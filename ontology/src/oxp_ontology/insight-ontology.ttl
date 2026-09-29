@@ -1,0 +1,111 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+@prefix mas: <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+# ============================================================
+#   MAS Insight Ontology
+#   Companion to analysis-ontology.ttl (Insight is an
+#   mas:AnalysisElement, split into its own file for size).
+#
+#   Scope: rendered, catalog-templated insights attached to a
+#   target KG node. Produced by the intelligence-worker from a
+#   KG query and an InsightTemplate (template rendering itself
+#   lives outside the ontology, in the intelligence-catalog).
+# ============================================================
+
+<https://outshift-open.github.io/oxp-ontology/insight> rdf:type owl:Ontology ;
+    dcterms:title "MAS Insight Ontology"@en ;
+    dcterms:description "Rendered, catalog-templated insights attached to KG nodes (MAS, Agent, Session, SemanticGroup), produced by the intelligence-worker. Companion to analysis-ontology.ttl — Insight is an mas:AnalysisElement."@en ;
+    dcterms:created "2026-09-17"^^xsd:date ;
+    dcterms:license <https://opensource.org/licenses/Apache-2.0> ;
+    dcterms:creator [
+        a foaf:Organization ;
+        foaf:name "Outshift by Cisco" ;
+        foaf:homepage <https://github.com/outshift-open>
+    ] ;
+    vann:preferredNamespacePrefix "mas" ;
+    vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:versionInfo "2.0.1" ;
+    owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ,
+                <https://outshift-open.github.io/oxp-ontology/analysis> ;
+    rdfs:comment "Insight ontology — rendered, catalog-templated insights attached to a target KG node. v1.0.0: split out of analysis-ontology.ttl."@en .
+
+#################################################################
+#    INSIGHT
+#################################################################
+
+mas:Insight rdf:type owl:Class ;
+    rdfs:subClassOf mas:AnalysisElement ;
+    rdfs:comment "A human-readable insight rendered from an intelligence-catalog template and a KG query result, attached to a target KG node (e.g. a MAS, SemanticGroup, or Session)."@en .
+
+mas:templateId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:templateId ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Identifier of the intelligence-catalog template this insight was rendered from." .
+
+mas:labels rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:labels ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON-encoded list of free-text labels/tags rendered for this insight." .
+
+mas:scope rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:scope ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Scope the insight applies to, e.g. 'mas' | 'semantic_group' | 'session'." .
+
+mas:priority rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:priority ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Rendered priority label for this insight, if the template defines one." .
+
+mas:targetNodeId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:targetNodeId ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Identifier of the KG node this insight is attached to." .
+
+mas:createdAt rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:createdAt ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:Insight ;
+    rdfs:range xsd:dateTime ;
+    rdfs:comment "Timestamp at which this insight was generated." .
+
+mas:concerns rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:concerns ;
+    sh:targetClass mas:Insight ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Insight ;
+    rdfs:range mas:Element ;
+    rdfs:comment "Links a Session, MAS, Agent, or SemanticGroup to a generated Insight, per the insight's declared scope." .

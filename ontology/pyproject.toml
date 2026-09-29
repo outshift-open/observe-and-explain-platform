@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "oxp-ontology"
+version = "2.0.1"
+description = "Single Source of Truth for OXP MAS Ontology"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Cisco Outshift", email = "eti@cisco.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Private :: Do Not Upload"
+]
+dependencies = [ # Optional but recommended for helper usage
+    "rdflib>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+eval = [
+    "pyshacl>=0.25.0",
+    "rdflib>=6.0.0",
+]
+# Demonstrative tests (optional - for analytical validation of design claims)
+# These are NOT required for core evaluation (materialize + query + SHACL)
+# Install with: uv sync --extra eval-full
+eval-full = [
+    "pyshacl>=0.25.0",
+    "rdflib>=6.0.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+
+models = [
+    "pydantic>=2.0",
+]
+
+verify = [
+    "pyshacl>=0.25.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oxp_ontology"]
+
+[dependency-groups]
+dev = [
+    "pydantic>=2.13.5",
+    "pytest>=8.4.2",
+    "ruff>=0.16.7",
+]
+
+[tool.hatch.build]
+include = [
+    "src/oxp_ontology/*.ttl",
+    "src/oxp_ontology/__init__.py",
+    "src/oxp_ontology/validation.py",
+    "src/oxp_ontology/verification.py",
+    "src/oxp_ontology/models/__init__.py",
+    "src/oxp_ontology/models/base.py"
+]
+
+artifacts = [
+    "src/oxp_ontology/models/nodes/*.py",
+    "src/oxp_ontology/models/edges/*.py",
+    "src/oxp_ontology/mas-shapes.ttl"
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+# Pinned explicitly to ruff's own long-standing default selection
+# (pyflakes + pycodestyle error/syntax subsets) so a ruff upgrade can't
+# silently start enforcing (or stop enforcing) extra rule categories -
+# see the F403/E402 CI-vs-local drift this was added to fix.
+select = ["E4", "E7", "E9", "F"]

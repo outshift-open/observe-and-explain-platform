@@ -1,0 +1,102 @@
+# Build outputs
+docs/widoco/
+docs/webvowl/
+docs/lode/
+docs/mas/
+docs/otel/
+docs/metrics/
+test-widoco/
+dist/
+build/
+*.egg-info/
+
+src/oxp_ontology/models/nodes/
+src/oxp_ontology/models/edges/
+src/oxp_ontology/mas-shapes.ttl
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.env
+venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Paper evaluation code (lives in mas-framework/papers/iswc26-mas-ontology/)
+code/
+
+# Downloaded JARs
+widoco.jar
+metrics-wip.json
+
+# Unreleased documentation (local only)
+docs/design_patterns.md
+docs/ontology_vs_graph_discrepancies.md
+docs/performance_and_optimization.md
+
+# Academic Papers
+# LaTeX compilation artifacts
+*.aux
+*.log
+*.synctex.gz
+*.out
+*.toc
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.nav
+*.snm
+*.vrb
+*.bcf
+*.run.xml
+
+# Papers directory
+# Commit PDFs for review/publication
+# papers/*/paper/*.pdf
+
+# Related work PDFs (copyright - don't commit)
+papers/*/relatedwork/pdf/*.pdf
+
+# Large datasets (commit only README)
+papers/shared/datasets/*.json
+papers/shared/datasets/*.csv
+!papers/shared/datasets/README.md
+
+# Evaluation outputs (commit markdown, not raw data)
+papers/*/evaluations/results/*.csv
+papers/*/evaluations/logs/*.log
+
+# Temporary analysis files (never commit)
+*STATUS*.md
+*SUMMARY*.md
+*CHANGES*.md
+*REPORT*.md
+*ANALYSIS*.md
+*FIX*.md
+*MIGRATION*.md
+*IMPLEMENTATION*.md
+*QUICKSTART*.md
+*COMPLETE*.md
+*CHECKLIST*.md
+*.bak
+*~.md
+
+# Jupyter Notebook
+.ipynb_checkpoints

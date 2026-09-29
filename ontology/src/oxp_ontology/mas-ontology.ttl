@@ -1,0 +1,619 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+@prefix : <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix mas: <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+<https://outshift-open.github.io/oxp-ontology/mas> rdf:type owl:Ontology ;
+    dcterms:title "Multi-Agent System (MAS) Telemetry Ontology"@en ;
+    dcterms:description "General-purpose MAS schema: structural types (MAS, Agent, LLM, Tool, Processing), execution instances of those types, and the normalized State/Transition trajectory each execution produces, rooted in a common :Element base class. Quantitative metric taxonomies are in metrics-ontology.ttl; trajectory enrichment layers and evaluation taxonomy are in interpretability-ontology.ttl."@en ;
+    dcterms:created "2026-01-13"^^xsd:date ;
+    dcterms:modified "2026-02-25"^^xsd:date ;
+    dcterms:license <https://opensource.org/licenses/Apache-2.0> ;
+    dcterms:creator [
+        a foaf:Organization ;
+        foaf:name "Outshift by Cisco" ;
+        foaf:homepage <https://github.com/outshift-open>
+    ] ;
+    vann:preferredNamespacePrefix "mas" ;
+    vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:priorVersion <https://outshift-open.github.io/oxp-ontology/mas/1.0.0-rc0> ;
+    owl:versionInfo "2.0.1" ;
+    rdfs:comment "Multi-Agent System telemetry ontology for observability and governance, independent of any specific telemetry source format. v1.7.1: removed inverse edge property :executedBy (runtime now keeps only canonical direction :executes); aligned KG extension structure to split modules (mas-kg-provenance.ttl, mas-kg-governance.ttl, mas-kg-experiment.ttl). v1.7.0: declared 6 undeclared AnnotationProperties (block, baseColor, icon, layer, shape, spanLevel); removed latent-space forward-reference block (embedsAs/clustersInto/connectsCluster moved to interpretability-ontology.ttl whose classes VectorEmbedding/VectorCluster they reference); removed :VectorEmbedding from :status union domain (forward reference — not imported). v1.6.0: sequenceNumber removed (a total-order index is incorrect for parallel/partial-order traces; containment edges from timestamp-enclosure are the correct model); allSpanIds and mainSpanId removed (no producer; sourceSpanId covers the use case; bridge adapters that merge multiple spans can add domain-specific properties). v1.5.0: realisesCallId renamed to mas:realizesCallId (American spelling); mas:agentId :requirement downgraded to 'recommended' on ExecutionElement; dead pipeline properties annotated; representsExecution documented as SPARQL-inference-only. v1.4.0: kindBase/masUri added as optional pipeline-metadata properties on ExecutionElement; agentId domain broadened to Agent∪ExecutionElement; toolOutput/processingOutput/sourceCallId/realisesCallId added; CallAnnotation class added (§16). v1.3.0: callId added as mandatory MERGE key on ExecutionElement; executionId downgraded to recommended (human-readable derived label); sessionId domain broadened to Session∪State∪Transition; MASCall annotated identityScope=session; runId added as optional provenance attribute; AgentShape and TaskCallShape added to mas-shapes.ttl. v1.2.0: Ontology split — trajectory enrichment layers (§2.2-§3.1), evaluation taxonomy (§5), and analytical applications (§6) moved to interpretability-ontology.ttl; core execution schema and base Metric stub remain here. v1.1.0: OTel primitives consolidated into otel-ontology (imported); deduplicated LLM/Tool properties; added DPPhase vocabulary and DesignPattern individuals. v1.8.0: removed owl:imports of otel-ontology and all OTel-specific/pipeline-parsing language (source-format-agnostic general schema); moved :Metric and :hasMetric to metrics-ontology.ttl."@en .
+
+#################################################################
+#    META ANNOTATION PROPERTIES
+#    Cross-cutting annotations used throughout the ontology.
+#    These are declaration-level properties on class definitions,
+#    NOT instance-level data properties.
+#################################################################
+
+:hierarchyLevel rdf:type owl:AnnotationProperty ;
+    rdfs:range xsd:string ;
+    rdfs:comment "The zoom level this class is viewed/grouped at, independent of which layer (structural type, execution instance, trajectory) it belongs to: 'mas' | 'agent' | 'task' | 'call' | 'session' | 'annotation'." .
+
+:layer rdf:type owl:AnnotationProperty ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Which ontology layer this class belongs to, orthogonal to :hierarchyLevel: 'structural' | 'execution' | 'trajectory' | 'evaluation'. Every class carries exactly one of each: :hierarchyLevel says which zoom level it's viewed at, :layer says which kind of thing it is at that zoom level. 'evaluation' is declared here but used by metrics-ontology.ttl's Metric/MetricResult classes." .
+
+#################################################################
+#    ROOT ELEMENT
+#    Common ancestor of every node in this ontology. Every node has
+#    a name and an id, regardless of which layer it belongs to.
+#################################################################
+
+:Element rdf:type owl:Class ;
+    rdfs:comment "Abstract root for every node in this ontology: structural types, execution instances, and trajectory nodes alike." .
+
+:id rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :id ;
+    sh:targetClass :Element ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :Element ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Generic identifier for this element. Subclasses may declare a more specific, formally-formatted identity/MERGE key on top of this (e.g. :callId, :stateNodeId, :transitionId, :sessionId) — those are not replacements for :id, they are stricter identity contracts for specific node kinds." .
+
+:name rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :name ;
+    sh:targetClass :Element ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :Element ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Human-readable name of this element." .
+
+#################################################################
+#    STRUCTURAL LAYER (Schema/Types Block)
+#    Agent/MAS/LLM/Tool/Processing types either discovered from
+#    the execution trace or explicitly declared
+#################################################################
+
+# --- Structural Element
+
+:StructuralElement rdf:type owl:Class ;
+    rdfs:subClassOf :Element ;
+    :layer "structural" ;
+    rdfs:comment "Schema/type definitions representing the static structure of a MAS. These are TYPES not instances: Agent (not AgentCall), etc." .
+
+:declared rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :declared ;
+    sh:targetClass :StructuralElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :StructuralElement ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "Whether this structural type was explicitly declared (e.g. in an agent manifest or skill registry) rather than dynamically discovered from the execution trace. False (or absent) means inferred." .
+
+:description rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :description ;
+    sh:targetClass :StructuralElement, mas:SemanticGroup, mas:Insight ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain [ owl:unionOf ( :StructuralElement mas:SemanticGroup mas:Insight ) ] ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Human-readable description of this element." .
+
+# --- MAS
+
+:MAS rdf:type owl:Class ;
+    rdfs:subClassOf :StructuralElement ;
+    :hierarchyLevel "mas" ;
+    rdfs:comment "MAS instance discovered from the execution trace (which agents were composed together)" .
+
+# --- Agent
+
+:Agent rdf:type owl:Class ;
+    rdfs:subClassOf :StructuralElement ;
+    :hierarchyLevel "agent" ;
+    rdfs:comment "Agent TYPE (not execution instance). Represents the schema/template discovered from the execution trace. Example: trace name 'itinerary' → Agent type 'ItineraryAgent'. Execution instances are AgentCall." .
+
+:usesCapability rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :usesCapability ;
+    sh:targetClass :Agent ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain :Agent ;
+    rdfs:range :Capability ;
+    rdfs:comment "Generic link from an Agent type to a structural capability it can use. See subproperties :usesLLM, :usesTool, :usesProcessing for the specific capability kind." .
+
+:usesLLM rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :usesLLM ;
+    sh:targetClass :Agent ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:subPropertyOf :usesCapability ;
+    rdfs:domain :Agent ;
+    rdfs:range :LLM ;
+    rdfs:comment "Agent type can use this LLM type." .
+
+:usesTool rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :usesTool ;
+    sh:targetClass :Agent ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:subPropertyOf :usesCapability ;
+    rdfs:domain :Agent ;
+    rdfs:range :Tool ;
+    rdfs:comment "Agent type can use this Tool type." .
+
+:usesProcessing rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :usesProcessing ;
+    sh:targetClass :Agent ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:subPropertyOf :usesCapability ;
+    rdfs:domain :Agent ;
+    rdfs:range :Processing ;
+    rdfs:comment "Agent type can use this Processing type." .
+
+:belongsToMAS rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :belongsToMAS ;
+    sh:targetClass :Agent ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :Agent ;
+    rdfs:range :MAS ;
+    rdfs:comment "MAS is composed of Agents" .
+
+# --- Capability
+
+:Capability rdf:type owl:Class ;
+    rdfs:subClassOf :StructuralElement ;
+    :hierarchyLevel "call" ;
+    rdfs:comment "Common parent for structural capability types an Agent can use: LLM, Tool, Processing. Placeholder for attributes shared across all three." .
+
+# --- LLM
+
+:LLM rdf:type owl:Class ;
+    rdfs:subClassOf :Capability ;
+    rdfs:comment "LLM type discovered from the execution trace" .
+
+:provider rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :provider ;
+    sh:targetClass :LLM ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLM ;
+    rdfs:range xsd:string ;
+    rdfs:comment "LLM provider name." .
+
+# --- Tool
+
+:Tool rdf:type owl:Class ;
+    rdfs:subClassOf :Capability ;
+    rdfs:comment "Tool type discovered from the execution trace" .
+
+# --- Processing
+
+:Processing rdf:type owl:Class ;
+    rdfs:subClassOf :Capability ;
+    rdfs:comment "Processing type discovered from the execution trace. Represents internal computation capabilities within agents." .
+
+#################################################################
+#    EXECUTION LAYER (*Call instances extracted from the execution trace)
+#    Direct 1:1 mapping from trace units to ExecutionElement instances
+#################################################################
+
+# --- Execution Element
+
+:ExecutionElement rdf:type owl:Class ;
+    rdfs:subClassOf :Element ;
+    :layer "execution" ;
+    rdfs:comment "Execution instances (not types) extracted from the execution trace. 1 trace unit = 1 *Call instance. These are runtime occurrences: AgentCall_001, LLMCall_gpt4_042, etc." .
+
+:sessionId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :sessionId ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement;
+    rdfs:range xsd:string ;
+    rdfs:comment "Unique session identifier. Primary key for Session nodes (MERGE key). Carried as a provenance attribute on State and Transition nodes to make their scope explicit without a join." .
+
+:startTime rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :startTime ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Start time of the execution as a Unix timestamp (seconds, high precision)." .
+
+:endTime rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :endTime ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "End time of the execution as a Unix timestamp (seconds, high precision)." .
+
+:duration rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :duration ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:double ;
+    rdfs:comment "Duration in milliseconds." .
+
+:executes rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executes ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range :StructuralElement ;
+    rdfs:comment "Generic link from an execution instance to the structural type it is an instance of. See subproperties :executesMAS, :executesAgent, :executesLLM, :executesTool, :executesProcessing for the specific pair." .
+
+:spanId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :spanId ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:string ;
+    rdfs:comment "ID of the corresponding span in OTel traces, where one exists." .
+
+:parentSpanId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :parentSpanId ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:string ;
+    rdfs:comment "ID of the corresponding parent span in OTel traces, where one exists." .
+
+# --- Session
+
+:Session rdf:type owl:Class ;
+    rdfs:subClassOf :ExecutionElement ;
+    :hierarchyLevel "session" ;
+    rdfs:comment "Session execution extracted from the execution trace (top-level execution context)" .
+
+:executesSession rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesSession ;
+    sh:targetClass :Session ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :Session ;
+    rdfs:range :MAS ;
+    rdfs:comment "Session executes this MAS configuration" .
+
+:hasMASCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasMASCall ;
+    sh:targetClass :Session ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :Session ;
+    rdfs:range :MASCall ;
+    rdfs:comment "Session contains MASCall executions (1:N — one session can have multiple MAS calls, e.g. retries/continuations)." .
+
+# --- MAS Call
+
+:MASCall rdf:type owl:Class ;
+    rdfs:subClassOf :ExecutionElement ;
+    :hierarchyLevel "mas" ;
+    rdfs:comment "MAS execution extracted from the execution trace (orchestration of multiple agents)" .
+
+:executesMAS rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesMAS ;
+    sh:targetClass :MASCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :MASCall ;
+    rdfs:range :MAS ;
+    rdfs:comment "MASCall instance executes this MAS type" .
+
+:hasAgentCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasAgentCall ;
+    sh:targetClass :MASCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :MASCall ;
+    rdfs:range :AgentCall ;
+    owl:inverseOf :belongsToMASCall ;
+    rdfs:comment "MASCall orchestrates AgentCall executions (1:N — one MAS call coordinates multiple agent calls)" .
+
+:belongsToMASCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :belongsToMASCall ;
+    sh:targetClass :AgentCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :AgentCall ;
+    rdfs:range :MASCall ;
+    owl:inverseOf :hasAgentCall ;
+    rdfs:comment "AgentCall belongs to MASCall link. " .
+
+# --- Agent Call
+
+:AgentCall rdf:type owl:Class ;
+    rdfs:subClassOf :ExecutionElement ;
+    :hierarchyLevel "agent" ;
+    rdfs:comment "Agent execution INSTANCE extracted from the execution trace. Linked to Agent TYPE via :executesAgent. Example: trace unit 'itinerary_20250113_143052' → AgentCall_001 :executesAgent ItineraryAgent (type)." .
+
+:executesAgent rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesAgent ;
+    sh:targetClass :AgentCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :AgentCall ;
+    rdfs:range :Agent ;
+    rdfs:comment "AgentCall instance executes this Agent type (e.g., AgentCall_001 executes ItineraryAgent)" .
+
+:hasToolCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasToolCall ;
+    sh:targetClass :AgentCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :AgentCall ;
+    rdfs:range :ToolCall ;
+    rdfs:comment "Legacy shortcut (denormalized) from AgentCall to ToolCall. Canonical typing links are mas:executesTool on ToolCall and containment topology edges. Consumers should avoid emitting this edge in normalized KG outputs." .
+
+:hasLLMCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasLLMCall ;
+    sh:targetClass :AgentCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :AgentCall ;
+    rdfs:range :LLMCall ;
+    rdfs:comment "Legacy shortcut (denormalized) from AgentCall to LLMCall. Canonical typing links are mas:executesLLM on LLMCall and containment topology edges. Consumers should avoid emitting this edge in normalized KG outputs." .
+
+:hasProcessingCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasProcessingCall ;
+    sh:targetClass :AgentCall, :MASCall ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain [ owl:unionOf ( :AgentCall :MASCall ) ] ;
+    rdfs:range :ProcessingCall ;
+    rdfs:comment "Denormalized shortcut from AgentCall or MASCall to a ProcessingCall it directly contains. Canonical typing link is mas:executesProcessing on Processing." .
+
+# -- Capability Call
+
+:CapabilityCall rdf:type owl:Class ;
+    rdfs:subClassOf :ExecutionElement ;
+    :hierarchyLevel "call" ;
+    rdfs:comment "Common parent for execution instances of a Capability: LLMCall, ToolCall, ProcessingCall. Placeholder for attributes shared across all three." .
+
+# -- LLM Call
+
+:LLMCall rdf:type owl:Class ;
+    rdfs:subClassOf :CapabilityCall ;
+    rdfs:comment "LLM call extracted from the execution trace (input prompt + output completion)" .
+
+:executesLLM rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesLLM ;
+    sh:targetClass :LLMCall ;
+    sh:class :LLM ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :LLMCall ;
+    rdfs:range :LLM ;
+    rdfs:comment "LLMCall instance is of this LLM structural type (e.g., GPT-4, Claude)." .
+
+:totalTokenCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :totalTokenCount ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Total tokens used (prompt + completion)." .
+
+:promptTokenCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :promptTokenCount ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Number of tokens in the prompt." .
+
+:completionTokenCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :completionTokenCount ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Number of tokens in the completion." .
+
+:temperature rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :temperature ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:double ;
+    rdfs:comment "Model temperature setting (sampling randomness, typically 0.0-2.0)." .
+
+:finishReason rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :finishReason ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Reason generation stopped. Values: 'stop', 'length', 'content_filter', 'tool_calls'." .
+
+:responseId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :responseId ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Unique response ID from the LLM provider. Used for provider-side debugging." .
+
+:cacheReadTokenCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :cacheReadTokenCount ;
+    sh:targetClass :LLMCall ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain :LLMCall ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Cached input tokens reused." .
+
+# -- Tool Call
+
+:ToolCall rdf:type owl:Class ;
+    rdfs:subClassOf :CapabilityCall ;
+    rdfs:comment "Tool call extracted from the execution trace (external API/DB call)" .
+
+:executesTool rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesTool ;
+    sh:targetClass :ToolCall ;
+    sh:class :Tool ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :ToolCall ;
+    rdfs:range :Tool ;
+    rdfs:comment "ToolCall instance is of this Tool structural type (e.g., WeatherAPI)." .
+
+# -- Processing Call
+
+:ProcessingCall rdf:type owl:Class ;
+    rdfs:subClassOf :CapabilityCall ;
+    rdfs:comment "Processing code execution inside an agent (internal computation, data transformation, validation logic, etc.). Distinct from LLMCall (external model inference) and ToolCall (external API)." .
+
+:executesProcessing rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :executesProcessing ;
+    sh:targetClass :ProcessingCall ;
+    sh:class :Processing ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :executes ;
+    rdfs:domain :ProcessingCall ;
+    rdfs:range :Processing ;
+    rdfs:comment "ProcessingCall executes this Processing structural type (e.g., DataNormalizer, ResponseFormatter)." .
+
+#################################################################
+#    TRAJECTORY LAYER
+#    Normalized State/Transition chain: the raw, unstructured-text
+#    view of a session's data flow.
+#################################################################
+
+# -- Trajectory Element
+
+:TrajectoryElement rdf:type owl:Class ;
+    rdfs:subClassOf :Element ;
+    :layer "trajectory" ;
+    rdfs:comment "Parent class for State/Transition — the normalized (raw unstructured text) view of a session's trajectory." .
+
+:sessionId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :sessionId ;
+    sh:targetClass :TrajectoryElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :TrajectoryElement;
+    rdfs:range xsd:string ;
+    rdfs:comment "Unique session identifier. Primary key for Session nodes (MERGE key). Carried as a provenance attribute on State and Transition nodes to make their scope explicit without a join." .
+
+# -- State
+
+:State rdf:type owl:Class ;
+    rdfs:subClassOf :TrajectoryElement ;
+    rdfs:comment "Data state at a point in execution (prompt/input/output). Example: State_prompt_001 with content 'Book a flight to Paris'. States are connected via Transitions." .
+
+:content rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :content ;
+    sh:targetClass :State ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :State ;
+    rdfs:range xsd:string ;
+    rdfs:comment "The raw textual content of the state (the delta produced by each call)." .
+
+# -- Transition
+
+:Transition rdf:type owl:Class ;
+    rdfs:subClassOf :TrajectoryElement ;
+    rdfs:comment "State transition representing a processing step between states. Links normalized data flow to execution instances via :representsExecution. Example: Transition_001 :inputTo State_prompt, :leadsTo State_response, :representsExecution AgentCall_itinerary_001." .
+
+:inputTo rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :inputTo ;
+    sh:targetClass :State ;
+    sh:class :Transition ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :State ;
+    rdfs:range :Transition ;
+    owl:inverseOf :leadsTo ;
+    rdfs:comment "Source State feeds into this Transition (State → Transition). Declared owl:inverseOf :leadsTo as a schema-level pairing (this codebase does no OWL inference, so this does not imply automatic mirrored triples) — the two are independently-populated adjacent hops used together to walk a trajectory's State → Transition → State chain." .
+
+:leadsTo rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :leadsTo ;
+    sh:targetClass :Transition ;
+    sh:class :State ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :Transition ;
+    rdfs:range :State ;
+    owl:inverseOf :inputTo ;
+    rdfs:comment "Transition leads to its next/target State (Transition → State). Also serves as the canonical 'target state of this Transition' property for endpoint cardinality checks (see mas-shapes.ttl TransitionEndpointsShape)." .
+
+:representsExecution rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :representsExecution ;
+    sh:targetClass :Transition ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :Transition ;
+    rdfs:range :ExecutionElement ;
+    rdfs:comment "Canonical execution edge: Transition -> ExecutionElement. This object property is the normalized topology link." .
+
+:correspondsToTransition rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :correspondsToTransition ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range :Transition ;
+    owl:inverseOf :representsExecution ;
+    rdfs:comment "ExecutionElement instance corresponds to this Transition (AgentCall_001 → Transition between its input/output states)" .
+
+
+# -- (ExecutionElement <-> Trajectory)
+
+:hasState rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasState ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range :State ;
+    rdfs:comment "ExecutionElement has associated States in its trajectory. Example: AgentCall_001 :hasState State_reasoning" .
+
+:hasInitialState rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasInitialState ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :hasState ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range :State ;
+    rdfs:comment "Points to the initial/starting State of an execution. Subproperty of :hasState for easier querying." .
+
+:hasFinalState rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasFinalState ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:subPropertyOf :hasState ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range :State ;
+    rdfs:comment "Points to the final/terminal State of an execution. Subproperty of :hasState for easier querying." .
+

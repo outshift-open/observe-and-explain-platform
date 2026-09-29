@@ -1,0 +1,49 @@
+---
+version: "3"
+
+env:
+  DOCKER_PLATFORMS: "linux/{{ARCH}}"
+
+vars:
+  # Main module version
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  # tmp folder
+  TMP_FOLDER: ".tmp"
+
+tasks:
+  build-oxp-ui:
+    internal: false
+    dir: .
+    cmds:
+      - |
+        yarn install
+        yarn build
+    vars:
+
+  docker:
+    internal: true
+    cmds:
+      - |
+        docker build --no-cache -t {{.IMAGE_NAME}} \
+        -f {{.DOCKERFILE}} --target {{.IMAGE_TARGET}} .
+
+  version:
+    internal: true
+    cmds:
+      - git describe --tags --match='v*'
+
+  release:
+    internal: true
+    cmds:
+      - bash ./scripts/release.sh
+
+  prerelease:
+    internal: true
+    cmds:
+      - bash ./scripts/prerelease.sh
+
+  bugfixrelease:
+    internal: true
+    cmds:
+      - bash ./scripts/bugfixrelease.sh
