@@ -4,7 +4,7 @@ The Metrics Computation Engine (MCE) — a pluggable framework that computes qua
 LLM-judged metrics for MAS (Multi-Agent System) sessions and persists the results back to the
 knowledge graph.
 
-**Source:** [`mce`](https://github.com/cisco-eti/oxp-lib/tree/main/mce)
+**Source:** [`mce`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/mce)
 
 ## Overview
 

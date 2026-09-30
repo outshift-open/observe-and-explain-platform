@@ -123,13 +123,6 @@ JSON; a JSON array is processed as a batch and written as an array. In queue
 mode, `--max-sessions N` processes at most N messages (`-1`, the default, means
 no limit).
 
-Both modes read spans from ClickHouse; the worker has no file input. To evaluate
-the bundled NOA trip planner sample
-[`trajectory_e7f32992.json`](../../stateful-evals/quickstart/data/trajectory_e7f32992.json)
-without a database, use `stateful_evals_be.evaluate_file`, as the
-[quickstart](../../stateful-evals/quickstart/README.md) does. The full NOA set is in
-[claris-sandbox](https://github.com/cisco-eti/claris-sandbox/tree/main/stateful_evals/backend/data/trajectories/noa_trip_planner).
-
 ## Docker
 
 Build from the repository root.

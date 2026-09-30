@@ -4,7 +4,7 @@ Standalone normal behaviour worker: builds a description of what a *typical* ses
 group looks like — an envelope for each metric, a centroid and representative example for the text
 output, and a consensus or medoid execution graph — and writes a `NormalBehaviourReport` per layer.
 
-**Source:** [`workers/normal-behaviour-worker`](https://github.com/cisco-eti/oxp-lib/tree/main/workers/normal-behaviour-worker)
+**Source:** [`workers/normal-behaviour-worker`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/normal-behaviour-worker)
 
 !!! info "Relationship to the analysis worker"
     The default `docker-compose` deployment runs the combined
@@ -202,7 +202,7 @@ skipped.
 
 ## Methodology
 
-Source: [`dem/src/dem/normal_behaviour/`](https://github.com/cisco-eti/oxp-lib/tree/main/dem/src/dem/normal_behaviour).
+Source: [`dem/src/dem/normal_behaviour/`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/dem/src/dem/normal_behaviour).
 
 Every layer produces the same conceptual triple:
 

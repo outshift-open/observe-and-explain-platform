@@ -2,7 +2,7 @@
 
 This library provides an unified access layer across all the underlying data stored in databases. It fronts ClickHouse/SQLite/PostgreSQL (session, span and trace data) and Neo4j (the knowledge graph). An optional FastAPI REST server is built on top of the library, as a wrapper that serves the functions as endpoints; thus, it can be used as a single Python library, or as a REST service.
 
-**Source:** [`api`](https://github.com/cisco-eti/oxp-lib/tree/main/api)
+**Source:** [`api`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/api)
 
 How to use the API (two different ways):
 - **As a library, in-process.** Workers (e.g. the [analysis worker](../workers/analysis-worker.md)) import `oxp.dependencies` and `oxp.client.dal` directly and talk to Neo4j without ever going   through HTTP.
@@ -52,7 +52,7 @@ This component consolidates data-access patterns that used to be spread across `
 ### The request pipeline
 
 Every read/write, whether called directly from the Python lib, or from an HTTP endpoint, follows the same three
-steps (from the `LocalClient` docstring, [`client/local.py`](https://github.com/cisco-eti/oxp-lib/tree/main/api/oxp/client/local.py)):
+steps (from the `LocalClient` docstring, [`client/local.py`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/api/oxp/client/local.py)):
 
 1. **Query builder** — `oxp.query_builders.<domain>` turns typed arguments into a SQLAlchemy
    `Select` (ClickHouse/SQLite/Postgres) or a Cypher string + params (Neo4j).
@@ -61,7 +61,7 @@ steps (from the `LocalClient` docstring, [`client/local.py`](https://github.com/
 
 ### REST layer
 
-`oxp.api:app` (in [`oxp/api/__init__.py`](https://github.com/cisco-eti/oxp-lib/tree/main/api/oxp/api/__init__.py))
+`oxp.api:app` (in [`oxp/api/__init__.py`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/api/oxp/api/__init__.py))
 is a thin wrapper: each endpoint depends on `get_db` / `get_neo4j_db` / `get_redis`
 (`oxp/dependencies.py`), which lazily create **singleton** connectors on first use and reuse them
 for the process lifetime — avoiding a new connection pool per request. The
@@ -110,7 +110,7 @@ docker run --rm -p 8000:8000 \
   oxp-api
 ```
 
-The init script ([`data/clickhouse/otel_traces.sql`](https://github.com/cisco-eti/oxp-lib/tree/main/api/data/clickhouse/otel_traces.sql))
+The init script ([`data/clickhouse/otel_traces.sql`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/api/data/clickhouse/otel_traces.sql))
 runs on first startup and creates the `oxp` database.
 
 ### Use as a library
@@ -153,7 +153,7 @@ real metric compute in tests.
 The API image builds with Docker `context: api`, so `api/uv.lock` cannot reference sources outside
 that directory. When updating `mce-core` or an MCE provider, rebuild the wheels and copy them into
 `api/vendor/` before re-locking — see the
-[README](https://github.com/cisco-eti/oxp-lib/tree/main/api/README.md#vendored-wheel-maintenance-important-for-docker-builds)
+[README](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/api/README.md#vendored-wheel-maintenance-important-for-docker-builds)
 for the exact commands. Skipping this and pointing `[tool.uv.sources]` at `../mce/...` will build
 locally but break the Docker image.
 

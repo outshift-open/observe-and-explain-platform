@@ -93,33 +93,6 @@ Each trajectory gets fresh state, so runs never share context or token counts.
 `evaluate_session` needs the repository's API package (`./api`, Python 3.13+) and
 its `CLICKHOUSE_*` settings.
 
-## Example data
-
-The example trajectories are the NOA trip planner runs in the
-`cisco-eti/claris-sandbox` repository, at
-[`stateful_evals/backend/data/trajectories/noa_trip_planner/`](https://github.com/cisco-eti/claris-sandbox/tree/main/stateful_evals/backend/data/trajectories/noa_trip_planner).
-The `gpt35_curated` files are curated runs of the multi-agent NOA trip planner.
-In each run a `moderator` agent routes work to `schedule_agent`,
-`concierge_agent`, and `itinerary_agent` as needed.
-
-| Folder | Contents |
-| --- | --- |
-| `gpt35_curated/train` | 45 trajectories and an import manifest |
-| `gpt35_curated/test` | 25 trajectories |
-| `sample` | 2 hand-written samples in a simpler format that `evaluate_file` does not read |
-
-Each `gpt35_curated` trajectory file is one JSON object: a `spans` array (6 to
-98 spans) plus metadata such as `reward`. `evaluate_file` loads a file directly;
-the metadata is not evaluation input.
-
-`python -m stateful_evals_be.scripts.import_trajectories --domain noa` imports
-the set into ClickHouse. Without `--trajectory-dir`, it looks for
-`data/trajectories/noa_trip_planner/gpt35_curated` in this folder.
-
-One train trajectory is bundled at
-[`quickstart/data/trajectory_e7f32992.json`](quickstart/data/trajectory_e7f32992.json),
-so the [quickstart](quickstart/README.md) runs from a fresh clone.
-
 ## Options
 
 `TemporalMetricOptions` fields most callers set:

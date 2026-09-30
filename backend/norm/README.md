@@ -5,8 +5,8 @@ platform.
 
 `norm` converts telemetry from the observe-sdk (`ioa_observe`) into validated
 KG documents (`{"nodes": [...], "edges": [...]}`) that conform to
-[oxp-ontology](https://cisco-eti.github.io/oxp-ontology/) (namespace
-`https://cisco-eti.github.io/oxp-ontology/mas#`). It is the normalization
+[oxp-ontology](https://outshift-open.github.io/oxp-ontology/) (namespace
+`https://outshift-open.github.io/oxp-ontology/mas#`). It is the normalization
 layer used by **norm-worker**.
 
 ## Design

@@ -3,7 +3,7 @@
 Runs anomaly detection, consistency analysis and normal-behaviour analysis for one semantic
 session group, with the three tracks executing in parallel.
 
-**Source:** [`workers/analysis-worker`](https://github.com/cisco-eti/oxp-lib/tree/main/workers/analysis-worker)
+**Source:** [`workers/analysis-worker`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/analysis-worker)
 
 This is the analysis worker that runs in the default deployment.
 It bundles the three single-purpose workers
@@ -14,7 +14,7 @@ instead of being fetched three times.
 ## Input
 
 `SessionGroupMessage` from
-[`worker-base`](https://github.com/cisco-eti/oxp-lib/tree/main/worker-base/src/worker_base/queue_message.py):
+[`worker-base`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/worker-base/src/worker_base/queue_message.py):
 
 ```json
 {

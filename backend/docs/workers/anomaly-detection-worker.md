@@ -4,7 +4,7 @@ Standalone anomaly detection worker: within one semantic group of sessions, it s
 sessions from outliers on three layers (text, execution graph, metrics) and writes an
 `AnomalyReport` per layer.
 
-**Source:** [`workers/anomaly-detection-worker`](https://github.com/cisco-eti/oxp-lib/tree/main/workers/anomaly-detection-worker)
+**Source:** [`workers/anomaly-detection-worker`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/anomaly-detection-worker)
 
 !!! info "Relationship to the analysis worker"
     The default `docker-compose` deployment runs the combined
@@ -190,7 +190,7 @@ metric:
 
 ## Methodology
 
-Source: [`dem/src/dem/anomaly/`](https://github.com/cisco-eti/oxp-lib/tree/main/dem/src/dem/anomaly).
+Source: [`dem/src/dem/anomaly/`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/dem/src/dem/anomaly).
 
 Each layer turns its sessions into a numeric feature matrix, hands it to a scikit-learn outlier
 model, and reads the `+1 / -1` labels back:

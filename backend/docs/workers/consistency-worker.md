@@ -3,7 +3,7 @@
 Standalone consistency analysis worker: measures how alike the sessions inside one semantic group
 are, on three layers (text, execution graph, metrics), and writes a `ConsistencyReport` per layer.
 
-**Source:** [`workers/consistency-worker`](https://github.com/cisco-eti/oxp-lib/tree/main/workers/consistency-worker)
+**Source:** [`workers/consistency-worker`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/consistency-worker)
 
 !!! info "Relationship to the analysis worker"
     The default `docker-compose` deployment runs the combined
@@ -196,7 +196,7 @@ text:
 
 ## Methodology
 
-Source: [`dem/src/dem/consistency/`](https://github.com/cisco-eti/oxp-lib/tree/main/dem/src/dem/consistency).
+Source: [`dem/src/dem/consistency/`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/dem/src/dem/consistency).
 
 Every layer follows the same three-stage shape. Only the middle stage — the dispersion statistic —
 differs between text, graph and metric.

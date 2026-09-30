@@ -4,7 +4,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/cisco-eti/oxp/container-images/oxp-api
+  repository: ghcr.io/outshift-open/container-images/oxp-api
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""

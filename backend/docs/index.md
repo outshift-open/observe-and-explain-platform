@@ -28,7 +28,3 @@ The rest of this documentation provides a detailed view of the different pieces 
 | [`workers/`](workers/index.md) | 11 standalone analysis workers |
 | [`intelligence-catalog/`](components/intelligence-catalog.md) | Insight template catalog |
 | [`stateful-evals/`](components/stateful-evals.md) | stateful evaluation library |
-
-The Knowledge Graph schema itself lives in the external
-[`oxp-ontology`](https://github.com/cisco-eti/oxp-ontology) package, published to Cisco's internal
-Artifactory PyPI index — it is not part of this repo.

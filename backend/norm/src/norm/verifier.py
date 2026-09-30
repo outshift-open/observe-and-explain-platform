@@ -51,10 +51,10 @@ class _OntologyIndex:
     constant is derived from the ontology graph. Nothing is hardcoded.
 
     Recognised namespace (used to filter triples to the MAS vocabulary):
-    ``mas:`` ``https://cisco-eti.github.io/oxp-ontology/mas#``
+    ``mas:`` ``https://outshift-open.github.io/oxp-ontology/mas#``
     """
 
-    _NS = "https://cisco-eti.github.io/oxp-ontology/mas#"
+    _NS = "https://outshift-open.github.io/oxp-ontology/mas#"
 
     def __init__(self) -> None:
         self.known_node_types: frozenset[str] = frozenset()
@@ -577,7 +577,7 @@ def nodes_edges_to_jsonld(
     there is no more per-type identity field (``callId``/``stateNodeId``/
     ``transitionId``/etc.) to branch on.
     """
-    MAS = "https://cisco-eti.github.io/oxp-ontology/mas#"
+    MAS = "https://outshift-open.github.io/oxp-ontology/mas#"
 
     # Maps camelCase node dict keys → MAS camelCase property IRIs. Kept to
     # the ontology's actual current field set (see oxp_ontology.models.nodes).

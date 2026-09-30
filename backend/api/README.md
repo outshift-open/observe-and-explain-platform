@@ -116,15 +116,6 @@ make test-rest-api
 
 Besides running as a REST server, `oxp-api` can be imported directly into any Python project as a library.
 
-### Installation
-
-```bash
-# directly from Git
-pip install git+https://github.com/cisco-eti/oxp-api.git
-```
-
-This installs the `oxp` package and all its dependencies.
-
 ### Quick example
 
 ```python

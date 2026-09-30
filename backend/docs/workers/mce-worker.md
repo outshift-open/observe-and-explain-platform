@@ -2,7 +2,7 @@
 
 Standalone Metrics Computation Engine (MCE) worker for processing telemetry sessions.
 
-**Source:** [`workers/mce-worker`](https://github.com/cisco-eti/oxp-lib/tree/main/workers/mce-worker)
+**Source:** [`workers/mce-worker`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/mce-worker)
 
 ## Overview
 

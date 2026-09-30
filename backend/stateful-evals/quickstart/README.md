@@ -66,10 +66,7 @@ export the spans to a file and call `evaluate_file`, as `evaluate_trajectories.p
 
 ## Step 2: The sample trajectory
 
-[`data/trajectory_e7f32992.json`](data/trajectory_e7f32992.json) is copied
-unchanged from `cisco-eti/claris-sandbox`,
-[`stateful_evals/backend/data/trajectories/noa_trip_planner/gpt35_curated/train/trajectory_e7f32992.json`](https://github.com/cisco-eti/claris-sandbox/blob/0bea909789c37f6fac6a05380cded280a6112954/stateful_evals/backend/data/trajectories/noa_trip_planner/gpt35_curated/train/trajectory_e7f32992.json)
-(last changed in commit `0bea909`).
+[`data/trajectory_e7f32992.json`](data/trajectory_e7f32992.json) is one sampled trajectory.
 
 | Property | Value |
 | --- | --- |
@@ -78,25 +75,6 @@ unchanged from `cisco-eti/claris-sandbox`,
 | Spans | 26, recorded with the observe SDK from a LangGraph app |
 | What happens | The user asks "What's Luminos famous for?". `moderator` routes the request to `schedule_agent`, which calls `list_documents` and `read_document`; `moderator` answers |
 | `reward` | 1. This is the dataset's label; `load_trajectory_file` does not pass it to the evaluator |
-
-The full NOA trip planner set (about 143 MB) is on the `main` branch of
-[claris-sandbox](https://github.com/cisco-eti/claris-sandbox/tree/main/stateful_evals/backend/data/trajectories/noa_trip_planner):
-
-| Folder | Contents | `reward` 1 / 0 |
-| --- | --- | --- |
-| `gpt35_curated/train` | 45 `trajectory_*.json` files and `import_manifest_noa-trip-planner.json` | 25 / 20 |
-| `gpt35_curated/test` | 25 `trajectory_*.json` files | 17 / 8 |
-| `sample` | 2 small files in a simpler format that `load_trajectory_file` rejects | - |
-
-To use it, point the scripts at `gpt35_curated/train` or `gpt35_curated/test` in
-a claris-sandbox checkout. `inspect_trajectory.py` takes a file or a folder; for a
-folder it uses the smallest `trajectory_*.json`.
-
-```bash
-NOA=/path/to/claris-sandbox/stateful_evals/backend/data/trajectories/noa_trip_planner/gpt35_curated
-.venv-evals/bin/python stateful-evals/quickstart/inspect_trajectory.py "$NOA/test"
-.venv-evals/bin/python stateful-evals/quickstart/evaluate_trajectories.py --trajectory-dir "$NOA/test" -n 3 --dry-run
-```
 
 ## Step 3: Run the scripts
 
