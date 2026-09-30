@@ -1,0 +1,10 @@
+[
+  {
+    "id": "session_1",
+    "conversation_text": "User: What is the capital of France?\nAssistant: The capital of France is Paris."
+  },
+  {
+    "id": "session_2",
+    "conversation_text": "User: Tell me a joke.\nAssistant: I'm sorry, I don't know any jokes."
+  }
+]

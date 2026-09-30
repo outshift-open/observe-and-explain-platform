@@ -1,0 +1,176 @@
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.sessionEndTrigger.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxp.fullname" . }}-session-end-trigger
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: session-end-trigger
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "oxp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: session-end-trigger
+  template:
+    metadata:
+      labels:
+        {{- include "oxp.labels" . | nindent 8 }}
+        app.kubernetes.io/component: session-end-trigger
+    spec:
+      {{- $globalValues := get .Values "global" | default dict }}
+      {{- $globalPullSecrets := get $globalValues "imagePullSecrets" | default (list) }}
+      {{- $pullSecrets := .Values.imagePullSecrets | default $globalPullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: session-end-trigger
+          image: {{ printf "%s:%s" .Values.clickhouse.image.repository .Values.clickhouse.image.tag | quote }}
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          env:
+            - name: CLICKHOUSE_HOST
+              value: {{ include "oxp.clickhouseHost" . | quote }}
+            - name: CLICKHOUSE_PORT
+              value: {{ include "oxp.clickhouseTcpPort" . | quote }}
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.usernameKey }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.passwordKey }}
+            - name: CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: RABBITMQ_HOST
+              value: {{ include "oxp.rabbitmqHost" . | quote }}
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.rabbitmqSecretName" . }}
+                  key: {{ include "oxp.rabbitmqUsernameKey" . }}
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.rabbitmqSecretName" . }}
+                  key: {{ include "oxp.rabbitmqPasswordKey" . }}
+            - name: RABBITMQ_VHOST
+              value: {{ default "/" .Values.rabbitmq.auth.vhost | quote }}
+            - name: EXCHANGE_NAME
+              value: {{ default .Values.workers.norm.inputQueue .Values.clickhouse.sessionEndTrigger.exchangeName | quote }}
+            - name: TARGET_QUEUE
+              value: {{ .Values.workers.norm.inputQueue | quote }}
+            - name: CURSOR_TABLE
+              value: {{ .Values.clickhouse.sessionEndTrigger.cursorTable | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.clickhouse.sessionEndTrigger.pollIntervalSeconds | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -u
+
+              echo "Waiting for ClickHouse at tcp://${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"
+              until clickhouse-client --host "${CLICKHOUSE_HOST}" --port "${CLICKHOUSE_PORT}" --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT 1" >/dev/null 2>&1; do
+                sleep 2
+              done
+
+              ch() {
+                clickhouse-client --host "${CLICKHOUSE_HOST}" --port "${CLICKHOUSE_PORT}" --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --database "${CLICKHOUSE_DATABASE}" "$@"
+              }
+
+              esc_json() {
+                printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+              }
+
+              # Durable watermark of the last-published span's Timestamp, so a pod restart
+              # resumes correctly instead of replaying or missing rows.
+              ch --query "CREATE TABLE IF NOT EXISTS ${CURSOR_TABLE} (last_ts DateTime64(9)) ENGINE = MergeTree ORDER BY tuple()"
+
+              cursor_count=$(ch --query "SELECT count() FROM ${CURSOR_TABLE}")
+              if [ "${cursor_count}" = "0" ]; then
+                # Bootstrap to "now" on first run so we don't replay pre-existing history.
+                ch --query "INSERT INTO ${CURSOR_TABLE} VALUES (now64(9))"
+              fi
+
+              vhost_enc=$(printf '%s' "${RABBITMQ_VHOST}" | sed 's#/#%2F#g')
+              rabbitmq_api="http://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@${RABBITMQ_HOST}:15672/api"
+
+              # The definitions-import below requires TARGET_QUEUE to already exist
+              # (RabbitMQ rejects a binding to a queue it can't find). That queue is
+              # declared by the norm worker, not by us, so on a fresh install - or right
+              # after a full RabbitMQ restart, before consumers have reconnected - it may
+              # not exist yet. Wait for it rather than losing that race once and never
+              # retrying.
+              echo "Waiting for queue ${TARGET_QUEUE} to exist"
+              queue_wait_elapsed=0
+              queue_wait_timeout=120
+              until wget -q -O /dev/null "${rabbitmq_api}/queues/${vhost_enc}/${TARGET_QUEUE}"; do
+                if [ "${queue_wait_elapsed}" -ge "${queue_wait_timeout}" ]; then
+                  echo "Timed out after ${queue_wait_timeout}s waiting for queue ${TARGET_QUEUE} to exist (has its consumer started yet?); will still attempt the binding"
+                  break
+                fi
+                sleep 2
+                queue_wait_elapsed=$((queue_wait_elapsed + 2))
+              done
+
+              # wget in this image has no --method=PUT, and RabbitMQ's dedicated
+              # exchange/binding endpoints require PUT. The definitions-import endpoint
+              # accepts POST and merges into existing broker state, so it doubles as a
+              # POST-only way to ensure the exchange and its binding to the norm worker's
+              # queue exist. Re-importing identical definitions on every restart is a no-op.
+              echo "Ensuring exchange ${EXCHANGE_NAME} is bound to queue ${TARGET_QUEUE}"
+              binding_attempt=0
+              binding_max_attempts=5
+              binding_ok=0
+              until [ "${binding_ok}" = "1" ]; do
+                binding_attempt=$((binding_attempt + 1))
+                if wget -q -O /dev/null \
+                  --header "Content-Type: application/json" \
+                  --post-data "{\"exchanges\":[{\"name\":\"$(esc_json "${EXCHANGE_NAME}")\",\"type\":\"fanout\",\"durable\":true,\"auto_delete\":false,\"internal\":false,\"arguments\":{}}],\"bindings\":[{\"source\":\"$(esc_json "${EXCHANGE_NAME}")\",\"destination\":\"$(esc_json "${TARGET_QUEUE}")\",\"destination_type\":\"queue\",\"routing_key\":\"\",\"arguments\":{}}]}" \
+                  "${rabbitmq_api}/definitions/${vhost_enc}"; then
+                  binding_ok=1
+                elif [ "${binding_attempt}" -ge "${binding_max_attempts}" ]; then
+                  echo "WARN: failed to ensure exchange/binding after ${binding_max_attempts} attempts; the trigger will keep polling but published messages may not reach ${TARGET_QUEUE} until this is fixed"
+                  break
+                else
+                  echo "Attempt ${binding_attempt}/${binding_max_attempts} to ensure exchange/binding failed; retrying in 5s"
+                  sleep 5
+                fi
+              done
+
+              echo "Polling ${CLICKHOUSE_DATABASE}.otel_traces for session.end every ${POLL_INTERVAL_SECONDS}s"
+              rows_file=/tmp/pending_rows.tsv
+              while true; do
+                last_ts=$(ch --query "SELECT max(last_ts) FROM ${CURSOR_TABLE}")
+                ch --query "SELECT DISTINCT session_id, toString(Timestamp) FROM otel_traces WHERE SpanName = 'session.end' AND Timestamp > '${last_ts}' ORDER BY Timestamp FORMAT TSV" > "${rows_file}" 2>/dev/null
+
+                if [ -s "${rows_file}" ]; then
+                  max_ts="${last_ts}"
+                  while IFS="$(printf '\t')" read -r session_id ts; do
+                    [ -z "${session_id}" ] && continue
+                    inner_payload="{\"session_id\":\"$(esc_json "${session_id}")\"}"
+                    outer_body="{\"properties\":{},\"routing_key\":\"\",\"payload\":\"$(esc_json "${inner_payload}")\",\"payload_encoding\":\"string\"}"
+                    if ! wget -q -O /dev/null \
+                      --header "Content-Type: application/json" \
+                      --post-data "${outer_body}" \
+                      "${rabbitmq_api}/exchanges/${vhost_enc}/${EXCHANGE_NAME}/publish"; then
+                      echo "WARN: failed to publish session_id=${session_id}, will retry next poll"
+                      break
+                    fi
+                    max_ts="${ts}"
+                  done < "${rows_file}"
+                  ch --query "INSERT INTO ${CURSOR_TABLE} VALUES ('${max_ts}')"
+                fi
+
+                sleep "${POLL_INTERVAL_SECONDS}"
+              done
+          resources:
+            {{- toYaml .Values.clickhouse.sessionEndTrigger.resources | nindent 12 }}
+{{- end }}

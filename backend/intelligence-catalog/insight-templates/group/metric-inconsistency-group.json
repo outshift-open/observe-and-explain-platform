@@ -1,0 +1,30 @@
+{
+  "nameTemplate": "Unreliable metric results in group \"$groupName\"",
+  "descriptionTemplate": "Sessions about \"$groupName\" have the following unreliable metrics: $metricsList (consistency threshold: $threshold)",
+  "kgQuery": [
+    "MATCH (sg:SemanticGroup)-[:hasConsistencyReport]->(cr:ConsistencyReport)",
+    "WHERE cr.dataType = 'metric'",
+    "WITH sg, cr, 0.70 AS threshold, toFloat(cr.mean) AS consistencyValue",
+    "WHERE consistencyValue < threshold",
+    "WITH sg, threshold, collect(DISTINCT CASE",
+    "      WHEN toString(cr.metadata) CONTAINS '\"metric\": ' THEN split(split(toString(cr.metadata), '\"metric\": ')[1], '\"')[1]",
+    "      ELSE 'metric'",
+    "    END) AS metricNames",
+    "WHERE size(metricNames) > 0",
+    "WITH sg, threshold, metricNames,",
+    "  reduce(acc = '', m IN metricNames |",
+    "    CASE",
+    "      WHEN acc = '' THEN m",
+    "      ELSE acc + ', ' + m",
+    "    END",
+    "  ) AS metricsList",
+    "RETURN sg.id AS groupId,",
+    "  sg.groupName AS groupName,",
+    "  metricsList,",
+    "  round(threshold, 2) AS threshold"
+  ],
+  "labels": ["Reliability"],
+  "scope": "SemanticGroup",
+  "priority": "P2",
+  "targetNodeId": "$groupId"
+}

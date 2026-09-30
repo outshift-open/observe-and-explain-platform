@@ -1,0 +1,28 @@
+# Python environments
+.venv/
+venv/
+
+# Secrets / local env
+.env
+.env.*
+
+# Python cache/build/test artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated output
+reports/
+metrics_out/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

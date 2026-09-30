@@ -1,0 +1,18 @@
+{
+  "nameTemplate": "Unreliable execution patterns in group \"$groupName\"",
+  "descriptionTemplate": "Traces about \"$groupName\" have unreliable execution patterns (consistency=$meanValue, below the threshold $threshold).",
+  "kgQuery": [
+    "MATCH (sg:SemanticGroup)-[:hasConsistencyReport]->(cr:ConsistencyReport)",
+    "WHERE cr.dataType = 'graph'",
+    "WITH sg, cr, 0.70 AS threshold, toFloat(cr.mean) AS consistencyValue",
+    "WHERE consistencyValue < threshold",
+    "RETURN sg.id AS groupId,",
+    "  sg.groupName AS groupName,",
+    "  round(consistencyValue, 4) AS meanValue,",
+    "  round(threshold, 2) AS threshold"
+  ],
+  "labels": ["Reliability"],
+  "scope": "SemanticGroup",
+  "priority": "P2",
+  "targetNodeId": "$groupId"
+}

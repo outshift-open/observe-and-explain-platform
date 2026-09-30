@@ -1,0 +1,24 @@
+{
+  "nameTemplate": "Unexpected spike in $metricName",
+  "descriptionTemplate": "$metricName value for session $sessionId is higher than expected ($metricValue instead of $normal)",
+  "kgQuery": [
+        "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
+        "  WHERE ar.dataType = 'metric'",
+        "    AND ar.metricName IS NOT NULL",
+        "    AND toString(ar.outliersValues) CONTAINS s.sessionId",
+        "MATCH (s)-[:hasMetric]->(m:Metric)",
+        "  WHERE m.metricName = ar.metricName",
+        "MATCH (sg)-[:hasNormalBehaviourReport]->(nbr:NormalBehaviourReport)",
+        "  WHERE nbr.dataType = 'metric'",
+        "    AND toString(nbr.metadata) CONTAINS m.metricName",
+        "    AND toFloat(m.metricResult) / toFloat(nbr.centroid) > 1.5",
+        "RETURN s.sessionId AS sessionId,",
+        "  ar.metricName AS metricName,",
+        "  round(toFloat(m.metricResult), 2) AS metricValue,",
+        "  round(toFloat(nbr.centroid), 2) AS normal"
+    ],
+  "labels": ["Performance", "Anomaly"],
+  "scope": "Session",
+  "priority": "P3",
+  "targetNodeId": "$sessionId"
+}

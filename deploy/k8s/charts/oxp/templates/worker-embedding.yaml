@@ -1,0 +1,110 @@
+{{- $worker := .Values.workers.embedding -}}
+{{- if and .Values.workers.enabled $worker.enabled }}
+{{- $workerOverrides := default dict $worker.secretOverrides }}
+{{- $llmSecretName := include "oxp.secretName" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxp.workerDeploymentName" (dict "root" . "name" "embedding") }}
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/worker-name: embedding
+spec:
+  replicas: {{ default 1 $worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oxp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+      app.kubernetes.io/worker-name: embedding
+  template:
+    metadata:
+      labels:
+        {{- include "oxp.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/worker-name: embedding
+    spec:
+      {{- $globalValues := get .Values "global" | default dict }}
+      {{- $globalPullSecrets := get $globalValues "imagePullSecrets" | default (list) }}
+      {{- $pullSecrets := .Values.imagePullSecrets | default $globalPullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $waitInitContainers := include "oxp.workerInitContainers.waitDependencies" (dict "root" .) }}
+      {{- if $waitInitContainers }}
+      initContainers:
+        {{- $waitInitContainers | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: embedding
+          image: "{{ $worker.image.repository }}:{{ $worker.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ $worker.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "oxp.workerEnvConfigMapName" . }}
+          {{- with $worker.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            {{- include "oxp.rabbitmqWorkerEnv" . | nindent 12 }}
+            {{- include "oxp.neo4jWorkerEnv" . | nindent 12 }}
+            - name: EMBEDDING_INPUT_QUEUE
+              value: {{ $worker.inputQueue | quote }}
+            - name: EMBEDDING_OUTPUT_QUEUE
+              value: {{ include "oxp.listOrStringEnvValue" $worker.outputQueue | quote }}
+            {{ if $worker.feedbackQueue }}
+            - name: EMBEDDING_FEEDBACK_QUEUE
+              value: {{ $worker.feedbackQueue | quote }}
+            {{ end }}
+            - name: EMBEDDING_EMBEDDER_TYPE
+              value: {{ $worker.embedderType | quote }}
+            {{- $embeddingModelKey := default .Values.secrets.llm.embeddingModelNameKey (get $workerOverrides "embeddingModelNameKey") }}
+            - name: EMBEDDING_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $llmSecretName }}
+                  key: {{ $embeddingModelKey }}
+            - name: EMBEDDING_LAYER
+              value: {{ $worker.layer | quote }}
+            - name: MAX_INFLIGHT_MESSAGES
+              value: {{ $worker.maxInflightMessages | quote }}
+            {{- if $workerOverrides.aiGatewayApiKey }}
+            - name: AI_GATEWAY_API_KEY
+              value: {{ $workerOverrides.aiGatewayApiKey | quote }}
+            {{- else }}
+            - name: AI_GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $llmSecretName }}
+                  key: {{ .Values.secrets.llm.llmGatewayApiKeyKey }}
+            {{- end }}
+            {{- if $workerOverrides.aiGatewayBaseUrl }}
+            - name: AI_GATEWAY_BASE_URL
+              value: {{ $workerOverrides.aiGatewayBaseUrl | quote }}
+            {{- else }}
+            - name: AI_GATEWAY_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $llmSecretName }}
+                  key: {{ .Values.secrets.llm.llmGatewayBaseUrlKey }}
+            {{- end }}
+          {{- with $worker.extraEnv }}
+            {{- range $envName, $envValue := . }}
+            - name: {{ $envName }}
+              value: {{ $envValue | quote }}
+            {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml $worker.resources | nindent 12 }}
+          {{- with $worker.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with $worker.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

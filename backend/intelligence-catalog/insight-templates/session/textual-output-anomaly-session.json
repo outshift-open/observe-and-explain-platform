@@ -1,0 +1,22 @@
+{
+  "nameTemplate": "Anomalous textual output for session $sessionId",
+  "descriptionTemplate": "Session $sessionId has anomalous textual output: \"$sessionOutput\".\nExpected session query: \"$medoidOutput\".",
+  "kgQuery": [
+    "MATCH (sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
+    "WHERE ar.dataType = 'text'",
+    "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg)",
+    "WHERE toString(ar.outliersValues) CONTAINS s.sessionId",
+    "OPTIONAL MATCH (s)-[:hasFinalState]->(outState:State)",
+    "OPTIONAL MATCH (med:Session {sessionId: sg.medioidSessionId})-[:hasFinalState]->(medOut:State)",
+    "WITH s, sg, collect(DISTINCT outState.content) AS outContents, collect(DISTINCT medOut.content) AS medoidContents",
+    "RETURN s.sessionId AS sessionId,",
+    "  sg.id AS groupId,",
+    "  sg.groupName AS groupName,",
+    "  coalesce(head([x IN outContents WHERE x IS NOT NULL]), '') AS sessionOutput,",
+    "  coalesce(head([x IN medoidContents WHERE x IS NOT NULL]), '') AS medoidOutput"
+  ],
+  "labels": ["Anomaly"],
+  "scope": "Session",
+  "priority": "P2",
+  "targetNodeId": "$sessionId"
+}

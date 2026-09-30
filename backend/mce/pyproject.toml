@@ -1,0 +1,27 @@
+[tool.uv.workspace]
+members = [
+    "mce-core",
+    "mce-helper",
+    "mce-client",
+    "mce-legacy",
+    "mce-meta",
+    "mce-provider-native",
+    "mce-provider-sdk",
+    "mce-provider-deepeval",
+    "mce-provider-opik",
+    "mce-provider-ragas",
+]
+
+[[tool.uv.index]]
+name = "outshift-pypi"
+url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
+explicit = true
+
+[tool.uv.sources]
+oxp-ontology = { index = "outshift-pypi" }
+oxp-api = { path = "../api", editable = true }
+
+[dependency-groups]
+dev = [
+    "ruff<=0.15.22",
+]

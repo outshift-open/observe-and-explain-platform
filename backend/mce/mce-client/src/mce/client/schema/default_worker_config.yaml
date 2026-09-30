@@ -1,0 +1,52 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+# MCE Config — Default Configuration
+# =====================================
+# This file is bundled with the mce-client package and used as a fallback
+# when no explicit config is provided.
+# Override with: MCE_WORKER_CONFIG=/path/to/your/mce_config.yaml
+#
+# See worker_config.schema.yaml for full field documentation.
+#
+# Scope keys follow the ontology class names (Session, AgentCall, LLMCall,
+# ToolCall, …). New scopes can be added without any schema changes.
+
+engine:
+  max_workers: 8
+  execution_strategy: hybrid
+
+cache:
+  path: null    # set to a .json file path to enable file-based caching
+  read: true
+  write: true
+
+metrics:
+  # Session-level metrics — computed once per session (non-recursive pass).
+  # These operate on the full session context (inputs, outputs, agent graph).
+  Session:
+    - AnswerRelevancy
+    - GoalSuccessRate
+    - TaskCompletion
+    - ResponseCompleteness
+    - Groundedness
+    - ToolErrorRate
+    - ToolUtilizationAccuracy
+    - WorkflowEfficiency
+    - WorkflowCohesionIndex
+    - AgentToToolInteractions
+    - AgentToAgentInteractions
+    - CyclesCount
+    - GraphDeterminismScore
+    - Duration
+    - IntentRecognitionAccuracy
+    - Cost
+    - LLMErrorRate
+
+  # LLMCall-level metrics — computed for each LLMCall execution element.
+  LLMCall:
+    - TokenCount
+    - Cost
+
+  # ToolCall-level metrics — computed for each ToolCall execution element.
+  ToolCall:
+    - ToolError

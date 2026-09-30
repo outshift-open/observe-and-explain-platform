@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxp-api.fullname" . }}
+  labels:
+    {{- include "oxp-api.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "oxp-api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "oxp-api.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- $globalValues := get .Values "global" | default dict }}
+      {{- $globalPullSecrets := get $globalValues "imagePullSecrets" | default (list) }}
+      {{- $pullSecrets := .Values.imagePullSecrets | default $globalPullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "oxp-api.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- $useClickhouseExistingSecret := and (not .Values.syncSecretsFromVault.enabled) .Values.clickhouse.existingSecret }}
+          {{- $useNeo4jExistingSecret := and (not .Values.syncSecretsFromVault.enabled) .Values.neo4j.existingSecret }}
+          {{- $useNeo4jAuth := or .Values.neo4j.auth (and .Values.neo4j.existingSecret .Values.neo4j.authKey) }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ .Chart.Name }}-configmap
+          {{- if or .Values.syncSecretsFromVault.enabled .Values.environment $useClickhouseExistingSecret $useNeo4jExistingSecret }}
+          env:
+            {{- if .Values.syncSecretsFromVault.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ include "oxp-api.otelEndpoint" . | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: http/protobuf
+            - name: OXP_API_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.server.secretName" . }}
+                  key: port
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: clickhouseUrl
+            - name: CLICKHOUSE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: clickhouseUser
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: clickhousePass
+            - name: CLICKHOUSE_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: clickhouseDatabase
+            - name: CLICKHOUSE_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: clickhousePort
+            - name: NEO4J_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: neo4jHost
+            - name: NEO4J_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: neo4jPort
+            {{- if $useNeo4jAuth }}
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: {{ include "oxp-api.neo4j.authKey" . }}
+            {{- else }}
+            - name: NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: neo4jUsername
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: neo4jPassword
+            {{- end }}
+            - name: NEO4J_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: neo4jDatabase
+            {{- end }}
+            {{- if $useClickhouseExistingSecret }}
+            - name: CLICKHOUSE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: {{ include "oxp-api.clickhouse.usernameKey" . }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.clickhouse.secretName" . }}
+                  key: {{ include "oxp-api.clickhouse.passwordKey" . }}
+            {{- end }}
+            {{- if $useNeo4jExistingSecret }}
+            {{- if $useNeo4jAuth }}
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: {{ include "oxp-api.neo4j.authKey" . }}
+            {{- else }}
+            - name: NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: {{ default "neo4jUsername" .Values.neo4j.usernameKey }}
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp-api.neo4j.secretName" . }}
+                  key: {{ default "neo4jPassword" .Values.neo4j.passwordKey }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.environment }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+      - name: aethe-api-root-ca-certificate-secret
+        secret:
+          secretName: {{ .Values.apiRootCaSecretName | default "oxp-api-root-ca-certificate-secret" }}
+          items:
+          - key: ca.crt
+            path: ca.crt
+      {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

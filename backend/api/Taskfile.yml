@@ -1,0 +1,40 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+version: "3"
+
+vars:
+  API_PORT: '{{.API_PORT | default "8006"}}'
+  SESSION_ID: '{{.SESSION_ID | default "e9815583-76e1-479b-9098-ba0c3f066bc8"}}'
+  METRIC_ID: '{{.METRIC_ID | default "Duration"}}'
+  COMPUTE_METRIC_ID: '{{.COMPUTE_METRIC_ID | default "Cost"}}'
+
+tasks:
+  test-env:
+    desc: Recreate the dedicated test virtualenv with project and dev dependencies
+    cmds:
+      - rm -rf .venv_tests
+      - uv venv .venv_tests
+      - uv sync --python .venv_tests/bin/python --dev
+
+  test-env-compute:
+    desc: Recreate test virtualenv including MCE provider packages for real /metrics/compute
+    cmds:
+      - rm -rf .venv_tests
+      - uv venv .venv_tests
+      - test -n "${UV_INDEX_URL}" || (echo "UV_INDEX_URL is required to resolve mce-provider-* packages" && exit 1)
+      - uv sync --python .venv_tests/bin/python --dev --group mce-providers
+
+  api-server:
+    desc: Start the OXP API with uv on the configured port
+    cmds:
+      - uv run uvicorn oxp.app:app --host 0.0.0.0 --port {{.API_PORT}} --log-level info
+
+  test-single:
+    desc: Run one GET on a real session and check for Duration and Cost in the payload
+    cmds:
+      - bash ./scripts/test_metrics_single.sh http://localhost:{{.API_PORT}} {{.SESSION_ID}} Duration Cost
+
+  test-sequence:
+    desc: Run the metrics endpoint checks sequentially with a pause between each request
+    cmds:
+      - bash ./scripts/test_metrics_sequence.sh http://localhost:{{.API_PORT}} {{.SESSION_ID}} {{.METRIC_ID}} {{.COMPUTE_METRIC_ID}}

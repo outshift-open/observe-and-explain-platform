@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mce-client"
+version = "0.1.0"
+description = "High-level client for the Metrics Computation Engine"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "mce-core>=2.0.0rc1",
+    "mce-helper>=0.1.0",
+    "oxp-api>=0.1.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+mce = "mce.cli.main:app"
+mce-server = "mce.api.server:main"
+mce-client = "mce.client.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mce.api*", "mce.cli*", "mce.client*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"mce.client" = ["schema/*.yaml"]
+
+[tool.uv.sources]
+mce-core = { workspace = true }
+mce-helper = { workspace = true }

@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "norm"
+version = "1.0.0"
+description = "OTel(ioa_observe) span -> Knowledge Graph normalization."
+requires-python = ">=3.10"
+# oxp-ontology[models] provides the generated KG node/edge Pydantic models
+# (oxp_ontology.models.*) that the ioa_observe -> KG path builds directly
+# (see docs/normalization.md).
+dependencies = [
+  "neo4j>=6.3.1",
+  "oxp-ontology>=2.0.2",
+  "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+# Ontology-driven class enrichment (parses mas-ontology.ttl) + KG structural/
+# SHACL validation (norm.verifier) -- both are rdflib-based.
+graph = [
+  "rdflib>=6.0.0",
+  "pyshacl>=0.25.0",
+]
+# Everything, for development / CI.
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0",
+  "pytest-asyncio>=0.21",
+  "ruff>=0.12.10",
+  "rdflib>=6.0.0",
+  "pyshacl>=0.25.0",
+]
+# [dev] already is the complete superset (pytest/ruff plus every optional
+# extra's deps); `all` just aliases it so a plain `pip install -e ".[all]"`
+# gets pytest/ruff too.
+all = [
+  "norm[dev]",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["reference"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["norm"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/norm"]
+

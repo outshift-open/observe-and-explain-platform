@@ -8,11 +8,11 @@ The bundled ontology set has five components, each versioned independently in `V
 (one `component=version` line each) and in that component's own `owl:versionInfo`:
 
 ```
-mas=2.0.1
-semantic=1.0.1
-metrics=2.0.1
-analysis=2.0.1
-insight=2.0.1
+mas=1.0.0
+semantic=1.0.0
+metrics=1.0.0
+analysis=1.0.0
+insight=1.0.0
 ```
 
 `mas`, `metrics`, `analysis`, and `insight` are kept in **lockstep** (bumped together — CI's

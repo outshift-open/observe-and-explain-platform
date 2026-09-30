@@ -1,0 +1,17 @@
+{
+  "nameTemplate": "Anomalous execution graph for session $sessionId",
+  "descriptionTemplate": "Session $sessionId has an anomalous execution graph pattern in semantic group \"$groupName\".",
+  "kgQuery": [
+    "MATCH (sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
+    "WHERE ar.dataType = 'graph'",
+    "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg)",
+    "WHERE toString(ar.outliersValues) CONTAINS s.sessionId",
+    "RETURN s.sessionId AS sessionId,",
+    "  sg.groupName AS groupName,",
+    "  ar.dataType AS anomalyType"
+  ],
+  "labels": ["Anomaly"],
+  "scope": "Session",
+  "priority": "P2",
+  "targetNodeId": "$sessionId"
+}

@@ -1,0 +1,33 @@
+{{- include "oxp-ui.validate" . }}
+{{- if eq .Values.syncSecretsFromVault.enabled false }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-configmap
+  namespace: '{{ .Release.Namespace }}'
+data:
+  VITE_API_PROXY_URL: {{ include "oxp-ui.apiProxyBaseUrl" . | quote }}
+  VITE_REST_API_URL: {{ include "oxp-ui.restApiUrl" . | quote }}
+  VITE_FF_SEMANTIC_GROUPS: {{ .Values.featureFlags.semanticGroups | quote }}
+  VITE_FF_INSIGHTS: {{ .Values.featureFlags.insights | quote }}
+  VITE_FF_LIVE_TOPOLOGY: {{ .Values.featureFlags.liveTopology | quote }}
+  VITE_FF_STATEFUL_EVAL: {{ .Values.featureFlags.statefulEval | quote }}
+  VITE_FF_IMPACT_ASSESSMENT: {{ .Values.featureFlags.impactAssessment | quote }}
+  VITE_FF_WASTE_ESTIMATION: {{ .Values.featureFlags.wasteEstimation | quote }}
+  VITE_FF_NEUROSYMBOLIC_EVAL: {{ .Values.featureFlags.neurosymbolicEval | quote }}
+---
+
+{{- if .Values.copilot.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-copilot-configmap
+  namespace: '{{ .Release.Namespace }}'
+data:
+  AZURE_OPENAI_ENDPOINT: {{ .Values.copilot.azureOpenaiEndpoint }}
+  AZURE_OPENAI_DEPLOYMENT_NAME: {{ .Values.copilot.azureOpenaiDeploymentName }}
+  AZURE_OPENAI_API_VERSION: {{ .Values.copilot.azureOpenaiApiVersion }}
+  AZURE_OPENAI_API_KEY: {{ .Values.copilot.azureOpenaiApiKey }}
+  ALLOWED_ORIGIN: {{ include "oxp-ui.allowedOrigin" . | quote }}
+{{- end }}
+{{- end }}

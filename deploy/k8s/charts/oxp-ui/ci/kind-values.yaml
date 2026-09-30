@@ -1,0 +1,5 @@
+# Values to be used in kind test
+server:
+  test: true
+syncSecretsFromVault:
+  enabled: false
