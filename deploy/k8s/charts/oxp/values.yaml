@@ -1,0 +1,728 @@
+nameOverride: ""
+
+# Global settings shared by the umbrella chart and subcharts.
+# Example:
+# global:
+#   imagePullSecrets:
+#     - name: ghcr-pull-secret
+global:
+  # Default pull secret for bundled workloads (API, UI, and workers).
+  # Component-level imagePullSecrets still take precedence when set.
+  imagePullSecrets: []
+  # Base resource name used for shared internal services such as oxp-api,
+  # oxp-clickhouse, oxp-rabbitmq, oxp-neo4j, and oxp-otel-collector.
+  baseName: "oxp"
+  # Optional shared external dependency endpoints.
+  # Set these once to avoid duplicating host/port across component sections.
+  # Component-level values still override when explicitly set.
+  clickhouse:
+    host: ""
+    port: ""
+    httpPort: ""
+    tcpPort: ""
+  rabbitmq:
+    host: ""
+    port: ""
+  neo4j:
+    host: ""
+    port: ""
+
+secrets:
+  # LLM credentials secret consumed by workers.
+  # - existingSecret: ""   => create Secret 'name' from values below
+  # - existingSecret: <ref> => reuse existing Secret; do not create one
+  llm:
+    name: "oxp-llm-secret"
+    # If set, this existing Secret is used instead of creating one from values below.
+    # Required keys in that Secret:
+    # - llmGatewayBaseUrlKey (default: llmGatewayBaseUrl)
+    # - llmGatewayApiKeyKey (default: llmGatewayApiKey)
+    # Example:
+    # kubectl -n oxp create secret generic oxp-llm-secret \
+    #   --from-literal=llmGatewayBaseUrl='https://your-llm-gateway' \
+    #   --from-literal=llmGatewayApiKey='your-api-key'
+    llmGatewayBaseUrl: ""
+    llmGatewayApiKey: ""
+    llmModelName: ""
+    embeddingModelName: ""
+
+    existingSecret: ""
+    # Keys used when reading an existing llm secret
+    llmGatewayBaseUrlKey: llmGatewayBaseUrl
+    llmGatewayApiKeyKey: llmGatewayApiKey
+    llmModelNameKey: llmModelName
+    embeddingModelNameKey: embeddingModelName
+
+# Optional ExternalSecret definitions.
+# Use this when an existingSecret is referenced and should be synced from an external provider.
+externalSecrets: []
+# Expected keys when existingSecret is set (or when secret is provisioned externally):
+# - LLM secret (.secrets.llm.name): values from llmGatewayBaseUrlKey / llmGatewayApiKeyKey
+#   plus model names from llmModelNameKey / embeddingModelNameKey
+# - ClickHouse secret (.clickhouse.auth.secretName): values from usernameKey / passwordKey
+# - RabbitMQ secret (.rabbitmq.auth.secretName): values from usernameKey / passwordKey
+# - Neo4j auth secret (default: <fullname>-auth or .neo4j.neo4j.passwordFromSecret): value for authKey
+# externalSecrets:
+#   - name: "oxp-llm-secret"
+#     secretStoreRef:
+#       name: "your-vault"
+#       kind: ClusterSecretStore
+#     target:
+#       name: "oxp-llm-secret"
+#     data:
+#       - secretKey: llmGatewayBaseUrl
+#         remoteRef:
+#           key: "your/secret/path"
+#           property: "your-base-url"
+#       - secretKey: llmGatewayApiKey
+#         remoteRef:
+#           key: "your/secret/path"
+#           property: "your-api-key"
+
+clickhouse:
+  enabled: true
+  fullnameOverride: oxp-clickhouse
+  database: default
+  sessionEndTrigger:
+    enabled: true
+    # ClickHouse's RabbitMQ table engine, used as a producer, has an internal
+    # background-flush race that occasionally publishes the same row twice - not
+    # something any exposed rabbitmq_* setting controls. Instead, a small poller
+    # (session-end-trigger.yaml) reads session.end rows from otel_traces directly and
+    # publishes each exactly once via the RabbitMQ HTTP management API.
+    pollIntervalSeconds: 3
+    # Durable watermark of the last-published span's Timestamp, so the poller resumes
+    # correctly across restarts instead of replaying or missing rows.
+    cursorTable: session_end_trigger_cursor
+    # The exchange session.end notifications are published to. Leave empty to
+    # automatically use workers.norm.inputQueue. The poller binds it directly to that
+    # queue on startup, since declaring a queue (worker-base's declare_queue) never
+    # auto-binds it to a same-named custom exchange.
+    exchangeName: ""
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  # Optional external endpoint when reusing an existing ClickHouse service.
+  # Leave empty to use the bundled ClickHouse service.
+  # If clickhouse.enabled=false, you can set endpoint once under global.clickhouse
+  # and keep this section empty.
+  external:
+    host: ""
+    httpPort: ""
+    tcpPort: ""
+  auth:
+    # - existingSecret: ""   => create Secret secretName from values below
+    # - existingSecret: <ref> => reuse existing Secret as credential source
+    # Existing Secret required keys:
+    # - usernameKey (default: username)
+    # - passwordKey (default: password)
+    # Example:
+    # kubectl -n oxp create secret generic oxp-clickhouse-secret \
+    #   --from-literal=username='oxp' \
+    #   --from-literal=password='change-me'
+    secretName: oxp-clickhouse-secret
+    existingSecret: ""
+    usernameKey: username
+    passwordKey: password
+    username: oxp
+    password: ""
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: "25.7-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    ports:
+      http: 8123
+      tcp: 9000
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClassName: ""
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 250m
+    limits:
+      memory: 8Gi
+      cpu: "8"
+
+rabbitmq:
+  enabled: true
+  fullnameOverride: oxp-rabbitmq
+  # Optional external endpoint when reusing an existing RabbitMQ service.
+  # Leave empty to use the bundled RabbitMQ service.
+  # If rabbitmq.enabled=false, you can set endpoint once under global.rabbitmq
+  # and keep this section empty.
+  external:
+    host: ""
+    port: ""
+  replicaCount: 1
+  image:
+    repository: rabbitmq
+    tag: 4.1-management
+    pullPolicy: IfNotPresent
+  clustering:
+    enabled: false
+  extraPlugins: ""
+  service:
+    type: ClusterIP
+    ports:
+      amqp: 5672
+      manager: 15672
+  auth:
+    # If existingSecret is set, this chart reads credentials from that Secret.
+    # Existing Secret required keys:
+    # - usernameKey (default: username)
+    # - passwordKey (default: password)
+    # RabbitMQ split configuration requires a non-empty password.
+    # Keep the default only for local development and replace it before sharing.
+    # Example:
+    # kubectl -n oxp create secret generic oxp-rabbitmq-secret \
+    #   --from-literal=username='oxp' \
+    #   --from-literal=password='change-me'
+    secretName: "oxp-rabbitmq-secret"
+    username: "oxp"
+    password: "change-me"
+    vhost: "/"
+    existingSecret: ""
+    usernameKey: username
+    passwordKey: password
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClassName: ""
+  resources:
+    requests:
+      memory: 192Mi
+      cpu: 100m
+    limits:
+      memory: 2Gi
+      cpu: 4000m
+
+neo4j:
+  enabled: true
+  fullnameOverride: oxp-neo4j
+  database: neo4j
+  # Optional external endpoint when reusing an existing Neo4j service.
+  # Leave empty to use the bundled Neo4j service.
+  # If neo4j.enabled=false, you can set endpoint once under global.neo4j
+  # and keep this section empty (while providing an existing auth secret).
+  external:
+    host: ""
+    port: ""
+  neo4j:
+    name: oxp-neo4j
+    username: "neo4j"
+    # Keep a deterministic default for local/simple installs so workers and DB
+    # stay aligned across pod restarts. Override this in shared/prod environments.
+    password: "change-me"
+    # Neo4j subchart creates <fullname>-auth with authKey by default.
+    # Workers consume that same secret via NEO4J_AUTH.
+    secretName: "oxp-neo4j-auth"
+    # If you provide an existing auth secret for Neo4j, set it here.
+    # Example:
+    # kubectl -n oxp create secret generic oxp-neo4j-auth \
+    #   --from-literal=NEO4J_AUTH='neo4j/change-me'
+    passwordFromSecret: ""
+    usernameKey: NEO4J_USERNAME
+    passwordKey: NEO4J_PASSWORD
+    authKey: NEO4J_AUTH
+    edition: community
+    acceptLicenseAgreement: "no"
+    resources:
+      cpu: "4000m"
+      memory: 4Gi
+  services:
+    neo4j:
+      enabled: false
+  volumes:
+    data:
+      mode: defaultStorageClass
+      defaultStorageClass:
+        accessModes:
+          - ReadWriteOnce
+        requests:
+          storage: 50Gi
+
+otelCollector:
+  enabled: true
+  fullnameOverride: oxp-otel-collector
+  # When disabled, this chart does not inject OTEL_EXPORTER_OTLP_ENDPOINT.
+  # Use an external mechanism if telemetry export is still required.
+  configMap:
+    create: false
+    existingName: oxp-otel-collector-config
+  extraEnvs:
+    - name: CLICKHOUSE_USER
+      valueFrom:
+        secretKeyRef:
+          name: oxp-clickhouse-users
+          key: CLICKHOUSE_USER
+    - name: CLICKHOUSE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: oxp-clickhouse-users
+          key: CLICKHOUSE_PASSWORD
+  mode: deployment
+  initContainers:
+    - name: wait-for-clickhouse
+      image: busybox:1.36.1
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -ec
+        - |
+          host="${CLICKHOUSE_WAIT_HOST}"
+          port="${CLICKHOUSE_WAIT_PORT}"
+          echo "Waiting for ClickHouse at ${host}:${port}"
+          until nc -z -w 2 "${host}" "${port}"; do
+            echo "ClickHouse not ready yet, retrying..."
+            sleep 2
+          done
+          echo "ClickHouse is reachable"
+      env:
+        - name: CLICKHOUSE_WAIT_HOST
+          value: '{{ .Values.global.clickhouse.host | default (printf "%s-clickhouse" .Values.global.baseName) }}'
+        - name: CLICKHOUSE_WAIT_PORT
+          value: '{{ .Values.global.clickhouse.port | default "8123" }}'
+  image:
+    repository: otel/opentelemetry-collector-contrib
+  command:
+    name: otelcol-contrib
+  service:
+    type: ClusterIP
+  ports:
+    otlp:
+      enabled: true
+      containerPort: 4317
+      servicePort: 4317
+    otlp-http:
+      enabled: true
+      containerPort: 4318
+      servicePort: 4318
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: false
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+
+api:
+  enabled: true
+  fullnameOverride: oxp-api
+  # Optional external API base URL when reusing an existing API deployment.
+  # Example: http://existing-api.oxp.svc:8000
+  # If api.enabled=false, set this so workers still resolve API_BASE_URL.
+  external:
+    baseUrl: ""
+  imagePullSecrets: []
+  syncSecretsFromVault:
+    enabled: false
+  # When syncSecretsFromVault is false, API connection settings come from the
+  # clickhouse/neo4j blocks below, and credentials can be sourced from existingSecret.
+  apiRootCaSecretName: oxp-api-root-ca-certificate-secret
+  apiRootCaSecret:
+    create: true
+    name: oxp-api-root-ca-certificate-secret
+    caCrt: ""
+  environment: []
+  api:
+    service:
+      type: ClusterIP
+      port: 8000
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+  cache:
+    enabled: true
+  redis:
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 100m
+      limits:
+        memory: 1Gi
+        cpu: 1000m
+  clickhouse:
+    # Leave host/port empty to inherit global.clickhouse.host/port.
+    # Set values here only for API-specific overrides.
+    host: ""
+    port: ""
+    username: "oxp"
+    password: ""
+    # Optional: set existingSecret to read API ClickHouse credentials from an existing Secret.
+    # Expected keys default to clickhouseUser/clickhousePass, but can be remapped.
+    # By default, the umbrella chart reuses the shared OXP ClickHouse secret.
+    existingSecret: "oxp-clickhouse-secret"
+    usernameKey: username
+    passwordKey: password
+    database: default
+  neo4j:
+    # Leave host/port empty to inherit global.neo4j.host/port.
+    # Set values here only for API-specific overrides.
+    host: ""
+    port: ""
+    auth: ""
+    # Optional: set existingSecret to read API Neo4j credentials from an existing Secret.
+    # Expected key defaults to neo4jAuth and can be remapped.
+    # By default, the umbrella chart reuses the shared Neo4j auth secret directly.
+    existingSecret: "oxp-neo4j-auth"
+    authKey: NEO4J_AUTH
+    database: neo4j
+
+ui:
+  enabled: true
+  fullnameOverride: oxp-ui
+  imagePullSecrets: []
+  syncSecretsFromVault:
+    enabled: false
+  # Keep this empty so the UI subchart computes its internal API upstream.
+  oxpApiUrl: ""
+  ui:
+    restApiUrl: "/api/v1"
+  featureFlags:
+    semanticGroups: "true"
+    insights: "true"
+    liveTopology: "true"
+    statefulEval: "true"
+    impactAssessment: "false"
+    wasteEstimation: "false"
+    neurosymbolicEval: "false"
+  copilot:
+    enabled: false
+    azureOpenaiEndpoint: ""
+    azureOpenaiDeploymentName: ""
+    azureOpenaiApiVersion: 2024-08-01-preview
+    azureOpenaiApiKey: ""
+    allowedOrigin: ""
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 1000m
+
+gateway:
+  enabled: true
+  fullnameOverride: oxp
+  replicaCount: 1
+  image:
+    repository: nginx
+    tag: "1.27-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: chart-example.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  nginx:
+    # Upstreams are cluster-internal service names from subcharts.
+    uiHost: oxp-ui
+    uiPort: 8080
+    apiHost: oxp-api
+    apiPort: 8000
+    copilotEnabled: false
+    copilotPathPrefix: /api/copilotkit
+    copilotHost: oxp-ui
+    copilotPort: 4000
+  resources: {}
+
+workers:
+  # Worker deployments used for the OXP processing pipeline.
+  enabled: true
+  defaultEnv: {}
+  globalExtraEnv: {}
+  startupWait:
+    # When enabled, workers run initContainers that wait for critical dependencies.
+    enabled: true
+    # Shared image used by dependency wait initContainers.
+    image:
+      repository: busybox
+      tag: "1.36.1"
+      pullPolicy: IfNotPresent
+    connectTimeoutSeconds: 2
+    retryIntervalSeconds: 2
+    maxWaitSeconds: 600
+    # RabbitMQ wait is enabled for all workers.
+    rabbitmq:
+      enabled: true
+    # Neo4j wait is enabled for all workers.
+    neo4j:
+      enabled: true
+    # ClickHouse wait is only used where the template asks for it (norm worker).
+    clickhouse:
+      enabled: true
+
+  norm:
+    enabled: true
+    replicaCount: 1
+    inputQueue: new_session_to_norm
+    outputQueue:
+      - new_session_to_mce
+      - new_session_to_emb
+    feedbackQueue: ""
+    maxInflightMessages: "128"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-norm
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 2Gi
+        cpu: "1"
+
+  embedding:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      aiGatewayApiKey: ""
+      aiGatewayBaseUrl: ""
+      embeddingModelNameKey: ""
+    inputQueue: new_session_to_emb
+    outputQueue:
+      - new_session_to_grouping
+      - new_session_to_stateful_eval
+    feedbackQueue: ""
+    embedderType: OpenAIEmbedder
+    layer: transition
+    maxInflightMessages: "32"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-embedding
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 200m
+      limits:
+        memory: 4Gi
+        cpu: "2"
+
+  mce:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      aiGatewayApiKey: ""
+      aiGatewayBaseUrl: ""
+      llmModelNameKey: ""
+    inputQueue: new_session_to_mce
+    outputQueue: []
+    feedbackQueue: ""
+    configPath: /oxp/mce_config.yaml
+    maxInflightMessages: "64"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-mce
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    config:
+      engine:
+        max_workers: 32
+        execution_strategy: hybrid
+      cache:
+        path: null
+        read: true
+        write: true
+      metrics:
+        Session:
+          - Duration
+          - Cost
+          - AnswerRelevancy
+          - IntentRecognitionAccuracy
+          - Groundedness
+          - ToolUtilizationAccuracy
+          - ResponseCompleteness
+          - TaskCompletion
+          - WorkflowEfficiency
+          - CyclesCount
+          - ToolErrorRate
+    volumeMounts:
+      - name: mce-config
+        mountPath: /oxp/mce_config.yaml
+        subPath: mce_config.yaml
+    volumes:
+      - name: mce-config
+        configMap:
+          name: oxp-mce-config
+    resources:
+      requests:
+        memory: 384Mi
+        cpu: 300m
+      limits:
+        memory: 8Gi
+        cpu: "4"
+
+  grouping:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      embeddingModelNameKey: ""
+    inputQueue: new_session_to_grouping
+    outputQueue:
+      - new_session_to_analysis
+    feedbackQueue: ""
+    maxDistance: "0.3"
+    maxNeighbors: "10"
+    maxInflightMessages: "16"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-grouping
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 192Mi
+        cpu: 200m
+      limits:
+        memory: 8Gi
+        cpu: "2"
+
+  hierarchical-grouping:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      openaiApiKey: ""
+      llmBaseModelUrlMce: ""
+      llmModelNameKey: ""
+      embeddingModelNameKey: ""
+    inputQueue: new_session_to_periodic_grouping
+    outputQueue:
+      - new_session_to_analysis
+    feedbackQueue: ""
+    maxNeighbors: "10"
+    minSamples: "20"
+    maxDistance: "0.15"
+    periodicTriggerIntervalSeconds: "900"
+    maxInflightMessages: "1"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-hierarchical-grouping
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 384Mi
+        cpu: 300m
+      limits:
+        memory: 12Gi
+        cpu: "2"
+
+  intelligence:
+    enabled: true
+    replicaCount: 1
+    inputQueue: new_session_to_intelligence
+    feedbackQueue: ""
+    catalogRoot: /app/intelligence-catalog
+    periodicTriggerIntervalSeconds: "300"
+    maxInflightMessages: "1"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-intelligence
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 192Mi
+        cpu: 200m
+      limits:
+        memory: 8Gi
+        cpu: "2"
+
+  analysis:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      embeddingModelNameKey: ""
+    inputQueue: new_session_to_analysis
+    feedbackQueue: ""
+    anomalyConfigFile: ""
+    consistencyConfigFile: ""
+    normalBehaviourConfigFile: ""
+    maxInflightMessages: "6"
+    batchSize: "20"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-analysis
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 768Mi
+        cpu: 300m
+      limits:
+        memory: 12Gi
+        cpu: "6"
+
+  stateful-eval:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      aiGatewayApiKey: ""
+      aiGatewayBaseUrl: ""
+      llmModelNameKey: ""
+    inputQueue: new_session_to_stateful_eval
+    outputQueue: []
+    feedbackQueue: ""
+    maxInflightMessages: "32"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/container-images/oxp-worker-stateful-eval
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 2Gi
+        cpu: "1"

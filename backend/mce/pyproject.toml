@@ -1,0 +1,21 @@
+[tool.uv.workspace]
+members = [
+    "mce-core",
+    "mce-helper",
+    "mce-client",
+    "mce-legacy",
+    "mce-meta",
+    "mce-provider-native",
+    "mce-provider-sdk",
+    "mce-provider-deepeval",
+    "mce-provider-opik",
+    "mce-provider-ragas",
+]
+
+[tool.uv.sources]
+oxp-api = { path = "../api", editable = true }
+
+[dependency-groups]
+dev = [
+    "ruff<=0.15.22",
+]

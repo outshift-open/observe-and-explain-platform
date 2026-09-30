@@ -1,0 +1,132 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+@prefix : <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix mas: <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
+
+<https://outshift-open.github.io/oxp-ontology/embedding> rdf:type owl:Ontology ;
+    dcterms:title "MAS Embedding Layer Ontology"@en ;
+    dcterms:description "Semantic embedding layer for MAS trajectories. Defines Embedding classes and State/Execution to Embedding links."@en ;
+    dcterms:created "2026-07-22"^^xsd:date ;
+    owl:priorVersion <https://outshift-open.github.io/oxp-ontology/embedding/1.0.0-rc0> ;
+    owl:versionInfo "1.0.0" ;
+    vann:preferredNamespacePrefix "mas" ;
+    vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:imports <https://outshift-open.github.io/oxp-ontology/mas> .
+
+# -- Semantic Element
+
+mas:SemanticElement rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "semantic" ;
+    rdfs:comment "Common parent for elements in the semantic layer: derived representations of session/state meaning, such as embeddings and semantic groupings." .
+
+# -- Embedding
+
+mas:Embedding rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticElement ;
+    rdfs:comment "Vectorized semantic representation attached to execution artifacts." .
+
+mas:represents rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:represents ;
+    sh:targetClass mas:Embedding ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Embedding ;
+    rdfs:range mas:State ;
+    rdfs:comment "Link from a State to its embedding instance." .
+
+mas:embeddingVector rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:embeddingVector ;
+    sh:targetClass mas:Embedding ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Embedding ;
+    rdfs:range xsd:string ;
+    rdfs:comment "The embedding vector, stored as a string array of floats." .
+
+mas:embeddingModel rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:embeddingModel ;
+    sh:targetClass mas:Embedding ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Embedding ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Model identifier used to compute the underlying embedding." .
+
+mas:embeddingDimension rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:embeddingDimension ;
+    sh:targetClass mas:Embedding ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:Embedding ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Vector dimensionality." .
+
+# -- Semantic Group
+
+mas:SemanticGroup rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticElement ;
+    rdfs:comment "Group of sessions that share a common semantic topic, formed by clustering session embeddings. May itself be grouped into a parent SemanticGroup, forming a hierarchy." .
+
+:nSessions rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :nSessions ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Number of sessions in this group." .
+
+:splitDistance rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :splitDistance ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range xsd:double ;
+    rdfs:comment "Clustering distance threshold at which this group was split from its parent group." .
+
+mas:embeddingModel rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:embeddingModel ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Model identifier used to compute the underlying embedding." .
+
+:nodeHash rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :nodeHash ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Stable hash of this group's session membership, used as a dedup/identity key." .
+
+:hasMedioidSession rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :hasMedioidSession ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range mas:Session ;
+    rdfs:comment "The medioid (most representative) Session of this group." .
+
+:containsSession rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :containsSession ;
+    sh:targetClass mas:SemanticGroup ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range [ owl:unionOf ( mas:Session mas:SemanticGroup ) ] ;
+    rdfs:comment "SemanticGroup contains this Session or nested SemanticGroup (hierarchical clustering)." .
+

@@ -1,0 +1,125 @@
+body {
+  margin: 0;
+  /*font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',*/
+  /*'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',*/
+  /*sans-serif;*/
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100%;
+  min-width: 1366px;
+}
+
+html {
+  height: 100%;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+#root {
+  height: 100%;
+  position: relative;
+}
+
+/* Ensure CopilotKit UI overlays GridStack resize handles (which use z-index: 10000 during interactions) */
+.copilotKitSidebar,
+.copilotKitPopup,
+.copilotKitPanel,
+.copilotKitSidebarContentWrapper {
+  z-index: 11001 !important;
+}
+
+/* Force high-contrast close (X) button in CopilotKit header */
+.copilotKitHeaderCloseButton,
+.copilotKitHeaderCloseButton svg {
+  color: var(--copilot-kit-primary-color) !important;
+  stroke: var(--copilot-kit-primary-color) !important;
+}
+.copilotKitHeaderCloseButton svg path {
+  stroke: var(--copilot-kit-primary-color) !important;
+  stroke-width: 2 !important;
+}
+.copilotKitHeaderCloseButton:hover svg,
+.copilotKitHeaderCloseButton:hover svg path {
+  color: var(--copilot-kit-secondary-contrast-color) !important;
+  stroke: var(--copilot-kit-secondary-contrast-color) !important;
+}
+
+/* Ensure Debug dropdown opens and is clickable across browsers */
+.copilotKitDevConsole {
+  position: relative;
+}
+.copilotKitDebugMenu {
+  z-index: 11002 !important;
+  pointer-events: auto !important;
+  max-height: 60vh;
+  overflow: auto;
+}
+.copilotKitDevConsole .copilotKitDebugMenuTriggerButton {
+  pointer-events: auto !important;
+}
+
+/* Help dropdown styling to match theme */
+.copilotKitHelpModal {
+  background-color: var(--copilot-kit-dev-console-bg) !important;
+  color: var(--copilot-kit-dev-console-text) !important;
+  border: 1px solid color-mix(in srgb, var(--copilot-kit-dev-console-bg) 80%, black);
+  border-radius: 12px !important;
+  padding: 12px !important;
+}
+.copilotKitHelpModal h2 {
+  color: var(--copilot-kit-dev-console-text) !important;
+  margin: 0;
+}
+
+.copilotKitHelpItemButton {
+  margin-top: 4px;
+}
+
+.copilotKitHelpItemButton a {
+  color: var(--copilot-kit-dev-console-text) !important;
+  text-decoration: none !important;
+  display: block;
+  width: 100%;
+}
+.copilotKitHelpItemButton:hover a {
+  color: color-mix(in srgb, var(--copilot-kit-dev-console-text) 85%, white) !important;
+}
+.copilotKitHelpModalCloseButton svg path {
+  stroke: var(--copilot-kit-dev-console-text) !important;
+}
+
+.copilotKitHelpModalCloseButton {
+  background-color: transparent !important;
+  color: var(--copilot-kit-dev-console-text) !important;
+  border: 1px solid color-mix(in srgb, var(--copilot-kit-dev-console-bg) 70%, black) !important;
+  border-radius: 8px !important;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.copilotKitHelpModalCloseButton:hover {
+  background-color: color-mix(in srgb, var(--copilot-kit-dev-console-bg) 90%, black) !important;
+}
+
+/* Scoped utility classes used by CopilotKit (we don't use Tailwind) */
+.copilotKitDevConsole .relative {
+  position: relative;
+}
+.copilotKitDevConsole .absolute {
+  position: absolute;
+}
+.copilotKitDevConsole .mt-2 {
+  margin-top: 0.5rem;
+}
+.copilotKitDevConsole .z-50 {
+  z-index: 11002;
+}
+
+/* Left border for the assistant sidebar window */
+.copilotKitSidebar .copilotKitWindow {
+  border-left: 1px solid var(--copilot-kit-separator-color) !important;
+}

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stateful-evals"
+version = "1.0.0"
+description = "Temporal evaluation library (stateful_evals_be) for in-process use"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "metrics-computation-engine>=1.2.7",
+    "mdt-metrics",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+import = ["clickhouse-connect>=0.8.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.0.0", "ruff<=0.15.22"]
+
+[tool.uv.sources]
+mdt-metrics = { path = "stateful_evals_be/plugins/mdt_metrics" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["stateful_evals_be"]

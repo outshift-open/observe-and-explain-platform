@@ -1,0 +1,150 @@
+# Default values for oxp-api.
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/outshift-open/container-images/oxp-api
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+environment: {}
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: "oxp-api-service-account"
+
+podAnnotations:
+  opentelemetry.io/scrape: "true"
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /gql(/|$)(.*)
+          pathType: ImplementationSpecific
+          srvPort: 8080
+        - path: /rest(/|$)(.*)
+          pathType: ImplementationSpecific
+          srvPort: 8081
+  tls: []
+
+resources: {}
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+
+volumes: []
+volumeMounts: []
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+syncSecretsFromVault:
+  enabled: true
+
+certManagerCert:
+  enabled: false
+
+api:
+  service:
+    type: ClusterIP
+    allowOrig: '*'
+    port: 8000
+
+
+clickhouse:
+  # Leave empty to inherit global.clickhouse.host/port from an umbrella chart.
+  host: ''
+  port: ''
+  # BYO mode (syncSecretsFromVault.enabled=false): name of an existing Secret holding
+  # the credentials — REQUIRED in that mode. usernameKey/passwordKey select which keys
+  # of that Secret the username/password are read from.
+  existingSecret: ''
+  usernameKey: clickhouseUser
+  passwordKey: clickhousePass
+  database: 'default'
+
+neo4j:
+  # Leave empty to inherit global.neo4j.host/port from an umbrella chart.
+  host: ''
+  port: ''
+  # BYO mode (syncSecretsFromVault.enabled=false): name of an existing Secret holding
+  # the credentials — REQUIRED in that mode. By default a single combined value is read
+  # from authKey (neo4jAuth); to use separate username/password keys instead, set
+  # authKey to an empty string.
+  existingSecret: ''
+  authKey: neo4jAuth
+  usernameKey: neo4jUsername
+  passwordKey: neo4jPassword
+  database: 'neo4j'
+
+# ── Redis caching ──────────────────────────────────────────
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  port: 6379
+  resources: {}
+  livenessProbe:
+    exec:
+      command: ["redis-cli", "ping"]
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 5
+  readinessProbe:
+    exec:
+      command: ["redis-cli", "ping"]
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 5
+
+cache:
+  enabled: true
+  redisUrl: ""  # defaults to redis://<fullname>-redis:<port>/0 — set explicitly to override
+  ttlSeconds: 300

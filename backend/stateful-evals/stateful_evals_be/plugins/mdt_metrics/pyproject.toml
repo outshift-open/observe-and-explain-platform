@@ -1,0 +1,44 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mdt-metrics"
+version = "0.2.0"
+license = "Apache-2.0"
+description = "Core evaluation primitives (Groundedness, IntentRecognition, Relevancy) for Metrics Computation Engine"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "metrics-computation-engine",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.urls]
+Homepage = "https://github.com/agntcy/telemetry-hub"
+Repository = "https://github.com/agntcy/telemetry-hub"
+Issues = "https://github.com/agntcy/telemetry-hub/issues"
+
+[project.entry-points."metrics_computation_engine.plugins"]
+Groundedness = "mdt_metrics.groundedness:Groundedness"
+IntentRecognition = "mdt_metrics.intent_recognition:IntentRecognition"
+Relevancy = "mdt_metrics.relevancy:Relevancy"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mdt_metrics"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

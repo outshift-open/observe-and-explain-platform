@@ -1,0 +1,106 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+# MCE Configuration — JSON Schema
+# ==================================
+# Conforms to JSON Schema Draft 2020-12.
+# Associate this file in VS Code via:
+#   yaml:
+#     schemas:
+#       "path/to/worker_config.schema.yaml": "**/mce_config.yaml"
+#
+# This schema is the authoritative source for:
+#   - IDE auto-completion and validation (YAML extension)
+#   - Documentation of every field
+# Runtime validation is performed by Pydantic models in mce_client.worker.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$id: "mce:worker_config"
+title: MCE Worker Configuration
+description: >
+  Declarative configuration for MCEWorkerService.
+  Controls which metrics are computed at each ontology scope level and the
+  MetricEngine runtime parameters.
+
+type: object
+additionalProperties: false
+properties:
+
+  engine:
+    description: MetricEngine runtime parameters.
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+
+      max_workers:
+        description: >
+          Number of parallel computation workers passed to MetricEngine.
+          Can be overridden with the MCE_ENGINE_MAX_WORKERS environment variable.
+        type: integer
+        minimum: 1
+        maximum: 64
+        default: 8
+        examples: [1, 4, 8]
+
+      execution_strategy:
+        description: >
+          Parallelism strategy passed to MetricEngine.
+          - thread:  shared-memory threads (I/O-bound metrics)
+          - process: sub-processes (CPU-bound, isolated)
+          - hybrid:  threads for I/O, processes for CPU (default)
+          - asyncio: asyncio event loop (async-native metrics)
+          Can be overridden with the MCE_ENGINE_STRATEGY environment variable.
+        type: string
+        enum: [thread, process, hybrid, asyncio]
+        default: hybrid
+
+  cache:
+    description: File-based metric result cache (JSON).
+    type: object
+    additionalProperties: false
+    default: {}
+    properties:
+
+      path:
+        description: >
+          Absolute or relative path to the cache JSON file.
+          When null, caching is disabled.
+        type: [string, "null"]
+        default: null
+        examples: [".mce_cache.json", "/var/cache/mce/results.json"]
+
+      read:
+        description: >
+          When true and path is set, previously computed results are loaded
+          from the cache file before computing (skipping already-computed metrics).
+        type: boolean
+        default: true
+
+      write:
+        description: >
+          When true and path is set, newly computed results are appended to
+          the cache file after each successful computation pass.
+        type: boolean
+        default: true
+
+  metrics:
+    description: >
+      Per-scope metric selection.
+      Keys are ontology class names (Session, AgentCall, LLMCall, ToolCall, …).
+      New scopes can be added without any schema changes.
+      The worker uses two passes per session:
+        1. Session pass (recursive=False) — metrics under the «Session» key.
+        2. Element pass (recursive=True)  — metrics under all other keys.
+           The engine routes each metric to the correct node type based on its
+           declared target_types.
+    type: object
+    additionalProperties:
+      type: array
+      items:
+        type: string
+        minLength: 1
+    default: {}
+    examples:
+      - Session: [AnswerRelevancy, GoalSuccessRate, TaskCompletion]
+        LLMCall: [Duration, TokenCount, Cost]
+        ToolCall: [Duration, ToolError]

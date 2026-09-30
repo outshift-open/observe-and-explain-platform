@@ -1,0 +1,243 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+@prefix mas: <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+
+# ============================================================
+#   MAS Analysis Ontology
+#   Companion to mas-ontology.ttl
+#
+#   Scope: Post-hoc analytical layer — group-scoped analysis
+#   reports (consistency, anomaly, normal behaviour) computed
+#   over a SemanticGroup of sessions by the analysis-worker
+#   pipeline. These are computed artefacts (dataProvenance =
+#   "computed") anchored to execution KG nodes.
+#
+#   Insight (also an mas:AnalysisElement) moved to its own file,
+#   insight-ontology.ttl, for size.
+#
+#   v1.0.0: initial draft — resource waste, failure
+#   classification, trajectory segment analysis, group
+#   consistency/anomaly/normal-behaviour reports.
+#   v1.1.0: Insight split out to insight-ontology.ttl.
+# ============================================================
+
+<https://outshift-open.github.io/oxp-ontology/analysis> rdf:type owl:Ontology ;
+    dcterms:title "MAS Analysis Ontology"@en ;
+    dcterms:description "Post-hoc analytical layer for MAS execution KG. Defines group-scoped analysis reports (consistency, anomaly, normal behaviour) — computed artefacts anchored to execution nodes. Designed as a companion to mas-ontology.ttl. See also insight-ontology.ttl."@en ;
+    dcterms:created "2026-06-13"^^xsd:date ;
+    dcterms:modified "2026-09-15"^^xsd:date ;
+    dcterms:license <https://opensource.org/licenses/Apache-2.0> ;
+    dcterms:creator [
+        a foaf:Organization ;
+        foaf:name "Outshift by Cisco" ;
+        foaf:homepage <https://github.com/outshift-open>
+    ] ;
+    vann:preferredNamespacePrefix "mas" ;
+    vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:priorVersion <https://outshift-open.github.io/oxp-ontology/analysis/1.0.0-rc0> ;
+    owl:versionInfo "1.0.0" ;
+    owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
+    rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft. v1.1.0: Insight split out to insight-ontology.ttl."@en .
+
+#################################################################
+#    ABSTRACT BASE
+#################################################################
+
+# -- Analysis Element
+
+mas:AnalysisElement rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "analysis" ;
+    rdfs:comment "Abstract base for all analysis-layer computed artefacts. dataProvenance = 'computed'. Not emitted during execution — produced by offline or streaming analysis pipelines." .
+
+mas:dataType rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:dataType ;
+    sh:targetClass mas:AnalysisElement ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:AnalysisElement ;
+    rdfs:range xsd:string ;
+    rdfs:comment "What kind of data this report was computed over: 'text' | 'graph' | 'metric'. Discriminates whether mas:aboutMetric is populated." .
+
+mas:aboutMetric rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:aboutMetric ;
+    sh:targetClass mas:AnalysisElement ;
+    sh:class mas:Metric ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:AnalysisElement ;
+    rdfs:range mas:Metric ;
+    rdfs:comment "The Metric this report was computed over. Only present when mas:dataType = 'metric' — textual-output and execution-graph reports leave this unset rather than carrying a metric-specific field they don't need. See mas:AnalysisElementAboutMetricShape below, which enforces that conditional requirement." .
+
+# Rule binding dataType='metric' and existence of :aboutMetric link
+mas:AnalysisElementAboutMetricShape
+    a sh:NodeShape ;
+    sh:targetClass mas:AnalysisElement ;
+    sh:or (
+        [ sh:not [ sh:path mas:dataType ; sh:hasValue "metric" ] ]
+        [ sh:path mas:aboutMetric ; sh:minCount 1 ]
+    ) ;
+    sh:severity sh:Violation ;
+    sh:message "AnalysisElement with mas:dataType 'metric' must have mas:aboutMetric." .
+
+#################################################################
+#    GROUP ANALYSIS REPORT
+#
+#    Common parent for reports computed over a whole SemanticGroup
+#    (consistency, anomaly, normal behaviour). Every such report
+#    requires exactly the group it was computed over; a
+#    SemanticGroup does not require any of these reports to exist.
+#################################################################
+
+mas:SemanticAnalysisReport rdf:type owl:Class ;
+    rdfs:subClassOf mas:AnalysisElement ;
+    rdfs:comment "Common parent for analysis reports computed over an entire SemanticGroup (as opposed to a single Session or MetricResult). A report cannot exist without the group it was computed over." .
+
+mas:ofSemanticGroup rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:ofSemanticGroup ;
+    sh:targetClass mas:SemanticAnalysisReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticAnalysisReport ;
+    rdfs:range mas:SemanticGroup ;
+    rdfs:comment "The SemanticGroup this report was computed over. A SemanticAnalysisReport cannot exist without one; a SemanticGroup does not require any reports." .
+
+#################################################################
+#    CONSISTENCY REPORT
+#
+#    Statistical consistency summary (mean/min/max/confidence)
+#    computed across all sessions in a SemanticGroup, for one
+#    analysis layer (text/graph/metric).
+#################################################################
+
+mas:ConsistencyReport rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticAnalysisReport ;
+    rdfs:comment "Statistical consistency summary for one analysis layer (text/graph/metric) across all sessions in a SemanticGroup: a mean, range, and confidence interval/indicator over the per-session consistency statistic."@en .
+
+mas:mean rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:mean ;
+    sh:targetClass mas:ConsistencyReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:ConsistencyReport ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Mean value of the consistency statistic across the group's sessions." .
+
+mas:confidenceInterval rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:confidenceInterval ;
+    sh:targetClass mas:ConsistencyReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:ConsistencyReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON-encoded confidence interval dict (e.g. {'lower': .., 'upper': ..}) around the mean." .
+
+mas:confidenceIndicator rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:confidenceIndicator ;
+    sh:targetClass mas:ConsistencyReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:ConsistencyReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Human-readable confidence label for this report, e.g. 'low' | 'medium' | 'high'." .
+
+
+#################################################################
+#    ANOMALY REPORT
+#
+#    Inlier/outlier summary computed across all sessions in a
+#    SemanticGroup, for one analysis layer (text/graph/metric).
+#    Replaces an earlier draft per-call mas:AnomalyReport (see file
+#    header note above).
+#################################################################
+
+mas:AnomalyReport rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticAnalysisReport ;
+    rdfs:comment "Inlier/outlier classification summary for one analysis layer (text/graph/metric), computed across all sessions in a SemanticGroup. Session/MetricResult membership (outlier or not) is via mas:isAnomalous edges; mas:scores/mas:threshold hold the supporting numeric detail."@en .
+
+mas:scores rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:scores ;
+    sh:targetClass mas:AnomalyReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:AnomalyReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON-encoded list of raw per-session anomaly scores backing the inlier/outlier classification." .
+
+mas:threshold rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:threshold ;
+    sh:targetClass mas:AnomalyReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:AnomalyReport ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Score threshold above which a session was classified as an outlier." .
+
+mas:isAnomalous rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:isAnomalous ;
+    sh:targetClass mas:Session, mas:MetricResult ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain [ owl:unionOf (mas:Session mas:MetricResult) ] ;
+    rdfs:range mas:AnomalyReport ;
+    rdfs:comment "Links an outlier Session, or an outlier MetricResult to the AnomalyReport that flagged it." .
+
+
+#################################################################
+#    NORMAL BEHAVIOUR REPORT
+#
+#    Representative/centroid summary of "normal" behaviour across
+#    all sessions in a SemanticGroup, for one analysis layer.
+#################################################################
+
+mas:NormalBehaviourReport rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticAnalysisReport ;
+    rdfs:comment "Representative/centroid summary of normal behaviour for one analysis layer, computed across all sessions in a SemanticGroup."@en .
+
+mas:rawResult rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:rawResult ;
+    sh:targetClass mas:NormalBehaviourReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:NormalBehaviourReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "JSON-encoded raw result dict produced by the normal-behaviour detector (layer-specific shape)." .
+
+mas:centroid rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:centroid ;
+    sh:targetClass mas:NormalBehaviourReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:NormalBehaviourReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Centroid of the group's sessions for this layer — a scalar value, or JSON-encoded if structured." .
+
+mas:representativeSample rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:representativeSample ;
+    sh:targetClass mas:NormalBehaviourReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:NormalBehaviourReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Identifier (or JSON-encoded value) of the session/sample closest to the centroid — the group's representative example." .
+
+mas:representativeProcessedSample rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:representativeProcessedSample ;
+    sh:targetClass mas:NormalBehaviourReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:NormalBehaviourReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Processed/normalised form of the representative sample, if the detector produced one." .
+

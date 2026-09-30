@@ -1,0 +1,81 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dem"
+version = "1.0.0"
+license = "Apache-2.0"
+description = "Data Extraction and Mining - Advanced insights toolkit for anomaly detection, consistency checking, embeddings, and clustering"
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "pydantic>=2.0.0",
+    "numpy>=2.3.4,<2.5",
+    "neo4j>=5.28.2",
+    "networkx>=3.0.0",
+    "ruff<=0.15.22",    
+]
+
+[project.optional-dependencies]
+grouping = [
+    "hdbscan>=0.8.41",
+    "scikit-learn>=1.7.2,<1.9.0",
+]
+llm = [
+    "openai>=2.8.1",
+]
+embedding = [
+    "sentence-transformers>=5.1.2",
+    "transformers>=4.57.1",
+    "torch>=2.0.0",
+    "gensim>=4.4.0",
+    "openai>=2.8.1",
+    "google-genai>=1.51.0",
+]
+analysis = [
+    "scikit-learn>=1.7.2,<1.9.0",
+    "scipy>=1.0.0",
+]
+all = [
+    "dem[grouping]",
+    "dem[llm]",
+    "dem[embedding]",
+    "dem[analysis]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/agntcy/telemetry-hub"
+Repository = "https://github.com/agntcy/telemetry-hub"
+Issues = "https://github.com/agntcy/telemetry-hub/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dem"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/dem/tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.14.5",
+]

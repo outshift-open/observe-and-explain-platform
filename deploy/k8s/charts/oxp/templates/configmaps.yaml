@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxp.workerEnvConfigMapName" . }}
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.workers.globalExtraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxp.mceConfigMapName" . }}
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+data:
+  mce_config.yaml: |
+{{ toYaml (default dict .Values.workers.mce.config) | indent 4 }}

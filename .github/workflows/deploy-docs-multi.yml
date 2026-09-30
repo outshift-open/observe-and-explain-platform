@@ -1,0 +1,306 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+name: Deploy Multi-Ontology Documentation
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+env:
+  DOCS_BASE_URL: https://outshift-open.github.io/oxp-ontology
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      
+      - name: Setup Python
+        uses: actions/setup-python@65d7f2d534ac1bc67fcd62888c5f4f3d2cb2b236 # v5.1.0
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Java (for Widoco)
+        uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9 # v4.2.1
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Node.js (for WebVOWL build)
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '18'
+      
+      - name: Cache Widoco JAR
+        id: cache-widoco
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: widoco.jar
+          key: widoco-1.4.25-jdk17
+      
+      - name: Download Widoco JAR
+        if: steps.cache-widoco.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Widoco JAR (JDK 17 version)..."
+          wget -O widoco.jar https://github.com/dgarijo/Widoco/releases/download/v1.4.25/widoco-1.4.25-jar-with-dependencies_JDK-17.jar
+          # Verify checksum for security
+          echo "be57a270fffb91e55810fa308717e704a44e2e7c027a3d68125a49da6c8b4e2b  widoco.jar" | sha256sum -c -
+      
+      - name: Install Python dependencies
+        run: |
+          pip install rdflib
+      
+      - name: Get version info
+        id: version
+        run: |
+          BASE_VERSION=$(python3 ontology/scripts/version_manager.py get)
+          
+          # For RC versions, add commit SHA
+          if [[ "$BASE_VERSION" == *"-rc"* ]]; then
+            COMMIT_SHA=$(git rev-parse --short=7 HEAD)
+            FULL_VERSION="${BASE_VERSION}+g${COMMIT_SHA}"
+          else
+            FULL_VERSION="$BASE_VERSION"
+          fi
+          
+          echo "base=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "full=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Building ontology-docs for version: $FULL_VERSION"
+      
+      - name: Create output directory structure
+        run: |
+          mkdir -p ontology-docs/{mas,metrics}/{widoco,webvowl,lode}
+      
+      - name: Generate MAS Ontology Documentation
+        run: |
+          echo "📚 Generating MAS Ontology docs..."
+          
+          # Widoco
+          java -jar widoco.jar -ontFile ontology/src/oxp_ontology/mas-ontology.ttl \
+            -outFolder ontology-docs/mas/widoco -rewriteAll \
+            -includeAnnotationProperties -htaccess -webVowl -licensius
+          echo '<meta http-equiv="refresh" content="0; url=index-en.html">' > ontology-docs/mas/widoco/index.html
+          
+          # WebVOWL
+          python3 ontology/scripts/generate_webvowl_json_generic.py \
+            ontology/src/oxp_ontology/mas-ontology.ttl \
+            ontology-docs/mas/webvowl/data/mas-ontology.json \
+            "MAS Ontology" \
+            "${{ env.DOCS_BASE_URL }}/mas"
+          
+          # LODE
+          python3 ontology/scripts/generate_lode_html.py ontology/src/oxp_ontology/mas-ontology.ttl ontology-docs/mas/lode/index.html || echo "LODE generation skipped"
+      
+      - name: Generate Metrics Ontology Documentation
+        run: |
+          echo "📚 Generating Metrics Ontology docs..."
+          
+          # Widoco
+          java -jar widoco.jar -ontFile ontology/src/oxp_ontology/metrics-ontology.ttl \
+            -outFolder ontology-docs/metrics/widoco -rewriteAll \
+            -includeAnnotationProperties -htaccess -webVowl -licensius
+          echo '<meta http-equiv="refresh" content="0; url=index-en.html">' > ontology-docs/metrics/widoco/index.html
+          
+          # WebVOWL
+          python3 ontology/scripts/generate_webvowl_json_generic.py \
+            ontology/src/oxp_ontology/metrics-ontology.ttl \
+            ontology-docs/metrics/webvowl/data/metrics-ontology.json \
+            "Metrics Ontology" \
+            "${{ env.DOCS_BASE_URL }}/metrics"
+          
+          # LODE
+          python3 scripts/generate_lode_html.py src/oxp_ontology/metrics-ontology.ttl ontology-docs/metrics/lode/index.html || echo "LODE generation skipped"
+      
+      - name: Setup WebVOWL (shared instance)
+        run: |
+          echo "🎨 Setting up WebVOWL..."
+          wget -q https://github.com/VisualDataWeb/WebVOWL/archive/refs/tags/1.1.6.tar.gz
+          # Verify checksum for security
+          echo "68cd002e652f885f431ade54f856e6692daa9915913e40b8360a802fc2ec415e  1.1.6.tar.gz" | sha256sum -c -
+          tar -xzf 1.1.6.tar.gz
+          cd WebVOWL-1.1.6
+          
+          # Change default ontology to mas-ontology (for the MAS landing page)
+          # Note: We use a simple sed that works on Linux (GHA runner)
+          sed -i 's/DEFAULT_JSON_NAME = "foaf"/DEFAULT_JSON_NAME = "mas-ontology"/' src/app/js/loadingModule.js
+          
+          # Install and build
+          npm install --silent
+          npm run release --silent
+          
+          # Copy built WebVOWL to each ontology folder and customize default ontology
+          cd ..
+          for ont in mas metrics; do
+            cp -r WebVOWL-1.1.6/deploy/* ontology-docs/$ont/webvowl/
+            
+            # Patch the default JSON name in the built JavaScript file
+            # This ensures each WebVOWL instance loads its specific ontology by default
+            # We look for the string "mas-ontology" (our build default) and replace it with "${ont}-ontology"
+            sed -i "s/mas-ontology/${ont}-ontology/g" ontology-docs/$ont/webvowl/js/webvowl.app.js
+          done
+          
+          rm -rf WebVOWL-1.1.6 1.1.6.tar.gz
+      
+      - name: Create main index page
+        run: |
+          cat > ontology-docs/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>OXP Ontology Collection</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                      line-height: 1.6;
+                      color: #24292f;
+                      background: #f6f8fa;
+                      padding: 40px 20px;
+                  }
+                  .container {
+                      max-width: 1200px;
+                      margin: 0 auto;
+                      background: white;
+                      padding: 60px;
+                      border-radius: 12px;
+                      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                  }
+                  h1 {
+                      font-size: 48px;
+                      font-weight: 700;
+                      margin-bottom: 16px;
+                      color: #0969da;
+                  }
+                  .subtitle {
+                      font-size: 20px;
+                      color: #57606a;
+                      margin-bottom: 40px;
+                  }
+                  .ontologies-grid {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                      gap: 32px;
+                      margin-top: 48px;
+                  }
+                  .ontology-card {
+                      border: 2px solid #d0d7de;
+                      border-radius: 12px;
+                      padding: 32px;
+                      background: #ffffff;
+                  }
+                  .ontology-card h2 {
+                      font-size: 28px;
+                      font-weight: 600;
+                      margin-bottom: 12px;
+                      color: #24292f;
+                  }
+                  .ontology-card .description {
+                      font-size: 15px;
+                      color: #57606a;
+                      margin-bottom: 24px;
+                      line-height: 1.6;
+                  }
+                  .doc-links {
+                      display: flex;
+                      flex-direction: column;
+                      gap: 12px;
+                  }
+                  .doc-link {
+                      display: block;
+                      padding: 12px 16px;
+                      background: #f6f8fa;
+                      border-radius: 6px;
+                      text-decoration: none;
+                      color: #0969da;
+                      font-weight: 500;
+                      transition: all 0.2s;
+                  }
+                  .doc-link:hover {
+                      background: #ddf4ff;
+                      transform: translateX(4px);
+                  }
+                  .badge {
+                      display: inline-block;
+                      background: #ddf4ff;
+                      color: #0969da;
+                      padding: 4px 12px;
+                      border-radius: 12px;
+                      font-size: 12px;
+                      font-weight: 600;
+                      margin-left: 8px;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🧠 OXP Ontology Collection</h1>
+                  <div class="subtitle">
+                      Multi-Agent System telemetry ontologies for governance and observability
+                  </div>
+                  
+                  <div class="ontologies-grid">
+                      <div class="ontology-card">
+                          <h2>MAS Ontology <span class="badge">Core</span></h2>
+                          <div class="description">
+                              Multi-Agent System concepts: agents, tasks, workflows, memory, and execution primitives.
+                              Defines the structural and behavioral vocabulary for MAS governance.
+                          </div>
+                          <div class="doc-links">
+                              <a href="mas/widoco/" class="doc-link">📖 Widoco Documentation</a>
+                              <a href="mas/webvowl/index.html#url=data/mas-ontology.json" class="doc-link">🎨 WebVOWL Visualization</a>
+                              <a href="mas/lode/" class="doc-link">📄 LODE (Lightweight)</a>
+                          </div>
+                      </div>
+                      
+                      <div class="ontology-card">
+                          <h2>Metrics Ontology <span class="badge">Governance</span></h2>
+                          <div class="description">
+                              Metric templates and score nodes: cost, quality, performance, reliability.
+                              W3C SOSA-based framework for MAS evaluation metrics.
+                          </div>
+                          <div class="doc-links">
+                              <a href="metrics/widoco/" class="doc-link">📖 Widoco Documentation</a>
+                              <a href="metrics/webvowl/index.html#url=data/metrics-ontology.json" class="doc-link">🎨 WebVOWL Visualization</a>
+                              <a href="metrics/lode/" class="doc-link">📄 LODE (Lightweight)</a>
+                          </div>
+                      </div>
+                  </div>
+                  
+                  <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #d0d7de; text-align: center; color: #57606a; font-size: 14px;">
+                      <p>Version: <code>${{ steps.version.outputs.full }}</code> • View on <a href="${{ github.server_url }}/${{ github.repository }}" style="color: #0969da;">GitHub</a></p>
+                  </div>
+              </div>
+          </body>
+          </html>
+          EOF
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+        with:
+          path: ./ontology-docs
+  
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

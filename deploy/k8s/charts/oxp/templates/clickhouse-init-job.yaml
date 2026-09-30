@@ -1,0 +1,105 @@
+{{- if and .Values.clickhouse.enabled .Values.api.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "oxp.fullname" . }}-clickhouse-setup
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "oxp.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- $globalValues := get .Values "global" | default dict }}
+      {{- $globalPullSecrets := get $globalValues "imagePullSecrets" | default (list) }}
+      {{- $pullSecrets := .Values.imagePullSecrets | default $globalPullSecrets }}
+      {{- with $pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: clickhouse-setup
+          image: {{ printf "%s:%s" .Values.clickhouse.image.repository .Values.clickhouse.image.tag | quote }}
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          env:
+            - name: CLICKHOUSE_HOST
+              value: {{ include "oxp.clickhouseHost" . | quote }}
+            - name: CLICKHOUSE_PORT
+              value: {{ include "oxp.clickhouseTcpPort" . | quote }}
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.usernameKey }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.passwordKey }}
+            - name: CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+          command:
+            - sh
+            - -ec
+            - |
+              endpoint="tcp://${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"
+              echo "Waiting for ClickHouse at ${endpoint}"
+              until clickhouse-client --host "${CLICKHOUSE_HOST}" --port "${CLICKHOUSE_PORT}" --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "SELECT 1" >/dev/null 2>&1; do
+                sleep 2
+              done
+
+              # otel_traces is created lazily by the otel-collector's clickhouse exporter on
+              # its first connection, which can race with this post-install hook. Wait for it
+              # rather than failing on UNKNOWN_TABLE.
+              echo "Waiting for table ${CLICKHOUSE_DATABASE}.otel_traces to exist"
+              table_wait_elapsed=0
+              table_wait_timeout=120
+              until [ "$(clickhouse-client --host "${CLICKHOUSE_HOST}" --port "${CLICKHOUSE_PORT}" --user "${CLICKHOUSE_USER}" --password "${CLICKHOUSE_PASSWORD}" --query "EXISTS TABLE ${CLICKHOUSE_DATABASE}.otel_traces")" = "1" ]; do
+                if [ "${table_wait_elapsed}" -ge "${table_wait_timeout}" ]; then
+                  echo "Timed out after ${table_wait_timeout}s waiting for ${CLICKHOUSE_DATABASE}.otel_traces to exist (has the otel-collector received any spans yet?)"
+                  exit 1
+                fi
+                sleep 2
+                table_wait_elapsed=$((table_wait_elapsed + 2))
+              done
+
+              # Ensure analytics columns exist even when traces were created without explicit denormalized columns.
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port "${CLICKHOUSE_PORT}" \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --query "ALTER TABLE ${CLICKHOUSE_DATABASE}.otel_traces ADD COLUMN IF NOT EXISTS application_id String DEFAULT SpanAttributes['application_id'];"
+
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port "${CLICKHOUSE_PORT}" \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --query "ALTER TABLE ${CLICKHOUSE_DATABASE}.otel_traces ADD COLUMN IF NOT EXISTS session_id String DEFAULT multiIf(position(SpanAttributes['session.id'], '_') > 0, substring(SpanAttributes['session.id'], position(SpanAttributes['session.id'], '_') + 1), SpanAttributes['session.id']);"
+
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port "${CLICKHOUSE_PORT}" \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --query "ALTER TABLE ${CLICKHOUSE_DATABASE}.otel_traces ADD COLUMN IF NOT EXISTS agent_id String DEFAULT SpanAttributes['agent_id'];"
+
+              # otel_traces is a plain (non-Replicated) MergeTree, so ClickHouse does not
+              # deduplicate inserts by default. The otel-collector's clickhouse exporter can
+              # retry an insert that actually landed (e.g. after a client-side timeout),
+              # producing byte-identical blocks; this setting makes ClickHouse drop those.
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port "${CLICKHOUSE_PORT}" \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --query "ALTER TABLE ${CLICKHOUSE_DATABASE}.otel_traces MODIFY SETTING non_replicated_deduplication_window = 100;"
+
+              echo "ClickHouse setup completed"
+{{- end }}

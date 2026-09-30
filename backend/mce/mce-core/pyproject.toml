@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mce-core"
+version = "2.0.0rc1"
+description = "Metric Computation Engine core"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.28.0",
+    "networkx>=3.0.0",
+    "packaging>=23.0",
+    "pandas>=1.5.0",
+    "pydantic-settings>=2.10.1",
+    "typer>=0.9.0",
+    "rdflib>=7.0.0",
+    "pyyaml>=6.0.0",
+    "oxp-ontology",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "black",
+    "flake8",
+    "mypy",
+    "httpx",
+]
+neo4j = [
+    "neo4j>=6.1.0",
+]
+deepeval = [
+    "mce-provider-deepeval>=0.1.0",
+]
+llm = [
+    "mce-provider-native>=0.1.0",
+]
+opik = [
+    "mce-provider-opik>=0.1.0",
+]
+ragas = [
+    "mce-provider-ragas>=0.1.0",
+]
+server = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+]
+all = [
+    "mce-provider-native>=0.1.0",
+    "mce-provider-sdk>=0.1.0",
+    "mce-provider-deepeval>=0.1.0",
+    "mce-provider-opik>=0.1.0",
+    "mce-provider-ragas>=0.1.0",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+mce-provider-native = { workspace = true }
+mce-provider-sdk = { workspace = true }
+mce-provider-deepeval = { workspace = true }
+mce-provider-opik = { workspace = true }
+mce-provider-ragas = { workspace = true }
+

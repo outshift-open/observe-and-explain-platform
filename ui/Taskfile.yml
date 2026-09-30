@@ -1,0 +1,40 @@
+---
+version: "3"
+
+includes:
+  utils: ./tasks/utils.yml
+
+silent: true
+
+tasks:
+  version:
+    desc: Print project version
+    cmds:
+      - git describe --tags --abbrev=0
+
+  release:
+    desc: Create a new release
+    cmds:
+      - task: utils:release
+
+  prerelease:
+    desc: Prepare a new release
+    cmds:
+      - task: utils:prerelease
+
+  bugfix-release:
+    desc: Prepare a new release
+    cmds:
+      - task: utils:bugfixrelease
+
+  bugfix-prerelease:
+    desc: Prepare a new release
+    cmds:
+      - task: utils:bugfixprerelease
+
+  oxp-ui-version:
+    desc: Print oxp-ui version
+    cmds:
+      - task: utils:version
+        vars:
+          MODULE: oxp-ui

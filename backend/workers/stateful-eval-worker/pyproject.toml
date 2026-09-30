@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stateful-eval-worker"
+version = "1.0.0"
+license = "Apache-2.0"
+description = "In-process stateful evaluation worker — runs temporal metric computation directly as a library, bypassing the HTTP service"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+requires-python = ">=3.11"
+dependencies = [
+    "worker-base",
+    "stateful-evals",
+    "oxp-api",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "click>=8.0.0",
+    "aio_pika>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-asyncio>=0.21.0",
+    "pre-commit>=4.4.0",
+    "ruff<=0.15.22",
+]
+
+[project.scripts]
+stateful-eval-worker-cli = "stateful_eval_worker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/agntcy/telemetry-hub"
+Repository = "https://github.com/agntcy/telemetry-hub"
+
+[tool.uv.sources]
+worker-base = { workspace = true }
+stateful-evals = { workspace = true }
+oxp-api = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stateful_eval_worker"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

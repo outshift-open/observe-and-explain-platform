@@ -1,0 +1,39 @@
+{{- if .Values.certManagerCert.enabled }}
+# Certificate for oxp server
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oxp-ui-certificate
+spec:
+  secretName: oxp-ui-certificate-secret
+  dnsNames:
+    - {{ include "oxp-ui.fullname" . }}
+    - {{ include "oxp-ui.fullname" . }}.{{ .Release.Namespace }}
+    - {{ include "oxp-ui.fullname" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "oxp-ui.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: oxp-ui-root-ca-issuer
+  duration: 2160h0m0s # 90d
+  renewBefore: 360h0m0s # 15d
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oxp-ui-client-certificate
+spec:
+  secretName: oxp-ui-client-certificate-secret
+  issuerRef:
+    name: oxp-ui-root-ca-issuer
+  duration: 2160h0m0s # 90d
+  emailAddresses:
+    - oxp-ui@oxp.org
+  renewBefore: 360h0m0s # 15d
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+{{- end }}

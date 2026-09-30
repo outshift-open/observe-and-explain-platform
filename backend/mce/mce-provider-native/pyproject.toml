@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mce-provider-native"
+version = "0.1.0"
+description = "Native MCE provider package"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "mce-core>=2.0.0rc1",
+    "openai>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mce.providers.native*"]
+namespaces = true
+
+[tool.uv.sources]
+mce-core = { workspace = true }

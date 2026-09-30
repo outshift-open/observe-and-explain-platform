@@ -1,0 +1,90 @@
+[project]
+name = "oxp-lib"
+version = "1.0.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dem[all]",
+    "mce",
+    "norm",
+]
+
+[tool.uv.workspace]
+members = [
+    "api",
+    "dem",
+    "mce/mce-meta",
+    "mce/mce-core",
+    "mce/mce-helper",
+    "mce/mce-client",
+    "mce/mce-legacy",
+    "mce/mce-provider-native",
+    "mce/mce-provider-sdk",
+    "mce/mce-provider-deepeval",
+    "mce/mce-provider-opik",
+    "mce/mce-provider-ragas",
+    "norm",
+    "workers/norm-worker",
+    "workers/embedding-worker",
+    "workers/hierarchical-grouping-worker",
+    "workers/mce-worker",
+    "workers/normal-behaviour-worker",
+    "workers/grouping-worker",
+    "workers/consistency-worker",
+    "workers/anomaly-detection-worker",
+    "workers/analysis-worker",
+    "workers/stateful-eval-worker",
+    "workers/intelligence-worker",
+    "worker-base",
+    "stateful-evals",
+]
+
+[tool.uv.sources]
+dem = { workspace = true }
+mce = { workspace = true }
+oxp-api = { workspace = true }
+mce-core = { workspace = true }
+mce-helper = { workspace = true }
+mce-client = { workspace = true }
+mce-legacy = { workspace = true }
+mce-provider-native = { workspace = true }
+mce-provider-sdk = { workspace = true }
+mce-provider-deepeval = { workspace = true }
+mce-provider-opik = { workspace = true }
+mce-provider-ragas = { workspace = true }
+norm = { workspace = true }
+norm-worker = { workspace = true }
+hierarchical-grouping-worker = { workspace = true }
+mce-worker = { workspace = true }
+normal-behaviour-worker = { workspace = true }
+grouping-worker = { workspace = true }
+consistency-worker = { workspace = true }
+anomaly-detection-worker = { workspace = true }
+analysis-worker = { workspace = true }
+stateful-eval-worker = { workspace = true }
+stateful-evals = { workspace = true }
+intelligence-worker = { workspace = true }
+worker-base = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.15.1",
+    "pytest-asyncio>=0.21.0",
+    "requests-mock",
+    "pytest-docker>=3.2.5",
+    "ruff<=0.15.22",
+]
+
+[tool.pytest.ini_options]
+# Root pytest should only run root-owned package suites.
+testpaths = [
+    "dem/src/dem/tests",
+]
+pythonpath = [
+    "dem/src",
+]
+addopts = [
+    "--import-mode=importlib",
+]

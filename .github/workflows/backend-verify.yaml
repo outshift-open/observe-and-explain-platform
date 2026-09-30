@@ -1,0 +1,41 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+name: Image Builder for OXP Backend
+
+on:
+  # we want pull requests so we can build(test) but not push to image registry
+  pull_request:
+    branches:
+      - 'main'
+  workflow_dispatch:
+
+jobs:
+  call-docker-build-push:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - api
+          - norm-worker
+          - mce-worker
+          - embedding-worker
+          - grouping-worker
+          - hierarchical-grouping-worker
+          - analysis-worker
+          - anomaly-detection-worker
+          - consistency-worker
+          - normal-behaviour-worker
+          - intelligence-worker
+          - stateful-eval-worker
+    permissions:
+      contents: read  # required for actions/checkout
+      packages: read
+    uses: ./.github/workflows/reusable-docker-build-push.yml
+    with:
+      bake-targets: ${{ matrix.target }}
+      image-tag: ${{ github.sha }}
+      image-repo: ghcr.io/outshift-open/oxp-${{ matrix.target }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,112 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+@prefix mas: <https://outshift-open.github.io/oxp-ontology/mas#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix vann: <http://purl.org/vocab/vann/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+<https://outshift-open.github.io/oxp-ontology/metrics> rdf:type owl:Ontology ;
+    dcterms:title "Multi-Agent System (MAS) Metrics Ontology" ;
+    dcterms:description "Comprehensive ontology for MAS telemetry metrics, scores, templates, and dependencies. Provides hierarchical metric organization, template-based instantiation, multi-dimensional scoring, and stateful evaluation support. Designed to integrate with mas-ontology.ttl for observability and governance of multi-agent systems." ;
+    dcterms:created "2025-01-20"^^xsd:date ;
+    dcterms:modified "2026-03-27"^^xsd:date ;
+    dcterms:license <https://opensource.org/licenses/Apache-2.0> ;
+    dcterms:creator [
+        a foaf:Organization ;
+        foaf:name "Outshift by Cisco" ;
+        foaf:homepage <https://github.com/outshift-open>
+    ] ;
+    vann:preferredNamespacePrefix "mas" ;
+    vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:priorVersion <https://outshift-open.github.io/oxp-ontology/metrics/1.0.0-rc0> ;
+    owl:versionInfo "1.0.0" ;
+    owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
+    rdfs:comment "Metrics ontology for MAS telemetry. Defines the Metric/MetricResult definition-observation split and integrates with mas-ontology.ttl via hasMetric property." ;
+    rdfs:seeAlso <https://outshift-open.github.io/oxp-ontology/mas> ,
+                 <https://www.w3.org/TR/skos-reference/> .
+
+# -- Metric
+
+mas:Metric rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "evaluation" ;
+    rdfs:comment "Definition of a metric: what is measured, by whom, and over what range of values. Not an observation itself — see mas:MetricResult for that." ;
+    skos:example "Latency, Token Count, Hallucination, Tool Call Rate, Description Complexity" .
+
+mas:unit rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:unit ;
+    sh:targetClass mas:Metric ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:Metric ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Measurement unit for metric value. Documents interpretation. Example: 'ms' (milliseconds), 'tokens', 'calls/sec', 'dimensionless' (for normalized scores)." .
+
+mas:metricProvider rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:metricProvider ;
+    sh:targetClass mas:Metric ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:Metric ;
+    rdfs:range xsd:string ;
+    rdfs:comment "System or method that computes this metric. Example: 'ragas', 'deepeval', 'mce', 'custom-rule'." .
+
+mas:valueRange rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:valueRange ;
+    sh:targetClass mas:Metric ;
+    sh:minCount 1 ;
+    sh:severity sh:Warning ;
+    rdfs:domain mas:Metric ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Description of the metric's possible values. Example: '0.0-1.0', '0-100', '{pass, fail}', 'non-negative integer'." .
+
+# -- MetricResult
+
+mas:MetricResult rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "evaluation" ;
+    rdfs:comment "One computed observation of a Metric for one resource at one point in time. Distinct from mas:Metric (the definition being computed): a MetricResult is to a Metric what an mas:LLMCall is to an mas:LLM." ;
+    skos:example "A Latency result of 1250.5ms computed for AgentCall_042 at 2026-03-27T10:15:00Z." .
+
+mas:ofMetricType rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:ofMetricType ;
+    sh:targetClass mas:MetricResult ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:MetricResult ;
+    rdfs:range mas:Metric ;
+    rdfs:comment "MetricResult is a computed observation of this Metric definition." .
+
+mas:measures rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:measures ;
+    sh:targetClass mas:MetricResult ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:MetricResult ;
+    rdfs:range mas:ExecutionElement ;
+    rdfs:comment "Metric result measures execution element." .
+
+mas:result rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:result ;
+    sh:targetClass mas:MetricResult ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:MetricResult ;
+    rdfs:range xsd:double ;
+    rdfs:comment "Numeric value of the metric observation (raw measurement). Unit and possible range are documented on the associated Metric (see mas:unit, mas:valueRange). Example: Latency_obs_001 mas:result 1250.5 (ms), TokenCount_obs_002 mas:result 450 (tokens)." .
+
+mas:reasoning rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:reasoning ;
+    sh:targetClass mas:MetricResult ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:MetricResult ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Logical reasoning/justification behind the metric evaluation." .

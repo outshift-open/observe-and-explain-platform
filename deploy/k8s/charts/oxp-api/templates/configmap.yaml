@@ -1,0 +1,31 @@
+{{- include "oxp-api.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-configmap
+  namespace: '{{ .Release.Namespace }}'
+data:
+  {{- if eq .Values.syncSecretsFromVault.enabled false }}
+  # Non-sensitive connection config only. Credentials (username/password/auth) are
+  # NEVER rendered here — they are read from the existing Secret via secretKeyRef in
+  # the deployment (see clickhouse.existingSecret / neo4j.existingSecret).
+  OXP_API_PORT: '{{ .Values.api.service.port }}'
+  CLICKHOUSE_HOST: '{{ include "oxp-api.clickhouse.host" . }}'
+  CLICKHOUSE_PORT: '{{ include "oxp-api.clickhouse.port" . }}'
+  CLICKHOUSE_DATABASE: '{{ .Values.clickhouse.database }}'
+  NEO4J_HOST: '{{ include "oxp-api.neo4j.host" . }}'
+  NEO4J_PORT: '{{ include "oxp-api.neo4j.port" . }}'
+  NEO4J_DATABASE: '{{ .Values.neo4j.database }}'
+  OTEL_EXPORTER_OTLP_ENDPOINT: '{{ include "oxp-api.otelEndpoint" . }}'
+  OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+  {{- end }}
+  {{- if .Values.certManagerCert.enabled }}
+  CA_FILE: '{{ .Values.api.service.caFile }}'
+  CERT_FILE: '{{ .Values.api.service.certFile }}'
+  KEY_FILE: '{{ .Values.api.service.keyFile }}'
+  {{- end }}
+  OXP_LOCAL: "false"
+  OXP_API_RELOAD: "false"
+  CACHE_ENABLED: '{{ .Values.cache.enabled }}'
+  CACHE_REDIS_URL: '{{ .Values.cache.redisUrl | default (printf "redis://%s-redis:%d/0" (include "oxp-api.fullname" .) (int .Values.redis.port)) }}'
+  CACHE_TTL_SECONDS: '{{ .Values.cache.ttlSeconds }}'

@@ -1,0 +1,12 @@
+.env
+stateful_evals_be/.env
+stateful_evals_be/.venv/
+stateful_evals_be/__pycache__/
+stateful_evals_be/**/__pycache__/
+stateful_evals_be/metrics_out/
+stateful_evals_be/reports/
+metrics_out/
+*.pyc
+.git
+.venv
+.venv-*/

@@ -1,0 +1,24 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+engine:
+  max_workers: 4
+  execution_strategy: hybrid
+
+cache:
+  path: null 
+  read: true
+  write: true
+
+metrics:
+  Session:
+    - Duration
+    - Cost
+    - AnswerRelevancy
+    - IntentRecognitionAccuracy
+    # - Groundedness
+    # - ToolUtilizationAccuracy
+    # - ResponseCompleteness
+    # - TaskCompletion
+    # - WorkflowEfficiency
+    # - CyclesCount
+    # - ToolErrorRate

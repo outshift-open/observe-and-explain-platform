@@ -1,0 +1,144 @@
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  version-check:
+    desc: Verify that pyproject.toml matches the VERSION file
+    cmds:
+      - |
+        FILE_VER=$(cat VERSION)
+        PROJ_VER=$(grep 'version = ' pyproject.toml | head -1 | cut -d '"' -f 2)
+        if [ "$FILE_VER" != "$PROJ_VER" ]; then
+          echo "Error: Version mismatch! file=$FILE_VER, toml=$PROJ_VER"
+          exit 1
+        fi
+        echo "Version Check Passed: $FILE_VER"
+
+  version:
+    desc: Get current version
+    cmds:
+      - python3 scripts/version_manager.py get
+
+  version-full:
+    desc: Get version with commit SHA (for RC builds)
+    cmds:
+      - python3 scripts/version_manager.py get-full
+
+  version-bump-rc:
+    desc: Bump RC version (rc0 -> rc1)
+    cmds:
+      - python3 scripts/version_manager.py bump rc
+
+  version-bump-patch:
+    desc: Bump patch version (removes RC, increments patch)
+    cmds:
+      - python3 scripts/version_manager.py bump patch
+
+  version-bump-minor:
+    desc: Bump minor version (removes RC, increments minor)
+    cmds:
+      - python3 scripts/version_manager.py bump minor
+
+  version-bump-major:
+    desc: Bump major version (removes RC, increments major)
+    cmds:
+      - python3 scripts/version_manager.py bump major
+
+  version-set:
+    desc: Set specific version (usage - task version-set -- 1.2.0-rc0)
+    cmds:
+      - python3 scripts/version_manager.py set {{.CLI_ARGS}}
+
+  lint:
+    desc: Run linters and validate TTL files
+    cmds:
+      - task: validate-ttl
+
+  validate-ttl:
+    desc: Validate TTL syntax and structure
+    cmds:
+      - |
+        python3 << 'EOF'
+        from rdflib import Graph, RDF, RDFS, OWL
+        import sys
+
+        files = ['src/oxp_ontology/mas-ontology.ttl', 'src/oxp_ontology/semantic-ontology.ttl', 'src/oxp_ontology/metrics-ontology.ttl', 'src/oxp_ontology/analysis-ontology.ttl', 'src/oxp_ontology/insight-ontology.ttl']
+        failed = []
+
+        for file in files:
+            print(f'Validating {file}...')
+            try:
+                g = Graph()
+                g.parse(file, format='turtle')
+                
+                # Basic checks
+                ontologies = list(g.subjects(RDF.type, OWL.Ontology))
+                classes = list(g.subjects(RDF.type, OWL.Class))
+                obj_props = list(g.subjects(RDF.type, OWL.ObjectProperty))
+                data_props = list(g.subjects(RDF.type, OWL.DatatypeProperty))
+                
+                print(f'  Triples: {len(g)}')
+                print(f'  Ontologies: {len(ontologies)}')
+                print(f'  Classes: {len(classes)}')
+                print(f'  Object Properties: {len(obj_props)}')
+                print(f'  Datatype Properties: {len(data_props)}')
+                
+                if len(ontologies) == 0:
+                    print(f'  ⚠️  Warning: No owl:Ontology declaration')
+                if len(classes) == 0:
+                    print(f'  ⚠️  Warning: No owl:Class definitions')
+                    
+                print(f'  ✓ {file} is valid')
+            except Exception as e:
+                print(f'  ✗ {file}: {e}')
+                failed.append(file)
+            print()
+
+        if failed:
+            print(f'Failed files: {", ".join(failed)}')
+            sys.exit(1)
+        else:
+            print('✅ All TTL files validated successfully!')
+        EOF
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - uv run pytest -v
+
+  test-coverage:
+    desc: Run tests with coverage report
+    cmds:
+      - pytest tests/ -v --cov=src/oxp_ontology --cov-report=term-missing
+
+  verify:
+    desc: Run all verification checks (version, TTL validation, tests)
+    cmds:
+      - task: version-check
+      - task: validate-ttl
+      - task: test
+
+  eval:
+    desc: Run paper evaluation pipeline (events → RDF → SPARQL → SHACL)
+    cmds:
+      - uv run code/evaluate_all.py
+
+  build:
+    desc: Build the package
+    deps: [version-check]
+    cmds:
+      - uv build
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf dist/ build/
+
+  build-models:
+    desc: Build the python classes
+    cmds:
+      - uv run scripts/generate_models.py

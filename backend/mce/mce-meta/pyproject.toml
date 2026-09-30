@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mce"
+version = "2.0.0rc1"
+description = "Metrics Computation Engine metapackage"
+requires-python = ">=3.13,<3.15"
+dependencies = [
+    "mce-core>=2.0.0rc1",
+    "mce-helper>=0.1.0",
+    "mce-client>=0.1.0",
+    "mce-legacy>=0.1.0",
+    "mce-provider-native>=0.1.0",
+    "mce-provider-sdk>=0.1.0",
+    "mce-provider-deepeval>=0.1.0",
+    "mce-provider-opik>=0.1.0",
+    "mce-provider-ragas>=0.1.0",
+]
+
+[tool.uv.sources]
+mce-core = { workspace = true }
+mce-helper = { workspace = true }
+mce-client = { workspace = true }
+mce-legacy = { workspace = true }
+mce-provider-native = { workspace = true }
+mce-provider-sdk = { workspace = true }
+mce-provider-deepeval = { workspace = true }
+mce-provider-opik = { workspace = true }
+mce-provider-ragas = { workspace = true }

@@ -1,0 +1,72 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "embedding-worker"
+version = "1.0.0"
+license = "Apache-2.0"
+description = "Standalone embedding worker for processing telemetry sessions with vector embeddings"
+readme = "README.md"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+requires-python = ">=3.11"
+dependencies = [
+    "dem[embedding]",
+    "worker-base",
+    "oxp-api",
+    "python-dotenv>=1.0.0",
+    "click>=8.0.0",
+]
+
+[tool.uv.sources]
+dem = { workspace = true }
+worker-base = { workspace = true }
+oxp-api = { workspace = true }
+mce-core = { workspace = true }
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "pytest-cov>=4.0.0",
+    "ruff<=0.15.22",
+    "pytest-mock>=3.10.0",
+    "mypy>=1.0.0",
+    "black>=23.0.0",
+]
+
+[project.scripts]
+embedding-worker-cli = "embedding_worker.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.black]
+line-length = 120
+target-version = ["py311", "py312"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]

@@ -1,0 +1,9 @@
+# Values to be used in kind test.
+# kind has no Vault/ClusterSecretStore, so we exercise BYO mode against dummy
+# Secrets pre-created by the CI workflow before `ct install`.
+syncSecretsFromVault:
+  enabled: false
+clickhouse:
+  existingSecret: oxp-api-clickhouse-secret
+neo4j:
+  existingSecret: oxp-api-neo4j-secret

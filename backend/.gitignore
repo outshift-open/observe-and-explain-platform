@@ -1,0 +1,36 @@
+# env file
+.env
+private/
+.deepeval
+.deploy
+.pytest_cache
+.ruff_cache
+.vscode
+.cursor
+.claude
+.playground
+*.sqlite
+.venv
+
+.venv-1
+.python-version
+.DS_Store
+__pycache__
+html_data.json
+__pycache__/
+*.egg-info/
+
+# Local workflow artifacts
+workflows/session_ids.txt
+workers/*/tmp/
+mce/src/mce.egg-info/
+mlflow.db
+test_env/
+
+# API generated test/debug artifacts
+api/tests/logs/
+
+# MkDocs build output
+site/
+_site/
+.idea
