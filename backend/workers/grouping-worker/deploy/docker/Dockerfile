@@ -28,9 +28,7 @@ COPY workers/grouping-worker /app/workers/grouping-worker
 COPY worker-base /app/worker-base
 COPY api /app/api
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package grouping-worker --frozen --no-editable
+RUN uv sync --package grouping-worker --frozen --no-editable
 
 # ── Run stage ─────────────────────────────────────────────────────────────────
 FROM python:3.13-slim AS runner

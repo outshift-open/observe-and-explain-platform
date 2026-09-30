@@ -30,9 +30,7 @@ COPY dem /app/dem
 COPY mce /app/mce
 COPY api /app/api
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package analysis-worker --frozen --no-editable \
+RUN uv sync --package analysis-worker --frozen --no-editable \
     --no-install-package numba \
     --no-install-package llvmlite
 

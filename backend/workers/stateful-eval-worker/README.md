@@ -132,13 +132,10 @@ without a database, use `stateful_evals_be.evaluate_file`, as the
 
 ## Docker
 
-Build from the repository root. The build mounts two secrets for the private
-`outshift-pypi` package index.
+Build from the repository root.
 
 ```bash
 docker build -f workers/stateful-eval-worker/deploy/docker/Dockerfile \
-  --secret id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-  --secret id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
   -t stateful-eval-worker .
 docker run --rm stateful-eval-worker --test
 ```

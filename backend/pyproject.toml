@@ -39,16 +39,11 @@ members = [
     "worker-base",
     "stateful-evals",
 ]
-[[tool.uv.index]]
-name = "outshift-pypi"
-url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
-explicit = true
 
 [tool.uv.sources]
 dem = { workspace = true }
 mce = { workspace = true }
 oxp-api = { workspace = true }
-oxp-ontology = { index = "outshift-pypi" }
 mce-core = { workspace = true }
 mce-helper = { workspace = true }
 mce-client = { workspace = true }

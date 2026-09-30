@@ -123,8 +123,6 @@ uv run --package stateful-eval-worker stateful-eval-worker-cli --test
 
 ```bash
 docker build -f workers/stateful-eval-worker/deploy/docker/Dockerfile \
-  --secret id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-  --secret id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
   -t stateful-eval-worker .
 docker run --rm stateful-eval-worker --test
 ```

@@ -22,7 +22,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "oxp-api",
-    "oxp-ontology[models]>=2.0.1",
+    "oxp-ontology[models]>=1.0.0",
     "dem[analysis]",
     "worker-base",
     "pydantic>=2.0.0",
@@ -45,14 +45,8 @@ dev = [
 [project.scripts]
 normal-behaviour-worker-cli = "normal_behaviour_worker.cli:main"
 
-[[tool.uv.index]]
-name = "outshift-pypi"
-url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
-explicit = true
-
 [tool.uv.sources]
 oxp-api = { workspace = true }
-oxp-ontology = { index = "outshift-pypi" }
 dem = { workspace = true }
 worker-base = { workspace = true }
 

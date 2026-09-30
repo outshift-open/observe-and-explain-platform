@@ -27,9 +27,7 @@ ENV PATH="/root/.local/bin:${PATH}"
 
 COPY . /app
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package intelligence-worker --frozen
+RUN uv sync --package intelligence-worker --frozen
 
 # --- Runtime stage ----------------------------------------------------------
 FROM python:3.13-slim

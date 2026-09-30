@@ -12,13 +12,7 @@ members = [
     "mce-provider-ragas",
 ]
 
-[[tool.uv.index]]
-name = "outshift-pypi"
-url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
-explicit = true
-
 [tool.uv.sources]
-oxp-ontology = { index = "outshift-pypi" }
 oxp-api = { path = "../api", editable = true }
 
 [dependency-groups]

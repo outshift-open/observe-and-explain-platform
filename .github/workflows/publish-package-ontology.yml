@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # required for PyPI Trusted Publishing (OIDC)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -173,17 +174,11 @@ jobs:
       - name: Build package
         run: uv build
 
-      - name: Publish to Artifactory
+      - name: Publish to PyPI
         if: github.repository == 'outshift-open/observe-and-explain-platform' && steps.version.outputs.is_rc == 'false' && steps.version.outputs.is_dev_build == 'false'
-        env:
-          TWINE_USERNAME: ${{ env.ARTIFACTORY_USERNAME }}
-          TWINE_PASSWORD: ${{ env.ARTIFACTORY_PASSWORD }}
-        run: |
-          uv venv
-          uv pip install twine
-          python -m twine upload \
-            --repository-url https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi \
-            dist/*
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
       - name: Summary
         if: always()

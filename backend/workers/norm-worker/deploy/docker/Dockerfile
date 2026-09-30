@@ -29,9 +29,7 @@ COPY worker-base /app/worker-base
 COPY norm /app/norm
 COPY api /app/api
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package norm-worker --frozen --no-editable
+RUN uv sync --package norm-worker --frozen --no-editable
 
 # ── Run stage ─────────────────────────────────────────────────────────────────
 FROM python:3.13-slim AS runner

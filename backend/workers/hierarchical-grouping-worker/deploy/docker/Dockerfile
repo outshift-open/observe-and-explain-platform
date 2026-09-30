@@ -28,9 +28,7 @@ COPY worker-base /app/worker-base
 COPY api /app/api
 COPY dem /app/dem
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package hierarchical-grouping-worker --frozen
+RUN uv sync --package hierarchical-grouping-worker --frozen
 
 FROM python:3.13-slim
 

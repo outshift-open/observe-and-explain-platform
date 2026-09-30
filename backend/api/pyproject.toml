@@ -20,7 +20,7 @@ dependencies = [
     "umap-learn>=0.5.7",
     "uvicorn>=0.41.0",
     "ruff<=0.15.22",
-    "oxp-ontology[models,verify]>=2.0.1",
+    "oxp-ontology[models,verify]>=1.0.0",
 ]
 
 
@@ -46,11 +46,3 @@ dev = [
 
 [tool.uv]
 environments = ["sys_platform == 'linux' or sys_platform == 'darwin'"]
-
-[[tool.uv.index]]
-name = "outshift-pypi"
-url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
-explicit = true
-
-[tool.uv.sources]
-oxp-ontology = { index = "outshift-pypi" }

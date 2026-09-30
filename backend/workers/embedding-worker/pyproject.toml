@@ -28,17 +28,11 @@ dependencies = [
     "click>=8.0.0",
 ]
 
-[[tool.uv.index]]
-name = "outshift-pypi"
-url = "https://artifactory.devhub-cloud.cisco.com/artifactory/api/pypi/outshift-pypi/simple"
-explicit = true
-
 [tool.uv.sources]
 dem = { workspace = true }
 worker-base = { workspace = true }
 oxp-api = { workspace = true }
 mce-core = { workspace = true }
-oxp-ontology = { index = "outshift-pypi" }
 
 [project.optional-dependencies]
 dev = [

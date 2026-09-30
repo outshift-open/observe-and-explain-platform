@@ -26,9 +26,7 @@ COPY worker-base /opt/worker-base
 COPY stateful-evals /opt/stateful-evals
 COPY api /opt/api
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package stateful-eval-worker --frozen --no-editable
+RUN uv sync --package stateful-eval-worker --frozen --no-editable
 
 # ── Run stage ─────────────────────────────────────────────────────────────────
 FROM python:3.13-slim AS runner

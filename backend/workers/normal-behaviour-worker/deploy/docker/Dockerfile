@@ -29,9 +29,7 @@ COPY worker-base /app/worker-base
 COPY api /app/api
 COPY dem /app/dem
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package normal-behaviour-worker --frozen --no-editable
+RUN uv sync --package normal-behaviour-worker --frozen --no-editable
 
 # ── Run stage ─────────────────────────────────────────────────────────────────
 FROM python:3.13-slim AS runner

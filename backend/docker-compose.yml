@@ -76,9 +76,6 @@ services:
     build:
       context: .
       dockerfile: workers/norm-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command: ["--max-sessions", "-1"]
     environment:
       <<: *worker-env
@@ -90,9 +87,6 @@ services:
     build:
       context: .
       dockerfile: workers/embedding-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command: ["--embedder-type", "OpenAIEmbedder", "--embedding-model", "${EMBEDDING_MODEL:-azure/text-embedding-3-small}"]
     environment:
       <<: *worker-env
@@ -112,9 +106,6 @@ services:
     build:
       context: .
       dockerfile: workers/mce-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command: ["--config-file", "/oxp/mce_config.yaml"]
     environment:
       <<: *worker-env
@@ -133,9 +124,6 @@ services:
     build:
       context: .
       dockerfile: workers/grouping-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command: ["--embedding-model", "${EMBEDDING_MODEL:-azure/text-embedding-3-small}"]
     environment:
       <<: *worker-env
@@ -154,9 +142,6 @@ services:
     build:
       context: .
       dockerfile: workers/analysis-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command:
       - "--embedding-model"
       - "${EMBEDDING_MODEL:-azure/text-embedding-3-small}"
@@ -180,9 +165,6 @@ services:
     build:
       context: .
       dockerfile: workers/hierarchical-grouping-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command:
       - "--embedding-model"
       - "${EMBEDDING_MODEL:-azure/text-embedding-3-small}"
@@ -203,9 +185,6 @@ services:
     build:
       context: .
       dockerfile: workers/intelligence-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     command:
       - "--catalog-root"
       - "intelligence-catalog"
@@ -227,9 +206,6 @@ services:
     build:
       context: .
       dockerfile: workers/stateful-eval-worker/deploy/docker/Dockerfile
-      secrets:
-        - ARTIFACTORY_USERNAME
-        - ARTIFACTORY_PASSWORD
     environment:
       <<: *worker-env
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${AI_GATEWAY_API_KEY:-}}
@@ -241,9 +217,3 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_healthy
-
-secrets:
-  ARTIFACTORY_USERNAME:
-    environment: "UV_INDEX_OUTSHIFT_PYPI_USERNAME"
-  ARTIFACTORY_PASSWORD:
-    environment: "UV_INDEX_OUTSHIFT_PYPI_PASSWORD"

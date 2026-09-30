@@ -34,9 +34,7 @@ COPY dem /app/dem
 COPY mce /app/mce
 COPY api /app/api
 
-RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
-    uv sync --package embedding-worker --frozen --no-editable --no-dev \
+RUN uv sync --package embedding-worker --frozen --no-editable --no-dev \
     --no-install-package torch \
     --no-install-package numba \
     --no-install-package llvmlite \

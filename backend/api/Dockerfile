@@ -24,8 +24,6 @@ COPY api/pyproject.toml /src/api/pyproject.toml
 
 # Install dependencies without installing source code yet.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
   cd /src && uv sync --frozen --no-dev --no-install-project --no-install-workspace --no-sources --project /src/api
 
 # Copy the API source code.
@@ -33,8 +31,6 @@ COPY api /src/api
 
 # Install the oxp-api package
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
-    --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \
   cd /src && uv sync --frozen --no-dev --no-editable --project /src/api
 
 FROM python:3.13-slim-trixie AS runner
