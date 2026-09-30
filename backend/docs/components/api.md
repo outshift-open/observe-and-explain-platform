@@ -15,7 +15,7 @@ Business logic therefore lives in the library layer (`oxp.client`), not in the F
 ## Overview
 
 This component consolidates data-access patterns that used to be spread across `oxp-backend`,
-`DAL`, `ontology-hub` and the workflow components into one library.
+`DAL`, and the workflow components into one library.
 
 ```text
                          ┌───────────────────────────┐

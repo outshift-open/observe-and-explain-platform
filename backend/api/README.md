@@ -1,6 +1,6 @@
 # OXP API
 
-Unified DB access layer across OXP. It consolidates the fragmented data access patterns currently spread across oxp-backend, DAL, ontology-hub, and workflow components into one single library and provides an optional REST API, for use by the downstream components.
+Unified DB access layer across OXP. It consolidates the fragmented data access patterns currently spread across oxp-backend, DAL, and workflow components into one single library and provides an optional REST API, for use by the downstream components.
 
 ## Tech stack
 

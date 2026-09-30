@@ -10,61 +10,16 @@ on:
       - 'main'
   workflow_dispatch:
 
-# Grant read access for GITHUB_TOKEN on all jobs
-permissions:
-  id-token: write # This is required for requesting the JWT
-  contents: read # This is required for actions/checkout
-  packages: read # needed to push docker image to gar or ecr
-
 jobs:
   call-docker-build-push:
-    name: Build docker and push
-    runs-on:
-      ubuntu-latest
-    container:
-      image: ghcr.io/cisco-eti/dragonfly/container-images/actions/base-image:1.0.11
-      credentials:
-        username: x-access-token
-        password: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4 # legit:ignore-pipeline
-        with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
-      - name: Generate tags
-        run: |
-          echo "TAG=$(task claris-ui-version | cut -c 2-)" >> $GITHUB_ENV
-      - name: Check tags
-        run: |
-          echo "Tag: ${{ env.TAG }}"
-      - name: Import Vault Secrets
-        uses: hashicorp/vault-action@v3 # legit:ignore-pipeline
-        with:
-          method: approle
-          url: ${{ vars.KEEPER_URL }}
-          roleId: ${{ secrets.VAULT_ESPRESSO_APPROLE_ROLE_ID }}
-          secretId: ${{ secrets.VAULT_ESPRESSO_APPROLE_SECRET_ID }}
-          namespace: eticloud/apps/espresso
-          secrets: |
-            secret/data/espresso-bot username | DOCKERHUB_USERNAME ;
-            secret/data/espresso-bot dockerhub-api-key | DOCKERHUB_API_KEY ;
-      - name: Build/Push Claris UI docker image
-        uses: cisco-eti/dragonfly-actions/docker@manang-patch-2 # legit:ignore-pipeline
-        with:
-          # vault-espresso-role-id: ${{ secrets.VAULT_ESPRESSO_APPROLE_ROLE_ID }}
-          # vault-espresso-secret-id: ${{ secrets.VAULT_ESPRESSO_APPROLE_SECRET_ID }}
-          context: ./claris-ui
-          docker-file: ./claris-ui/Dockerfile
-          enable-devhub-cloud: "false"
-          enable-dockerhub: "false"
-          enable-ecr: "false"
-          enable-ghcr: "true"
-          ghcr-username: x-access-token
-          ghcr-password: ${{ secrets.GITHUB_TOKEN }}
-          repository: claris/container-images/claris-ui
-          platforms: linux/amd64
-          push: false
-          tags: |
-            type=raw,value=${{ env.TAG }}
-            type=raw,value=latest
+    name: Build OXP UI image
+    permissions:
+      contents: read  # required for actions/checkout
+      packages: read
+    uses: ./.github/workflows/reusable-docker-build-push.yml
+    with:
+      bake-targets: ui
+      image-tag: ${{ github.sha }}
+      image-repo: ghcr.io/outshift-open/oxp-ui
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}

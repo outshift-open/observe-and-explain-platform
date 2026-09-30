@@ -88,4 +88,3 @@ XXX TODO update XXX
 - **api**: See [dal/README.md](dal/README.md) for API usage
 - **dem**: See [dem/README.md](dem/README.md) for anomaly detection, embeddings, and analytics
 - **norm**: See [norm/README.md](norm/README.md) for entity structures and analysis
-- **ontology-hub**: See [ontology-hub/README.md](ontology-hub/README.md) for knowledge graph operations

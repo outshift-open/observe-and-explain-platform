@@ -43,7 +43,6 @@ RabbitMQ Output Queues
 
 The worker has minimal dependencies:
 - **worker-base**: Base worker framework for RabbitMQ message processing
-- **ontology-hub**: Knowledge graph integration
 - **openai**: OpenAI API client for embeddings (can be extended for other providers)
 
 ## Running the Worker

@@ -29,7 +29,6 @@ COPY workers/embedding-worker /app/workers/embedding-worker
 COPY worker-base /app/worker-base
 COPY dem /app/dem
 COPY api /app/api
-COPY ontology-hub /app/ontology-hub
 
 RUN --mount=type=secret,id=ARTIFACTORY_USERNAME,env=UV_INDEX_OUTSHIFT_PYPI_USERNAME \
     --mount=type=secret,id=ARTIFACTORY_PASSWORD,env=UV_INDEX_OUTSHIFT_PYPI_PASSWORD \

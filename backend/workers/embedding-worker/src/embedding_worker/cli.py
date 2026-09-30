@@ -2,7 +2,7 @@
 #  SPDX-License-Identifier: Apache-2.0
 
 # Load .env BEFORE any other imports so that libraries reading os.environ at
-# import time (e.g. ontology-hub's kg_cli.py) see the correct values.
+# import time see the correct values.
 import os
 
 from dotenv import load_dotenv

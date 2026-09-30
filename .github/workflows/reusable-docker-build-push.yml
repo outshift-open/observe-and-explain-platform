@@ -24,7 +24,7 @@ on:
         required: false
         type: string
         description: "Image repo to use."
-        default: "ghcr.io/agntcy/obs"
+        default: "ghcr.io/outshift-open/oxp"
     secrets:
       github-token:
         description: "github token"
@@ -59,6 +59,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
+          images: ${{ inputs.image-repo }}
           tags: |
             type=raw,value=${{ inputs.image-tag }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
