@@ -55,22 +55,24 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
 
-      - name: Docker metadata
-        id: metadata
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ${{ inputs.image-repo }}
-          tags: |
-            type=raw,value=${{ inputs.image-tag }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
+      - name: Compute tags
+        id: tags
+        run: |
+          {
+            echo "overrides<<EOF"
+            echo "*.tags=${{ inputs.image-repo }}:${{ inputs.image-tag }}"
+            if [ "${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}" = "true" ]; then
+              echo "*.tags+=${{ inputs.image-repo }}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6.10.0
         with:
-          files: |
-            ${{ inputs.bake-file }}
-            ${{ steps.metadata.outputs.bake-file }}
+          files: ${{ inputs.bake-file }}
           targets: ${{ inputs.bake-targets }}
+          set: ${{ steps.tags.outputs.overrides }}
           push: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
           provenance: false
         env:
