@@ -34,6 +34,7 @@
     ] ;
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
+    owl:priorVersion <https://outshift-open.github.io/oxp-ontology/insight/1.0.0-rc0> ;
     owl:versionInfo "1.0.0" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ,
                 <https://outshift-open.github.io/oxp-ontology/analysis> ;
