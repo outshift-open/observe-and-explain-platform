@@ -8,6 +8,9 @@ build-backend = "hatchling.build"
 [project]
 name = "mdt-metrics"
 version = "0.2.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "Core evaluation primitives (Groundedness, IntentRecognition, Relevancy) for Metrics Computation Engine"
 readme = "README.md"

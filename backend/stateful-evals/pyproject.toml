@@ -5,6 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "stateful-evals"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
 description = "Temporal evaluation library (stateful_evals_be) for in-process use"
 readme = "README.md"
 requires-python = ">=3.11"

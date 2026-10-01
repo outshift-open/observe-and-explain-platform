@@ -1,12 +1,16 @@
 [project]
 name = "oxp-lib"
 version = "1.0.0"
-description = "Add your description here"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
+description = "OXP backend workspace aggregating dem, mce, and norm"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "dem[all]",
-    "mce",
+    "oxp-mce",
     "norm",
 ]
 
@@ -42,17 +46,17 @@ members = [
 
 [tool.uv.sources]
 dem = { workspace = true }
-mce = { workspace = true }
+oxp-mce = { workspace = true }
 oxp-api = { workspace = true }
-mce-core = { workspace = true }
-mce-helper = { workspace = true }
-mce-client = { workspace = true }
-mce-legacy = { workspace = true }
-mce-provider-native = { workspace = true }
-mce-provider-sdk = { workspace = true }
-mce-provider-deepeval = { workspace = true }
-mce-provider-opik = { workspace = true }
-mce-provider-ragas = { workspace = true }
+oxp-mce-core = { workspace = true }
+oxp-mce-helper = { workspace = true }
+oxp-mce-client = { workspace = true }
+oxp-mce-legacy = { workspace = true }
+oxp-mce-provider-native = { workspace = true }
+oxp-mce-provider-sdk = { workspace = true }
+oxp-mce-provider-deepeval = { workspace = true }
+oxp-mce-provider-opik = { workspace = true }
+oxp-mce-provider-ragas = { workspace = true }
 norm = { workspace = true }
 norm-worker = { workspace = true }
 hierarchical-grouping-worker = { workspace = true }

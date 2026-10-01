@@ -3,13 +3,17 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mce-client"
+name = "oxp-mce-client"
 version = "0.1.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
 description = "High-level client for the Metrics Computation Engine"
 requires-python = ">=3.13,<3.15"
 dependencies = [
-    "mce-core>=2.0.0rc1",
-    "mce-helper>=0.1.0",
+    "oxp-mce-core>=2.0.0rc1",
+    "oxp-mce-helper>=0.1.0",
     "oxp-api>=0.1.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.0",
@@ -39,5 +43,5 @@ namespaces = true
 "mce.client" = ["schema/*.yaml"]
 
 [tool.uv.sources]
-mce-core = { workspace = true }
-mce-helper = { workspace = true }
+oxp-mce-core = { workspace = true }
+oxp-mce-helper = { workspace = true }

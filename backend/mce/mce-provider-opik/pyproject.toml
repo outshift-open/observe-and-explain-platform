@@ -3,12 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mce-provider-opik"
+name = "oxp-mce-provider-opik"
 version = "0.1.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
 description = "Opik provider package for MCE"
 requires-python = ">=3.13,<3.15"
 dependencies = [
-    "mce-core>=2.0.0rc1",
+    "oxp-mce-core>=2.0.0rc1",
     "opik>=1.8.27",
     "nltk",
     "rouge-score",
@@ -20,4 +24,4 @@ include = ["mce.providers.opik*"]
 namespaces = true
 
 [tool.uv.sources]
-mce-core = { workspace = true }
+oxp-mce-core = { workspace = true }

@@ -8,6 +8,9 @@ build-backend = "hatchling.build"
 [project]
 name = "anomaly-detection-worker"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "Standalone Anomaly Detection worker for identifying outlier sessions within a semantic group"
 readme = "README.md"

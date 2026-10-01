@@ -5,6 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "norm"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
 description = "OTel(ioa_observe) span -> Knowledge Graph normalization."
 requires-python = ">=3.10"
 # oxp-ontology[models] provides the generated KG node/edge Pydantic models

@@ -8,6 +8,9 @@ build-backend = "hatchling.build"
 [project]
 name = "embedding-worker"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "Standalone embedding worker for processing telemetry sessions with vector embeddings"
 readme = "README.md"
@@ -32,7 +35,7 @@ dependencies = [
 dem = { workspace = true }
 worker-base = { workspace = true }
 oxp-api = { workspace = true }
-mce-core = { workspace = true }
+oxp-mce-core = { workspace = true }
 
 [project.optional-dependencies]
 dev = [
