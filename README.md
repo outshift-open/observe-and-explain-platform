@@ -45,4 +45,4 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for guideli
 
 ## License
 
-Licensed under the terms in [LICENSE](LICENSE).
+Licensed under the Apache License 2.0 — see [LICENSE](LICENSE) for the full text.
