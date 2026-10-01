@@ -1,6 +1,6 @@
 # Release Process
 
-This document describes the complete release process for `oxp-ontology`.
+This document describes the complete release process for the `ontology/` component of this repo.
 
 ## Overview
 
@@ -41,7 +41,7 @@ Release Candidates are for testing iterations before stable release.
 ### 1. Verify Current State
 
 ```bash
-cd oxp-ontology
+cd observe-and-explain-platform/ontology
 git checkout feat/metrics-ontology  # or your feature branch
 git pull origin feat/metrics-ontology
 
@@ -82,7 +82,7 @@ After merge, GitHub Actions automatically:
   - Adds commit SHA to version: `1.0.0-rc0+g<sha>`
   - Deploys to GitHub Pages with version in footer
 
-**Result**: Docs available at `https://outshift-open.github.io/oxp-ontology/`
+**Result**: Docs available at `https://outshift-open.github.io/observe-and-explain-platform/`
 
 ### 5. (Optional) Publish RC Package
 
@@ -125,7 +125,7 @@ Use this process when RC testing is complete and you're ready for a stable relea
 ### 2. Finalize Version
 
 ```bash
-cd oxp-ontology
+cd observe-and-explain-platform/ontology
 git checkout main
 git pull origin main
 
@@ -186,7 +186,7 @@ git push origin v1.1.0
 
 1. Check GitHub Releases: `https://github.com/outshift-open/observe-and-explain-platform/releases`
 2. Verify artifacts are attached
-3. Check GitHub Pages docs have clean version: `https://outshift-open.github.io/oxp-ontology/`
+3. Check GitHub Pages docs have clean version: `https://outshift-open.github.io/observe-and-explain-platform/`
 
 ### 7. (Optional) Publish to PyPI
 

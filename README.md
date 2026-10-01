@@ -37,7 +37,7 @@ For a fully local stack, see the [backend Docker Compose setup](backend/README.m
 ## Documentation
 
 - **Backend architecture & components**: [backend/docs/index.md](backend/docs/index.md) — architecture overview, pipelines, [component docs](backend/docs/components/index.md), and [worker docs](backend/docs/workers/index.md).
-- **Ontology**: [ontology/index.md](ontology/index.md), also published at [outshift-open.github.io/oxp-ontology](https://outshift-open.github.io/oxp-ontology/)
+- **Ontology**: [ontology/index.md](ontology/index.md), also published at [outshift-open.github.io/observe-and-explain-platform](https://outshift-open.github.io/observe-and-explain-platform/)
 
 ## Contributing
 

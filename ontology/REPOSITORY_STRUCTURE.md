@@ -1,7 +1,7 @@
 # OXP Ontology Package Structure
 
 ```
-oxp-ontology/
+ontology/
 │
 ├── README.md                     # Main repository documentation
 ├── REPOSITORY_STRUCTURE.md       # This file
@@ -87,10 +87,14 @@ task version-bump-rc
 
 ## Documentation Websites
 
-- **Main docs**: https://outshift-open.github.io/oxp-ontology/
-- **MAS Widoco**: https://outshift-open.github.io/oxp-ontology/mas/widoco/
-- **MAS WebVOWL**: https://outshift-open.github.io/oxp-ontology/mas/webvowl/
-- **Metrics Widoco**: https://outshift-open.github.io/oxp-ontology/metrics/widoco/
-- **Metrics WebVOWL**: https://outshift-open.github.io/oxp-ontology/metrics/webvowl/
+- **Main docs**: https://outshift-open.github.io/observe-and-explain-platform/
+- **MAS Widoco**: https://outshift-open.github.io/observe-and-explain-platform/mas/widoco/
+- **MAS WebVOWL**: https://outshift-open.github.io/observe-and-explain-platform/mas/webvowl/
+- **Metrics Widoco**: https://outshift-open.github.io/observe-and-explain-platform/metrics/widoco/
+- **Metrics WebVOWL**: https://outshift-open.github.io/observe-and-explain-platform/metrics/webvowl/
+- **Semantic Widoco**: https://outshift-open.github.io/observe-and-explain-platform/semantic/widoco/
+- **Analysis Widoco**: https://outshift-open.github.io/observe-and-explain-platform/analysis/widoco/
+- **Insight Widoco**: https://outshift-open.github.io/observe-and-explain-platform/insight/widoco/
+- **Backend docs**: https://outshift-open.github.io/observe-and-explain-platform/backend/
 
 See [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md) for how these are generated.

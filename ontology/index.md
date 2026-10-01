@@ -1,21 +1,21 @@
 # OXP Ontology Documentation
 
-🌐 **Live Documentation**: [https://outshift-open.github.io/oxp-ontology/](https://outshift-open.github.io/oxp-ontology/)
+🌐 **Live Documentation**: [https://outshift-open.github.io/observe-and-explain-platform/](https://outshift-open.github.io/observe-and-explain-platform/)
 
-The deployed site currently covers two of the five bundled ontologies — **MAS** and **Metrics** — each with three documentation formats.
+The deployed site covers all five bundled ontologies — **MAS**, **Metrics**, **Semantic**, **Analysis**, and **Insight** — each with three documentation formats, plus the [backend documentation](https://outshift-open.github.io/observe-and-explain-platform/backend/).
 
 ## 📚 Documentation Formats
 
-### 1. [MAS Widoco](https://outshift-open.github.io/oxp-ontology/mas/widoco/index-en.html) / [Metrics Widoco](https://outshift-open.github.io/oxp-ontology/metrics/widoco/index-en.html) (Standard)
+Each ontology (`mas`, `metrics`, `semantic`, `analysis`, `insight`) gets its own set, at `<ontology>/widoco/`, `<ontology>/webvowl/`, and `<ontology>/lode/` — e.g. [MAS Widoco](https://outshift-open.github.io/observe-and-explain-platform/mas/widoco/index-en.html):
+
+### 1. Widoco (Standard)
 W3C-compliant OWL documentation with cross-references and namespace details.
 
-### 2. [MAS WebVOWL](https://outshift-open.github.io/oxp-ontology/mas/webvowl/) / [Metrics WebVOWL](https://outshift-open.github.io/oxp-ontology/metrics/webvowl/) (Interactive)
+### 2. WebVOWL (Interactive)
 Interactive graph visualization: zoom, pan, node filtering, and visual exploration of the ontology structure.
 
-### 3. [MAS LODE](https://outshift-open.github.io/oxp-ontology/mas/lode/) / [Metrics LODE](https://outshift-open.github.io/oxp-ontology/metrics/lode/) (Lightweight)
+### 3. LODE (Lightweight)
 Minimal-styling, fast-loading HTML documentation.
-
-`semantic`, `analysis`, and `insight` ontologies are bundled in the Python package and validated in CI, but aren't published to this site yet.
 
 ## 🚀 Quick Start
 
@@ -43,7 +43,7 @@ python3 -m http.server 8000 --directory docs
 │   ├── generate_lode_html.py             # Lightweight LODE-style HTML
 │   └── generate_all_docs.sh              # Local mas-only preview build
 └── .github/workflows/
-    └── deploy-docs-multi.yml   # Auto-deploy to GitHub Pages (mas + metrics)
+    └── deploy-docs-multi.yml   # Auto-deploy to GitHub Pages (all ontologies)
 ```
 
 See [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) for the full breakdown and [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md) for how the deployment pipeline works.
