@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DOCS_BASE_URL: https://outshift-open.github.io/oxp-ontology
+  DOCS_BASE_URL: https://outshift-open.github.io/observe-and-explain-platform
 
 jobs:
   build:
@@ -61,7 +61,7 @@ jobs:
       
       - name: Install Python dependencies
         run: |
-          pip install rdflib
+          pip install rdflib mkdocs mkdocs-material
       
       - name: Get version info
         id: version
@@ -82,47 +82,37 @@ jobs:
       
       - name: Create output directory structure
         run: |
-          mkdir -p ontology-docs/{mas,metrics}/{widoco,webvowl,lode}
-      
-      - name: Generate MAS Ontology Documentation
+          mkdir -p ontology-docs/{mas,metrics,semantic,analysis,insight}/{widoco,webvowl,lode}
+
+      - name: Generate Ontology Documentation
         run: |
-          echo "📚 Generating MAS Ontology docs..."
-          
-          # Widoco
-          java -jar widoco.jar -ontFile ontology/src/oxp_ontology/mas-ontology.ttl \
-            -outFolder ontology-docs/mas/widoco -rewriteAll \
-            -includeAnnotationProperties -htaccess -webVowl -licensius
-          echo '<meta http-equiv="refresh" content="0; url=index-en.html">' > ontology-docs/mas/widoco/index.html
-          
-          # WebVOWL
-          python3 ontology/scripts/generate_webvowl_json_generic.py \
-            ontology/src/oxp_ontology/mas-ontology.ttl \
-            ontology-docs/mas/webvowl/data/mas-ontology.json \
-            "MAS Ontology" \
-            "${{ env.DOCS_BASE_URL }}/mas"
-          
-          # LODE
-          python3 ontology/scripts/generate_lode_html.py ontology/src/oxp_ontology/mas-ontology.ttl ontology-docs/mas/lode/index.html || echo "LODE generation skipped"
-      
-      - name: Generate Metrics Ontology Documentation
-        run: |
-          echo "📚 Generating Metrics Ontology docs..."
-          
-          # Widoco
-          java -jar widoco.jar -ontFile ontology/src/oxp_ontology/metrics-ontology.ttl \
-            -outFolder ontology-docs/metrics/widoco -rewriteAll \
-            -includeAnnotationProperties -htaccess -webVowl -licensius
-          echo '<meta http-equiv="refresh" content="0; url=index-en.html">' > ontology-docs/metrics/widoco/index.html
-          
-          # WebVOWL
-          python3 ontology/scripts/generate_webvowl_json_generic.py \
-            ontology/src/oxp_ontology/metrics-ontology.ttl \
-            ontology-docs/metrics/webvowl/data/metrics-ontology.json \
-            "Metrics Ontology" \
-            "${{ env.DOCS_BASE_URL }}/metrics"
-          
-          # LODE
-          python3 scripts/generate_lode_html.py src/oxp_ontology/metrics-ontology.ttl ontology-docs/metrics/lode/index.html || echo "LODE generation skipped"
+          declare -A ONTOLOGY_TITLES=(
+            [mas]="MAS Ontology"
+            [metrics]="Metrics Ontology"
+            [semantic]="Semantic Ontology"
+            [analysis]="Analysis Ontology"
+            [insight]="Insight Ontology"
+          )
+
+          for ont in mas metrics semantic analysis insight; do
+            echo "📚 Generating ${ONTOLOGY_TITLES[$ont]} docs..."
+
+            # Widoco
+            java -jar widoco.jar -ontFile ontology/src/oxp_ontology/${ont}-ontology.ttl \
+              -outFolder ontology-docs/$ont/widoco -rewriteAll \
+              -includeAnnotationProperties -htaccess -webVowl -licensius
+            echo '<meta http-equiv="refresh" content="0; url=index-en.html">' > ontology-docs/$ont/widoco/index.html
+
+            # WebVOWL
+            python3 ontology/scripts/generate_webvowl_json_generic.py \
+              ontology/src/oxp_ontology/${ont}-ontology.ttl \
+              ontology-docs/$ont/webvowl/data/${ont}-ontology.json \
+              "${ONTOLOGY_TITLES[$ont]}" \
+              "${{ env.DOCS_BASE_URL }}/$ont"
+
+            # LODE
+            python3 ontology/scripts/generate_lode_html.py ontology/src/oxp_ontology/${ont}-ontology.ttl ontology-docs/$ont/lode/index.html || echo "LODE generation skipped"
+          done
       
       - name: Setup WebVOWL (shared instance)
         run: |
@@ -143,7 +133,7 @@ jobs:
           
           # Copy built WebVOWL to each ontology folder and customize default ontology
           cd ..
-          for ont in mas metrics; do
+          for ont in mas metrics semantic analysis insight; do
             cp -r WebVOWL-1.1.6/deploy/* ontology-docs/$ont/webvowl/
             
             # Patch the default JSON name in the built JavaScript file
@@ -153,7 +143,48 @@ jobs:
           done
           
           rm -rf WebVOWL-1.1.6 1.1.6.tar.gz
-      
+
+      - name: Build Backend Documentation (MkDocs)
+        run: |
+          echo "📚 Building backend documentation..."
+          cat > mkdocs.yml << 'EOF'
+          site_name: OXP Backend Documentation
+          site_url: ${{ env.DOCS_BASE_URL }}/backend/
+          docs_dir: backend/docs
+          site_dir: ontology-docs/backend
+          theme:
+            name: material
+          nav:
+            - Home: index.md
+            - Architecture:
+                - Overview: architecture/overview.md
+                - Pipelines: architecture/pipelines.md
+            - Components:
+                - Overview: components/index.md
+                - API: components/api.md
+                - Analysis: components/analysis.md
+                - MCE: components/mce.md
+                - Norm: components/norm.md
+                - Worker Base: components/worker-base.md
+                - Intelligence Catalog: components/intelligence-catalog.md
+                - Stateful Evals: components/stateful-evals.md
+            - Workers:
+                - Overview: workers/index.md
+                - Analysis Worker: workers/analysis-worker.md
+                - Anomaly Detection Worker: workers/anomaly-detection-worker.md
+                - Consistency Worker: workers/consistency-worker.md
+                - Embedding Worker: workers/embedding-worker.md
+                - Grouping Worker: workers/grouping-worker.md
+                - Hierarchical Grouping Worker: workers/hierarchical-grouping-worker.md
+                - Intelligence Worker: workers/intelligence-worker.md
+                - MCE Worker: workers/mce-worker.md
+                - Norm Worker: workers/norm-worker.md
+                - Normal Behaviour Worker: workers/normal-behaviour-worker.md
+                - Stateful Eval Worker: workers/stateful-eval-worker.md
+          EOF
+          mkdocs build -f mkdocs.yml
+          rm -f mkdocs.yml
+
       - name: Create main index page
         run: |
           cat > ontology-docs/index.html << 'EOF'
@@ -279,8 +310,60 @@ jobs:
                               <a href="metrics/lode/" class="doc-link">📄 LODE (Lightweight)</a>
                           </div>
                       </div>
+
+                      <div class="ontology-card">
+                          <h2>Semantic Ontology <span class="badge">Embedding</span></h2>
+                          <div class="description">
+                              Semantic embedding layer for MAS trajectories. Defines Embedding classes
+                              and State/Execution to Embedding links.
+                          </div>
+                          <div class="doc-links">
+                              <a href="semantic/widoco/" class="doc-link">📖 Widoco Documentation</a>
+                              <a href="semantic/webvowl/index.html#url=data/semantic-ontology.json" class="doc-link">🎨 WebVOWL Visualization</a>
+                              <a href="semantic/lode/" class="doc-link">📄 LODE (Lightweight)</a>
+                          </div>
+                      </div>
+
+                      <div class="ontology-card">
+                          <h2>Analysis Ontology <span class="badge">Analytics</span></h2>
+                          <div class="description">
+                              Post-hoc analytical layer for the MAS execution KG: group-scoped analysis
+                              reports (consistency, anomaly, normal behaviour) anchored to execution nodes.
+                          </div>
+                          <div class="doc-links">
+                              <a href="analysis/widoco/" class="doc-link">📖 Widoco Documentation</a>
+                              <a href="analysis/webvowl/index.html#url=data/analysis-ontology.json" class="doc-link">🎨 WebVOWL Visualization</a>
+                              <a href="analysis/lode/" class="doc-link">📄 LODE (Lightweight)</a>
+                          </div>
+                      </div>
+
+                      <div class="ontology-card">
+                          <h2>Insight Ontology <span class="badge">Analytics</span></h2>
+                          <div class="description">
+                              Rendered, catalog-templated insights attached to KG nodes (MAS, Agent,
+                              Session, SemanticGroup), produced by the intelligence-worker.
+                          </div>
+                          <div class="doc-links">
+                              <a href="insight/widoco/" class="doc-link">📖 Widoco Documentation</a>
+                              <a href="insight/webvowl/index.html#url=data/insight-ontology.json" class="doc-link">🎨 WebVOWL Visualization</a>
+                              <a href="insight/lode/" class="doc-link">📄 LODE (Lightweight)</a>
+                          </div>
+                      </div>
                   </div>
-                  
+
+                  <div style="margin-top: 56px;">
+                      <h2 style="font-size: 28px; font-weight: 600; margin-bottom: 16px; color: #24292f;">Platform Documentation</h2>
+                      <div class="ontology-card">
+                          <div class="description">
+                              Architecture overview, core components (API, Analysis, MCE, Norm, ...), and the
+                              RabbitMQ-driven analysis workers that make up the OXP backend.
+                          </div>
+                          <div class="doc-links">
+                              <a href="backend/" class="doc-link">📘 Backend Documentation</a>
+                          </div>
+                      </div>
+                  </div>
+
                   <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #d0d7de; text-align: center; color: #57606a; font-size: 14px;">
                       <p>Version: <code>${{ steps.version.outputs.full }}</code> • View on <a href="${{ github.server_url }}/${{ github.repository }}" style="color: #0969da;">GitHub</a></p>
                   </div>

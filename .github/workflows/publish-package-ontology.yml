@@ -20,8 +20,6 @@ on:
   push:
     tags:
       - 'ontology-v*'
-    branches:
-      - main
 
 permissions:
   contents: write

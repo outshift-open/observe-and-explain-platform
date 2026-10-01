@@ -2,7 +2,7 @@
 
 `norm` turns `ioa_observe`/observe-sdk OTel spans into ontology-backed KG
 documents and validates them against
-[oxp-ontology](https://outshift-open.github.io/oxp-ontology/) (namespace
+[oxp-ontology](https://outshift-open.github.io/observe-and-explain-platform/) (namespace
 `https://outshift-open.github.io/oxp-ontology/mas#`).
 
 ## Install

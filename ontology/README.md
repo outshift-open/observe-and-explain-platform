@@ -4,14 +4,17 @@
 
 ## 📖 Documentation
 
-The complete documentation for the OXP Ontology Collection is available at: **[https://outshift-open.github.io/oxp-ontology/](https://outshift-open.github.io/oxp-ontology/)**
+The complete documentation for the OXP Ontology Collection is available at: **[https://outshift-open.github.io/observe-and-explain-platform/](https://outshift-open.github.io/observe-and-explain-platform/)**
 
 | Ontology | Description | Documentation | Visualization |
 |----------|-------------|---------------|----------------|
-| **MAS** | Core execution schema: structural types (MAS, Agent, LLM, Tool, Processing), their execution instances, and the normalized State/Transition trajectory | [Widoco](https://outshift-open.github.io/oxp-ontology/mas/widoco/) | [WebVOWL](https://outshift-open.github.io/oxp-ontology/mas/webvowl/) |
-| **Metrics** | Metric/MetricResult definition-observation split, score nodes, templates | [Widoco](https://outshift-open.github.io/oxp-ontology/metrics/widoco/) | [WebVOWL](https://outshift-open.github.io/oxp-ontology/metrics/webvowl/) |
+| **MAS** | Core execution schema: structural types (MAS, Agent, LLM, Tool, Processing), their execution instances, and the normalized State/Transition trajectory | [Widoco](https://outshift-open.github.io/observe-and-explain-platform/mas/widoco/) | [WebVOWL](https://outshift-open.github.io/observe-and-explain-platform/mas/webvowl/) |
+| **Metrics** | Metric/MetricResult definition-observation split, score nodes, templates | [Widoco](https://outshift-open.github.io/observe-and-explain-platform/metrics/widoco/) | [WebVOWL](https://outshift-open.github.io/observe-and-explain-platform/metrics/webvowl/) |
+| **Semantic** | Embedding layer linking State/Execution nodes to embeddings | [Widoco](https://outshift-open.github.io/observe-and-explain-platform/semantic/widoco/) | [WebVOWL](https://outshift-open.github.io/observe-and-explain-platform/semantic/webvowl/) |
+| **Analysis** | Group-scoped analysis reports (consistency, anomaly, normal behaviour) | [Widoco](https://outshift-open.github.io/observe-and-explain-platform/analysis/widoco/) | [WebVOWL](https://outshift-open.github.io/observe-and-explain-platform/analysis/webvowl/) |
+| **Insight** | Rendered, catalog-templated insights attached to a target KG node | [Widoco](https://outshift-open.github.io/observe-and-explain-platform/insight/widoco/) | [WebVOWL](https://outshift-open.github.io/observe-and-explain-platform/insight/webvowl/) |
 
-`semantic`, `analysis`, and `insight` are bundled in the Python package and validated in CI, but don't have a published Widoco/WebVOWL site yet — only `mas` and `metrics` are deployed today. See [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md).
+See [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md) for how these are built and deployed.
 
 ## 🔗 Namespace
 
@@ -23,12 +26,12 @@ All five bundled ontologies share a single namespace — there's no separate pre
 
 ## 📥 Download
 
-- **MAS**: [mas-ontology.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/mas-ontology.ttl)
-- **Semantic (embedding layer)**: [semantic-ontology.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/semantic-ontology.ttl)
-- **Metrics**: [metrics-ontology.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/metrics-ontology.ttl)
-- **Analysis**: [analysis-ontology.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/analysis-ontology.ttl)
-- **Insight**: [insight-ontology.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/insight-ontology.ttl)
-- **Custom SHACL shapes**: [mas-shapes-custom.ttl](https://raw.githubusercontent.com/outshift-open/oxp-ontology/main/src/oxp_ontology/mas-shapes-custom.ttl) — the auto-generated `mas-shapes.ttl` is not committed (see [Development](#️-development))
+- **MAS**: [mas-ontology.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/mas-ontology.ttl)
+- **Semantic (embedding layer)**: [semantic-ontology.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/semantic-ontology.ttl)
+- **Metrics**: [metrics-ontology.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/metrics-ontology.ttl)
+- **Analysis**: [analysis-ontology.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/analysis-ontology.ttl)
+- **Insight**: [insight-ontology.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/insight-ontology.ttl)
+- **Custom SHACL shapes**: [mas-shapes-custom.ttl](https://raw.githubusercontent.com/outshift-open/observe-and-explain-platform/main/ontology/src/oxp_ontology/mas-shapes-custom.ttl) — the auto-generated `mas-shapes.ttl` is not committed (see [Development](#️-development))
 
 ## Repository Structure
 
@@ -184,7 +187,7 @@ rapper -i turtle src/oxp_ontology/mas-ontology.ttl > /dev/null   # Raptor RDF pa
 ./scripts/generate_all_docs.sh
 ```
 
-This generates a single-ontology Widoco/WebVOWL/LODE build for `mas-ontology.ttl` under `docs/`, useful for a quick local preview. It is **not** what CI publishes — the deployed site is built per-ontology (currently `mas` and `metrics`) by `.github/workflows/deploy-docs-multi.yml`. See [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md) for the full picture.
+This generates a single-ontology Widoco/WebVOWL/LODE build for `mas-ontology.ttl` under `docs/`, useful for a quick local preview. It is **not** what CI publishes — the deployed site is built per-ontology (`mas`, `metrics`, `semantic`, `analysis`, and `insight`) by `.github/workflows/deploy-docs-multi.yml`. See [DOCS_DEPLOYMENT.md](DOCS_DEPLOYMENT.md) for the full picture.
 
 ### Legacy visualization tools
 

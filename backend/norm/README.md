@@ -5,7 +5,7 @@ platform.
 
 `norm` converts telemetry from the observe-sdk (`ioa_observe`) into validated
 KG documents (`{"nodes": [...], "edges": [...]}`) that conform to
-[oxp-ontology](https://outshift-open.github.io/oxp-ontology/) (namespace
+[oxp-ontology](https://outshift-open.github.io/observe-and-explain-platform/) (namespace
 `https://outshift-open.github.io/oxp-ontology/mas#`). It is the normalization
 layer used by **norm-worker**.
 

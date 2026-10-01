@@ -2,7 +2,7 @@
 
 OTel (`ioa_observe`) span → knowledge-graph normalization for the MAS platform: converts raw
 telemetry into validated KG documents (`{"nodes": [...], "edges": [...]}`) that conform to
-[oxp-ontology](https://outshift-open.github.io/oxp-ontology/) (namespace
+[oxp-ontology](https://outshift-open.github.io/observe-and-explain-platform/) (namespace
 `https://outshift-open.github.io/oxp-ontology/mas#`).
 
 **Source:** [`norm`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/norm)
