@@ -32,7 +32,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    
+    defaults:
+      run:
+        working-directory: ontology
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -163,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: python-package-dev-${{ github.sha }}
-          path: dist/*
+          path: ontology/dist/*
           retention-days: 5
 
       - name: Install uv
@@ -176,6 +179,7 @@ jobs:
         if: github.repository == 'outshift-open/observe-and-explain-platform' && steps.version.outputs.is_rc == 'false' && steps.version.outputs.is_dev_build == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          packages-dir: ontology/dist
           skip-existing: true
 
       - name: Summary

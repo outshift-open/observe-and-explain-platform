@@ -16,7 +16,7 @@
     dcterms:description "Semantic embedding layer for MAS trajectories. Defines Embedding classes and State/Execution to Embedding links."@en ;
     dcterms:created "2026-07-22"^^xsd:date ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/embedding/1.0.0-rc0> ;
-    owl:versionInfo "1.0.0" ;
+    owl:versionInfo "0.0.1" ;
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> .
