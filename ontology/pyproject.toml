@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oxp-ontology"
-version = "1.0.0"
+version = "0.0.1"
 description = "Single Source of Truth for OXP MAS Ontology"
 readme = "README.md"
 requires-python = ">=3.9"

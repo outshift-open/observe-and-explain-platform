@@ -46,7 +46,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/analysis/1.0.0-rc0> ;
-    owl:versionInfo "1.0.0" ;
+    owl:versionInfo "0.0.1" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
     rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft. v1.1.0: Insight split out to insight-ontology.ttl."@en .
 
