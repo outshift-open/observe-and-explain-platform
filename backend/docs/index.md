@@ -12,6 +12,7 @@ The rest of this documentation provides a detailed view of the different pieces 
 
 ## Where to start
 
+- **[Instrument your MAS](instrumentation.md)** — send agent traces to the collector with the AGNTCY Observe SDK.
 - **[Architecture overview](architecture/overview.md)** — how the pieces fit together.
 - **[Components](components/index.md)** — the core libraries and services (API, Analysis, MCE, norm, ...).
 - **[Workers](workers/index.md)** — the standalone RabbitMQ-driven analysis workers.

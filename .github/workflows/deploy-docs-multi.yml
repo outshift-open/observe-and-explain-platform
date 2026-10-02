@@ -185,7 +185,7 @@ jobs:
           mkdocs build -f mkdocs.yml
           rm -f mkdocs.yml
 
-      - name: Create main index page
+      - name: Create documentation landing pages
         run: |
           cat > ontology-docs/index.html << 'EOF'
           <!DOCTYPE html>
@@ -193,7 +193,7 @@ jobs:
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>OXP Ontology Collection</title>
+              <title>Observe and eXplain Platform (OXP)</title>
               <style>
                   * { margin: 0; padding: 0; box-sizing: border-box; }
                   body {
@@ -211,6 +211,148 @@ jobs:
                       border-radius: 12px;
                       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
                   }
+                  h1 {
+                      font-size: 48px;
+                      font-weight: 700;
+                      margin-bottom: 16px;
+                      color: #0969da;
+                  }
+                  .subtitle {
+                      font-size: 20px;
+                      color: #57606a;
+                      margin-bottom: 40px;
+                  }
+                  .section-grid {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                      gap: 32px;
+                      margin-top: 48px;
+                  }
+                  .section-card {
+                      border: 2px solid #d0d7de;
+                      border-radius: 12px;
+                      padding: 32px;
+                      background: #ffffff;
+                  }
+                  .section-card h2 {
+                      font-size: 28px;
+                      font-weight: 600;
+                      margin-bottom: 12px;
+                      color: #24292f;
+                  }
+                  .section-card .description {
+                      font-size: 15px;
+                      color: #57606a;
+                      margin-bottom: 24px;
+                      line-height: 1.6;
+                  }
+                  .doc-links {
+                      display: flex;
+                      flex-direction: column;
+                      gap: 12px;
+                  }
+                  .doc-link {
+                      display: block;
+                      padding: 12px 16px;
+                      background: #f6f8fa;
+                      border-radius: 6px;
+                      text-decoration: none;
+                      color: #0969da;
+                      font-weight: 500;
+                      transition: all 0.2s;
+                  }
+                  .doc-link:hover {
+                      background: #ddf4ff;
+                      transform: translateX(4px);
+                  }
+                  .badge {
+                      display: inline-block;
+                      background: #ddf4ff;
+                      color: #0969da;
+                      padding: 4px 12px;
+                      border-radius: 12px;
+                      font-size: 12px;
+                      font-weight: 600;
+                      margin-left: 8px;
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>Observe and eXplain Platform</h1>
+                  <div class="subtitle">
+                      The Observe and eXplain Platform (OXP) is a modular platform for agentic systems,
+                      designed to provide observability, analysis and explainability on how agentic systems behave.
+                      <br>
+                      It relies on a Multi-Agents System (MAS) execution ontology, that allows to model the execution of a MAS
+                      from the OpenTelemetry spans emited during the session execution.
+                  </div>
+
+                  <div class="section-grid">
+                      <div class="section-card">
+                          <h2>Ontology <span class="badge">5 ontologies</span></h2>
+                          <div class="description">
+                              RDF/OWL vocabulary for MAS telemetry: MAS, Metrics, Semantic, Analysis, and
+                              Insight ontologies, plus the SHACL shapes used to validate knowledge-graph
+                              instances against them.
+                          </div>
+                          <div class="doc-links">
+                              <a href="ontologies.html" class="doc-link">📚 Explore Ontologies</a>
+                          </div>
+                      </div>
+
+                      <div class="section-card">
+                          <h2>Backend <span class="badge">Architecture</span></h2>
+                          <div class="description">
+                              Architecture overview, core components (API, Analysis, MCE, Norm, ...), and the
+                              RabbitMQ-driven analysis workers that make up the OXP backend.
+                          </div>
+                          <div class="doc-links">
+                              <a href="backend/" class="doc-link">📘 Backend Documentation</a>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #d0d7de; text-align: center; color: #57606a; font-size: 14px;">
+                      <p>Version: <code>${{ steps.version.outputs.full }}</code> • View on <a href="${{ github.server_url }}/${{ github.repository }}" style="color: #0969da;">GitHub</a></p>
+                  </div>
+              </div>
+          </body>
+          </html>
+          EOF
+
+          cat > ontology-docs/ontologies.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>OXP MAS Execution Ontology</title>
+              <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                      line-height: 1.6;
+                      color: #24292f;
+                      background: #f6f8fa;
+                      padding: 40px 20px;
+                  }
+                  .container {
+                      max-width: 1200px;
+                      margin: 0 auto;
+                      background: white;
+                      padding: 60px;
+                      border-radius: 12px;
+                      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                  }
+                  .back-link {
+                      display: inline-block;
+                      margin-bottom: 24px;
+                      color: #0969da;
+                      text-decoration: none;
+                      font-weight: 500;
+                  }
+                  .back-link:hover { text-decoration: underline; }
                   h1 {
                       font-size: 48px;
                       font-weight: 700;
@@ -279,11 +421,12 @@ jobs:
           </head>
           <body>
               <div class="container">
-                  <h1>🧠 OXP Ontology Collection</h1>
+                  <a href="index.html" class="back-link">← Back to OXP Documentation</a>
+                  <h1>OXP MAS Execution Ontology</h1>
                   <div class="subtitle">
-                      Multi-Agent System telemetry ontologies for governance and observability
+                      Multi-Agent System execution ontology for observability and explainability.
                   </div>
-                  
+
                   <div class="ontologies-grid">
                       <div class="ontology-card">
                           <h2>MAS Ontology <span class="badge">Core</span></h2>
@@ -297,7 +440,7 @@ jobs:
                               <a href="mas/lode/" class="doc-link">📄 LODE (Lightweight)</a>
                           </div>
                       </div>
-                      
+
                       <div class="ontology-card">
                           <h2>Metrics Ontology <span class="badge">Governance</span></h2>
                           <div class="description">
@@ -351,19 +494,6 @@ jobs:
                       </div>
                   </div>
 
-                  <div style="margin-top: 56px;">
-                      <h2 style="font-size: 28px; font-weight: 600; margin-bottom: 16px; color: #24292f;">Platform Documentation</h2>
-                      <div class="ontology-card">
-                          <div class="description">
-                              Architecture overview, core components (API, Analysis, MCE, Norm, ...), and the
-                              RabbitMQ-driven analysis workers that make up the OXP backend.
-                          </div>
-                          <div class="doc-links">
-                              <a href="backend/" class="doc-link">📘 Backend Documentation</a>
-                          </div>
-                      </div>
-                  </div>
-
                   <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #d0d7de; text-align: center; color: #57606a; font-size: 14px;">
                       <p>Version: <code>${{ steps.version.outputs.full }}</code> • View on <a href="${{ github.server_url }}/${{ github.repository }}" style="color: #0969da;">GitHub</a></p>
                   </div>
@@ -371,7 +501,7 @@ jobs:
           </body>
           </html>
           EOF
-      
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
