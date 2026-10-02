@@ -167,6 +167,8 @@ class ConsistencyWrapper:
                 mean=report.consistency_result.mean,
                 confidenceInterval=json.dumps(report.consistency_result.confidence_interval),
                 confidenceIndicator=report.consistency_result.confidence_indicator,
+                ofSemanticGroup=group_id,
+                **({"aboutMetric": metadata.get("metric", "")} if report.layer == "metric" else {}),
             )
             if not kg_dal.ingest_consistency_report(
                 group_id=group_id, group_hash=node_hash, consistency_report=node, source=report
