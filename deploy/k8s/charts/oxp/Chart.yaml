@@ -5,8 +5,8 @@ maintainers:
   - name: tfeltin
     email: tfeltin@cisco.com
 type: application
-version: 1.0.1
-appVersion: "1.0.1"
+version: 1.0.0
+appVersion: "1.0.0"
 dependencies:
   - name: oxp-api
     alias: api
