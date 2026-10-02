@@ -143,8 +143,6 @@ class AnomalyDetectionWrapper:
                 dataType=report.layer,
                 scores=json.dumps(report.scores),
                 threshold=threshold,
-                ofSemanticGroup=group_id,
-                **({"aboutMetric": metric_name} if report.layer == "metric" else {}),
             )
             if not kg_dal.ingest_anomaly_report(
                 group_id=group_id,

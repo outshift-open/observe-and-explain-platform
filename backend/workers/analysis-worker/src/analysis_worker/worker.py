@@ -409,14 +409,6 @@ class AnalysisWorker(BaseWorker):
                     centroid=json.dumps(report.normal_behaviour.centroid),
                     representativeSample=json.dumps(representative_sample) if representative_sample is not None else "",
                     representativeProcessedSample=representative_processed_sample or "",
-                    # SemanticAnalysisReport.ofSemanticGroup is required (sh:minCount 1)
-                    # and AnalysisElement.aboutMetric is conditionally required when
-                    # dataType == "metric" -- neither is a declared pydantic field
-                    # (they're ontology object-property edges), but KGBase allows
-                    # extra fields and verify_kg_object() picks up any extra field
-                    # matching a real ontology property name.
-                    ofSemanticGroup=msg.group_id,
-                    **({"aboutMetric": metadata.get("metric", "")} if report.layer == "metric" else {}),
                 )
                 if not self.db_handler.ingest_normal_behaviour_report(
                     group_id=msg.group_id,
