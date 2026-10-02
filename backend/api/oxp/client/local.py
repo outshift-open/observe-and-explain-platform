@@ -89,12 +89,17 @@ class LocalClient(
             self.metrics_provider = OXPMetricsProvider(db=self.db)
 
     @classmethod
-    def from_settings(cls, *, persist_metrics: bool = False) -> LocalClient:
+    def from_settings(
+        cls, *, persist_metrics: bool = False, neo4j: Optional[Connector]
+    ) -> LocalClient:
         """Create a client with owned connections from API-library settings.
 
         Read spans from ClickHouse. When requested, persist metrics through the
         Neo4j provider. Use as a context manager or call close() after use.
         Explicitly injected connectors in LocalClient(db=...) remain caller-owned.
+        Pass neo4j to reuse a shared connector, such as the one from
+        oxp.dependencies.get_neo4j_connector(), instead of opening a new one; it
+        stays caller-owned and close() leaves it open.
         """
         from oxp.connectors.clickhouse import ClickHouseConnector
         from oxp.core.config import settings
@@ -110,17 +115,20 @@ class LocalClient(
             resources.callback(db.close)
             provider = None
             if persist_metrics:
-                from oxp.connectors.neo4j import Neo4JConnector
                 from oxp.providers import OXPMetricsProvider
 
-                kg = Neo4JConnector(
-                    host=settings.NEO4J_HOST,
-                    port=settings.NEO4J_PORT,
-                    username=settings.NEO4J_USERNAME,
-                    password=settings.NEO4J_PASSWORD,
-                    database=settings.NEO4J_DATABASE,
-                )
-                resources.callback(kg.close)
+                kg = neo4j
+                if kg is None:
+                    from oxp.connectors.neo4j import Neo4JConnector
+
+                    kg = Neo4JConnector(
+                        host=settings.NEO4J_HOST,
+                        port=settings.NEO4J_PORT,
+                        username=settings.NEO4J_USERNAME,
+                        password=settings.NEO4J_PASSWORD,
+                        database=settings.NEO4J_DATABASE,
+                    )
+                    resources.callback(kg.close)
                 provider = OXPMetricsProvider(db=kg)
             client = cls(db=db, metrics_provider=provider)
             client._owned_resources = resources.pop_all()
