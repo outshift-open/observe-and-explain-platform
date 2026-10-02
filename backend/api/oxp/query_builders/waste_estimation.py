@@ -32,7 +32,7 @@ def top_wasteful_sessions_query(
       AND EXISTS {
         MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
       }
-    OPTIONAL MATCH (s)-[:belongsToSemanticGroup]->(g:SemanticGroup)
+    OPTIONAL MATCH (g:SemanticGroup)-[:containsSession]->(s)
     WITH n, s, head(collect(g.groupName)) AS semanticGroup,
          head(collect(g.id)) AS semanticGroupId
     RETURN properties(n) AS waste_estimation,
@@ -160,7 +160,7 @@ def sessions_insights_query(
         MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
       })
       AND ($semantic_group_id IS NULL OR EXISTS {
-        MATCH (s)-[:belongsToSemanticGroup]->(:SemanticGroup {id: $semantic_group_id})
+        MATCH (:SemanticGroup {id: $semantic_group_id})-[:containsSession]->(s)
       })
     RETURN s.duration AS duration,
            s.endTime AS endTime,
