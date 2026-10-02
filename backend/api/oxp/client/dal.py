@@ -738,7 +738,7 @@ def ingest_semantic_groups(
     delta:
         Dict with ``"add"``, ``"update"``, and ``"remove"`` lists of group IDs.
     application_id:
-        ``masName`` of the owning MAS node.
+        ``masId`` of the owning MAS node.
     """
     upsert_list: List[str] = delta.get("add", []) + delta.get("update", [])
     remove_list: List[str] = delta.get("remove", [])
@@ -815,7 +815,7 @@ def ingest_semantic_groups(
 
             rel_query, rel_params = dal_queries.build_create_rel_query(
                 "MAS",
-                ["masName"],
+                ["masId"],
                 [application_id],
                 "SemanticGroup",
                 ["id"],
@@ -1278,7 +1278,7 @@ def get_mas_name(db: Connector, session_id: str) -> str:
     if not rows:
         raise ValueError(f"No MAS name found for {session_id}")
     row = rows[0] if isinstance(rows[0], dict) else {}
-    return str(row.get("masName", ""))
+    return str(row.get("masId", ""))
 
 
 # ── get_session_io_embeddings ─────────────────────────────────────────────────
@@ -1477,7 +1477,7 @@ def ingest_waste_estimation_results(
 
 
 def get_all_mas_metric_pairs(db: Connector) -> List[Dict[str, Any]]:
-    """Return all distinct ``{masName, metricName}`` pairs in the graph.
+    """Return all distinct ``{masId, metricName}`` pairs in the graph.
 
     Equivalent to ``Neo4jDBHandler.get_all_mas_metric_pairs`` in *oxp-lib*.
     """
@@ -1496,7 +1496,7 @@ def get_all_application_ids(db: Connector) -> List[str]:
         rows = db.execute(query, params)
     except Exception as exc:
         raise DatabaseError(f"Failed to get MAS application ids: {exc}") from exc
-    return [r["masName"] for r in rows if isinstance(r, dict) and r.get("masName")]
+    return [r["masId"] for r in rows if isinstance(r, dict) and r.get("masId")]
 
 
 def get_all_mas_ids(db: Connector) -> List[str]:
@@ -1675,7 +1675,7 @@ def get_analysis_data_for_semantic_group(
 
 _INSIGHT_SCOPE_TARGETS: Dict[str, Tuple[str, str]] = {
     "Session": ("Session", "sessionId"),
-    "MAS": ("MAS", "masName"),
+    "MAS": ("MAS", "masId"),
     "Agent": ("Agent", "agentName"),
     "SemanticGroup": ("SemanticGroup", "id"),
 }
