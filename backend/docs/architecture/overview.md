@@ -2,7 +2,7 @@
 
 The picture belows depicts the overall architecture of OXP.
 
-![image ](../pictures/Architecture.png "Overview architecture")
+![image ](../figures/Architecture.png "Overview architecture")
 
 The OTel spans emitted by the MAS are stored in a ClickHouse DB.
 Once the session is finished, the ingestion pipeline is triggered:

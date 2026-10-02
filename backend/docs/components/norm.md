@@ -1,129 +1,66 @@
-# Norm
+# Normalization
 
-OTel (`ioa_observe`) span → knowledge-graph normalization for the MAS platform: converts raw
-telemetry into validated KG documents (`{"nodes": [...], "edges": [...]}`) that conform to
-[oxp-ontology](https://outshift-open.github.io/observe-and-explain-platform/) (namespace
-`https://outshift-open.github.io/oxp-ontology/mas#`).
+The normalization library (`norm`) is the component that parses raw OpenTelemetry spans into ontology-backed knowledge graph data (`{"nodes": [...], "edges": [...]}`), which conforms to the [OXP ontology](https://cisco-eti.github.io/oxp-ontology/).
 
 **Source:** [`norm`](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/norm)
 
 ## Overview
 
-Each raw OTel span (a ClickHouse `otel_traces`-shaped dict: `SpanId`, `ParentSpanId`, `SpanName`,
-`SpanAttributes`, `Timestamp`, `Duration`, ...) is dispatched straight to a handler by its
-`SpanName`, and every value a handler needs is read directly off that span's own `SpanAttributes`
-— there is no intermediate span shape, no per-span field-inference layer, and no
-placeholder/"unknown" node fabricated for data a span doesn't carry. A span whose name matches
-nothing is silently skipped.
+`norm` is the normalization layer that sits between raw OTel traces and the knowledge graph. It takes the spans an agentic system emits through instrumentation and turns them into the nodes and edges that get written to the graph database.
 
-A small set of best-effort, idempotent post-processing passes then bridge or share trajectory
-state across agent handoffs, sibling capability calls within one agent invocation, and container
-(`MASCall`/`Session`) boundaries.
+The normalized data is made up of:
+- the structural identities (multi-agent system/agent/tool/model)
+- the execution hierarchy (the session execution, who called what)
+- the trajectory (what content actually flowed through the system)
 
-`norm` is the normalization layer run by [norm-worker](../workers/norm-worker.md) at the start of
-the [ingestion pipeline](../architecture/pipelines.md).
+These elements correspond respectively to the `StructuralElement`, `ExecutionElement`, and `TrajectoryElement` in the OXP ontology. 
 
-### Code structure
+![Normalization pipeline](../figures/norm-diagram.png)
 
-`norm` is split into an OTel/`ioa_observe`-specific layer and a format-agnostic core, all under the
-single installable package `src/norm` (a second, empty `src/normalization` directory in the repo is
-unused legacy scaffolding — not part of the built package).
+The normalization library simply contains the span data extraction, with no I/O beyond optional file loading: it does not fetch spans itself, does not talk to the graph database, and does not run as a service. [norm-worker](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/workers/norm-worker) is the production caller — it fetches spans through the API client, adapts them to the raw span-dict shape `norm` expects, calls `normalize()`, and writes the result to the graph.
 
-**`norm.ioa_observe` (OTel span → KG):**
 
-| Module | Role |
-|---|---|
-| `otel_io.py` | `load_otel_export` (ClickHouse JSONL) and `infer_run_id` — operate on raw span dicts directly |
-| `fields.py` | Span field derivation (`attrs`, `get_session_id`, `get_agent_id`, `get_start_time`, `get_duration_ms`, ...) read straight off `SpanAttributes` |
-| `registry.py` | Generic `(type, id)`-keyed node/edge store (`add`, `upsert`, `add_if_not_exists`, `add_edge`, `find`, `edge_target`, `edge_source`, `edges_from`, `all_of`) — no domain knowledge of its own |
-| `trajectory.py` | `add_state_pair_transition` (fresh State pair + Transition for one ExecutionElement), `bridge_states_if_mismatched` (synthesize a `ProcessingCall` bridge between two States only if their content differs), `adopt_boundary_states` (share an existing State directly, for pure containers) |
-| `build.py` | `build_kg(spans)` — dispatches each span to a handler by `SpanName`, then runs the post-processing heuristics |
-| `handlers/` | One handler per `SpanName` shape |
-| `heuristics/` | Best-effort post-processing passes that need the full span/KG picture |
+## Design principles
 
-**Format-agnostic core:**
+The normalization implementation follows the following principles:
 
-| Module | Role |
-|---|---|
-| `normalizer.py` | `normalize()`, `Normalizer` (thin file-loading wrapper), `dump_jsonld()` |
-| `ontology.py` | Resolves ontology TTL/SHACL shape paths from the installed `oxp-ontology` package — no vendored TTL copies |
-| `verifier.py` | Structural checks (`check_unknown_node_types`, `check_unknown_edge_types`, `check_edge_domain_range`, `check_orphaned_edges`), SHACL (`run_shacl_validation`), `nodes_edges_to_jsonld`, `verify_kg()` |
-| `compare.py` | KG structural regression diff (`compare_kg`, `read_kg_json`/`write_kg_json`) — a standalone comparison utility, not currently wired into norm-worker |
+1. Every span is dispatched straight to individual handlers based on their `SpanName`, which create/update a corresponding set of nodes and edges in the knowledge graph.
+2. To ensure sanity of the resulting graph, every generated node/edge is validated as an object from the OXP ontology.
+3. A set of post-processing steps ensure the eventual sanity of the resulting graph, mostly reconciling the trajectory after every span was processed by its handler.
 
-## Public API
 
-| Function / class | Purpose |
-|---|---|
-| `load_otel_export(path)` | ClickHouse JSONL → raw span dicts |
-| `infer_run_id(spans)` | Session id for use as `run_id` |
-| `normalize(spans)` | **Main entry** → `(nodes, edges)` |
-| `verify_kg(nodes, edges, run_id)` | Structural + SHACL validation |
-| `compare_kg(candidate, reference)` | Structural regression diff between two KGs |
-| `dump_jsonld(nodes, edges, path)` | JSON-LD export |
-| `Normalizer` | Thin file-loading wrapper around `normalize()` |
+### Structure 
 
-## Usage
+The main entrypoint for the library is `norm.normalize(spans: dict[str, any])` &rarr; `(nodes, edges)`. The processing operates in two phases:
+1. **Dispatch** spans to individual handlers to generate base nodes and edges
+2. **Post-processing** step through a set of heuristics reconciling the trajectory
 
-```bash
-# Install (from norm/)
-uv pip install -e ".[all]"
-```
+### 1. Dispatch — one pass over the spans
 
-```python
-from pathlib import Path
+| `SpanName` | Handler | Produces |
+|------------|---------|----------|
+| `session.start` | `handle_session_start` | `Session`, `MAS` (if `application_id` present) |
+| `session.end` | `handle_session_end` | Updates the existing `Session`'s `endTime`/`duration`/`success` |
+| `*.graph` | `handle_graph` | Declared `MAS`/`Agent`/`Tool` nodes — the one authoritative source of "declared" structural data |
+| `*.agent` | `handle_agent` | `Agent` (undeclared placeholder if not already declared), `AgentCall`, its own State pair |
+| `*.chat` | `handle_chat` | `LLM`, `LLMCall` (token counts, temperature, finish reason), its own State pair (including system-instruction content, folded into the initial State) |
+| `*.tool` | `handle_tool` | `Tool`, `ToolCall`, its own State pair |
 
-from norm import dump_jsonld, infer_run_id, load_otel_export, normalize, verify_kg
+### 2. Post-processing — four best-effort passes, in order, each over the full registry
 
-trace = Path(__file__).resolve().parent / "data" / "otel_traces_export.jsonl"
-spans = load_otel_export(trace)
-run_id = infer_run_id(spans)
+1. **`link_agent_handoffs`** — for each `*.agent` span carrying an explicit `ioa_observe.handoff.source.span_ids` signal, bridges the named predecessor `AgentCall`'s final State against the successor's initial State.
+2. **`chain_agent_handoffs_fallback`** — for sibling `AgentCall`s under one `MASCall` that got no explicit handoff signal at all, sorts them by `startTime` and bridges consecutive pairs — same fallback rationale as step 3, and correctly excludes a sub-agent call nested inside a sibling's own span (detected via `parentSpanId`) so a containment relationship never gets misread as a handoff.
+3. **`chain_capability_calls`** — no SDK signal orders sibling `LLMCall`/`ToolCall`s within one `AgentCall`, so this sorts them by `startTime` as a deliberate, documented fallback and bridges consecutive siblings whose content doesn't already line up.
+4. **`assign_container_boundary_states`** — `MASCall`/`Session` adopt their earliest/latest child's boundary State directly (see "bridge vs. share" above).
 
-nodes, edges = normalize(spans)
-report = verify_kg(nodes, edges, run_id)
 
-dump_jsonld(nodes, edges, Path("out/kg.jsonld"))
-print(f"nodes={len(nodes)} edges={len(edges)} ok={report['ok']}")
-```
+## Further reading
 
-Or generate a KG straight from the CLI (file output, or a direct Neo4j push):
+For further implementation details, see internal documentation under `norm/docs/`:
 
-```bash
-python scripts/generate_kg.py data/otel_traces_export.jsonl \
-    --nodes-out /tmp/nodes.json --edges-out /tmp/edges.json
-```
+- [README](https://github.com/cisco-eti/claris-lib/blob/main/norm/README.md) — quick start, public API, ontology conformance
+- [User guide](https://github.com/cisco-eti/claris-lib/blob/main/norm/docs/user-guide.md) — inputs, `normalize()`, validation reports
+- [Normalization pipeline](https://github.com/cisco-eti/claris-lib/blob/main/norm/docs/normalization.md) — full dispatch table and post-processing passes
+- [Code structure](https://github.com/cisco-eti/claris-lib/blob/main/norm/docs/code-structure.md) — module map
+- [Developer guide](https://github.com/cisco-eti/claris-lib/blob/main/norm/docs/developer-guide.md) — adding a handler or heuristic
 
-### Running it in the pipeline
-
-`norm` is normally not invoked directly — it's run by the standalone
-[`norm-worker`](../workers/norm-worker.md), which depends on `norm[graph]` and calls
-`normalize()` on spans it fetches from [oxp-api](api.md). Adapting oxp-api's
-`SpanMetadataItem` rows to the raw span-dict shape `normalize()` expects is norm-worker's own job
-(a straight field rename — both are sourced from the same ClickHouse `otel_traces` columns).
-
-## Conformance to oxp-ontology
-
-- **Pydantic node/edge models** (`oxp_ontology.models.*`) are generated from ontology TTL by
-  `oxp-ontology`'s own model generator; `norm` only consumes them (`oxp-ontology` is a base
-  dependency, not vendored).
-- **`KGBase` uses `extra="forbid"`** — constructing a node/edge with a field the ontology doesn't
-  declare raises `pydantic.ValidationError` immediately; this is a deliberate boundary, not just
-  validation strictness.
-- The **verifier** (`norm.verifier`) checks node/edge vocabulary, `rdfs:domain`/`range`, orphaned
-  edges, and runs SHACL against `mas-ontology.ttl` + `mas-shapes.ttl` + `mas-shapes-custom.ttl`.
-- **No OTel span nodes** in the output. `CapabilityCall` nodes (`ToolCall`/`LLMCall`/
-  `ProcessingCall`) and every other `ExecutionElement` carry an optional `spanId`/`parentSpanId`,
-  but there is no separate span provenance model.
-
-## Development
-
-```bash
-cd norm
-uv sync --extra dev
-pytest -q
-ruff check src tests
-ruff format --check src tests
-```
-
-See also: [user guide](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/norm/docs/user-guide.md),
-[normalization pipeline](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/norm/docs/normalization.md) (dispatch table, post-processing passes), and
-[developer guide](https://github.com/outshift-open/observe-and-explain-platform/tree/main/backend/norm/docs/developer-guide.md) (adding a handler or heuristic).
