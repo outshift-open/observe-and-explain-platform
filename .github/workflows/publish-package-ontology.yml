@@ -9,6 +9,7 @@ on:
       - 'ontology-v*'
 
 permissions:
+  content: read
   id-token: write # required for PyPI Trusted Publishing (OIDC)
 
 concurrency:
