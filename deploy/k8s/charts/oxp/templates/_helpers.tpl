@@ -92,7 +92,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $externalApi -}}
 {{- else -}}
 {{- $apiPort := int .Values.api.api.service.port -}}
-{{- printf "http://%s-api:%d" (include "oxp.fullname" .) $apiPort -}}
+{{- printf "http://%s-api.%s.svc.cluster.local:%d" (include "oxp.fullname" .) .Release.Namespace $apiPort -}}
 {{- end -}}
 {{- end -}}
 
@@ -112,7 +112,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else if $globalHost -}}
 {{- $globalHost -}}
 {{- else -}}
-{{- include "oxp.clickhouseName" . -}}
+{{- printf "%s.%s.svc.cluster.local" (include "oxp.clickhouseName" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 
@@ -164,7 +164,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else if $globalHost -}}
 {{- $globalHost -}}
 {{- else -}}
-{{- include "oxp.rabbitmqName" . -}}
+{{- printf "%s.%s.svc.cluster.local" (include "oxp.rabbitmqName" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 
@@ -200,7 +200,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else if $globalHost -}}
 {{- $globalHost -}}
 {{- else -}}
-{{- include "oxp.neo4jName" . -}}
+{{- printf "%s.%s.svc.cluster.local" (include "oxp.neo4jName" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 
@@ -303,7 +303,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if and .Values.otelCollector.ports (hasKey .Values.otelCollector.ports "otlp-http") -}}
 {{- $otelHttpPort = int (index (index .Values.otelCollector.ports "otlp-http") "servicePort") -}}
 {{- end -}}
-{{- printf "http://%s:%d" (include "oxp.otelCollectorName" .) $otelHttpPort -}}
+{{- printf "http://%s.%s.svc.cluster.local:%d" (include "oxp.otelCollectorName" .) .Release.Namespace $otelHttpPort -}}
 {{- end }}
 
 {{- define "oxp.listOrStringEnvValue" -}}
