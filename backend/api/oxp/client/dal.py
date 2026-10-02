@@ -11,6 +11,13 @@ import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from oxp_ontology import OntologyValidationError, verify_kg_object
+from oxp_ontology.models.edges import (
+    aboutMetric,
+    containsSession,
+    hasMedioidSession,
+    ofSemanticGroup,
+)
+from oxp_ontology.models.nodes import SemanticGroup as OntologySemanticGroup
 
 from oxp.connectors.base import Connector
 from oxp.core.exceptions import DatabaseError
@@ -773,6 +780,32 @@ def ingest_semantic_groups(
             group_id: str = group.get("id", "")
             if group_id not in upsert_set:
                 continue
+
+            session_ids: List[str] = group.get("sessionIds", [])
+            child_ids: List[str] = group.get("childrenNodes", [])
+            medioid_session_id: str = group.get("medioidSessionId", "")
+
+            ontology_group = OntologySemanticGroup(
+                id=group_id,
+                name=group.get("groupName", ""),
+                description=group.get("groupSummary", ""),
+                embeddingModel=group.get("embeddingModel", ""),
+                nSessions=group.get("nSessions", 0),
+                splitDistance=group.get("splitDistance", 0.0),
+                nodeHash=group.get("nodeHash", ""),
+            )
+            verify_edges: List[Any] = [
+                containsSession(source_id=group_id, target_id=target_id)
+                for target_id in (*session_ids, *child_ids)
+            ]
+            if medioid_session_id:
+                verify_edges.append(
+                    hasMedioidSession(source_id=group_id, target_id=medioid_session_id)
+                )
+            verification = verify_kg_object(ontology_group, edges=verify_edges)
+            if not verification.conforms:
+                raise OntologyValidationError(verification)
+
             ingest_query, ingest_params = dal_queries.build_ingest_node_query(
                 "SemanticGroup", group
             )
@@ -785,13 +818,26 @@ def ingest_semantic_groups(
 
             for session_id in group.get("sessionIds", []):
                 rel_query, rel_params = dal_queries.build_create_rel_query(
-                    "Session",
-                    ["sessionId"],
-                    [session_id],
                     "SemanticGroup",
                     ["id"],
                     [group_id],
-                    "belongsToSemanticGroup",
+                    "Session",
+                    ["sessionId"],
+                    [session_id],
+                    "containsSession",
+                )
+                _run_write(rel_query, rel_params, tx)
+
+            medioid_session_id = group.get("medioidSessionId", "")
+            if medioid_session_id:
+                rel_query, rel_params = dal_queries.build_create_rel_query(
+                    "SemanticGroup",
+                    ["id"],
+                    [group_id],
+                    "Session",
+                    ["sessionId"],
+                    [medioid_session_id],
+                    "hasMedioidSession",
                 )
                 _run_write(rel_query, rel_params, tx)
 
@@ -805,11 +851,11 @@ def ingest_semantic_groups(
                     rel_query, rel_params = dal_queries.build_create_rel_query(
                         "SemanticGroup",
                         ["id"],
-                        [child_id],
+                        [group_id],
                         "SemanticGroup",
                         ["id"],
-                        [group_id],
-                        "belongsToSemanticGroup",
+                        [child_id],
+                        "containsSession",
                     )
                     _run_write(rel_query, rel_params, tx)
 
@@ -832,11 +878,11 @@ def ingest_semantic_groups(
                     rel_query, rel_params = dal_queries.build_create_rel_query(
                         "SemanticGroup",
                         ["id"],
-                        [child_id],
+                        [group["id"]],
                         "SemanticGroup",
                         ["id"],
-                        [group["id"]],
-                        "belongsToSemanticGroup",
+                        [child_id],
+                        "containsSession",
                     )
                     _run_write(rel_query, rel_params, tx)
 
@@ -1012,12 +1058,28 @@ def ingest_consistency_report(
         so it's read off the original detector result rather than smuggled
         onto the ontology object. Read back by
         ``query_builders.semanticgroups.get_consistency_report``.
+
+    ``ofSemanticGroup`` (always) and ``aboutMetric`` (when
+    ``report.dataType == "metric"``) are ontology object-property edges,
+    not node fields -- ``verify_kg_object`` is given synthetic instances of
+    both to validate the mandatory-relationship SHACL shapes before
+    writing, and the same relationships are then persisted for real:
+    ``ofSemanticGroup`` to the owning ``SemanticGroup``, and ``aboutMetric``
+    fanned out to every ``(metricName, sessionId)`` Metric node this
+    report's sessions cover (a group-level report has no single Metric
+    node of its own to point to, since Metric nodes are session-scoped).
     """
-    verification = verify_kg_object(report)
+    metadata = getattr(source, "metadata", None) or {}
+    metric_name = metadata.get("metric", "")
+    session_ids = getattr(source, "session_ids", None) or []
+
+    verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
+    if report.dataType == "metric" and metric_name:
+        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+
+    verification = verify_kg_object(report, edges=verify_edges)
     if not verification.conforms:
         raise OntologyValidationError(verification)
-
-    metadata = getattr(source, "metadata", None) or {}
 
     label = "ConsistencyReport"
     props: Dict[str, Any] = {
@@ -1047,6 +1109,28 @@ def ingest_consistency_report(
         [props["id"]],
         "hasConsistencyReport",
     )
+    _create_rel(
+        db,
+        label,
+        ["id"],
+        [props["id"]],
+        "SemanticGroup",
+        ["id"],
+        [group_id],
+        "ofSemanticGroup",
+    )
+    if report.dataType == "metric" and metric_name:
+        for session_id in session_ids:
+            _create_rel(
+                db,
+                label,
+                ["id"],
+                [props["id"]],
+                "Metric",
+                ["metricName", "sessionId"],
+                [metric_name, session_id],
+                "aboutMetric",
+            )
     return True
 
 
@@ -1086,15 +1170,30 @@ def ingest_anomaly_report(
         ``query_builders.semanticgroups.get_anomaly_report`` and
         ``client._semanticgroups``, and used below to link outlier
         sessions/metrics to this report.
-    """
-    verification = verify_kg_object(report)
-    if not verification.conforms:
-        raise OntologyValidationError(verification)
 
+    ``ofSemanticGroup`` (always) and ``aboutMetric`` (when
+    ``report.dataType == "metric"``) are ontology object-property edges,
+    not node fields -- ``verify_kg_object`` is given synthetic instances of
+    both to validate the mandatory-relationship SHACL shapes before
+    writing, and the same relationships are then persisted for real:
+    ``ofSemanticGroup`` to the owning ``SemanticGroup``, and ``aboutMetric``
+    fanned out to every ``(metricName, sessionId)`` Metric node across this
+    report's full session set (inliers + outliers) -- a group-level report
+    has no single Metric node of its own to point to, since Metric nodes
+    are session-scoped.
+    """
     metadata = getattr(source, "metadata", None) or {}
     inlier_sessions = getattr(source, "inlier_sessions", None) or []
     outlier_sessions = getattr(source, "outlier_sessions", None) or []
     metric_name = metadata.get("metric", "")
+
+    verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
+    if report.dataType == "metric" and metric_name:
+        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+
+    verification = verify_kg_object(report, edges=verify_edges)
+    if not verification.conforms:
+        raise OntologyValidationError(verification)
 
     label = "AnomalyReport"
     props: Dict[str, Any] = {
@@ -1126,6 +1225,28 @@ def ingest_anomaly_report(
         [props["id"]],
         "hasAnomalyReport",
     )
+    _create_rel(
+        db,
+        label,
+        ["id"],
+        [props["id"]],
+        "SemanticGroup",
+        ["id"],
+        [group_id],
+        "ofSemanticGroup",
+    )
+    if metric_name:
+        for session_id in sorted({*inlier_sessions, *outlier_sessions}):
+            _create_rel(
+                db,
+                label,
+                ["id"],
+                [props["id"]],
+                "Metric",
+                ["metricName", "sessionId"],
+                [metric_name, session_id],
+                "aboutMetric",
+            )
 
     # link each outlier session and metric → anomaly report
     report_id: str = props["id"]
@@ -1188,12 +1309,28 @@ def ingest_normal_behaviour_report(
         itself, so it's read off the original detector result rather than
         smuggled onto the ontology object. Read back by
         ``query_builders.semanticgroups.get_normal_behaviour_report``.
+
+    ``ofSemanticGroup`` (always) and ``aboutMetric`` (when
+    ``report.dataType == "metric"``) are ontology object-property edges,
+    not node fields -- ``verify_kg_object`` is given synthetic instances of
+    both to validate the mandatory-relationship SHACL shapes before
+    writing, and the same relationships are then persisted for real:
+    ``ofSemanticGroup`` to the owning ``SemanticGroup``, and ``aboutMetric``
+    fanned out to every ``(metricName, sessionId)`` Metric node this
+    report's sessions cover (a group-level report has no single Metric
+    node of its own to point to, since Metric nodes are session-scoped).
     """
-    verification = verify_kg_object(report)
+    metadata = getattr(source, "metadata", None) or {}
+    metric_name = metadata.get("metric", "")
+    session_ids = getattr(source, "session_ids", None) or []
+
+    verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
+    if report.dataType == "metric" and metric_name:
+        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+
+    verification = verify_kg_object(report, edges=verify_edges)
     if not verification.conforms:
         raise OntologyValidationError(verification)
-
-    metadata = getattr(source, "metadata", None) or {}
 
     label = "NormalBehaviourReport"
     props: Dict[str, Any] = {
@@ -1224,6 +1361,28 @@ def ingest_normal_behaviour_report(
         [props["id"]],
         "hasNormalBehaviourReport",
     )
+    _create_rel(
+        db,
+        label,
+        ["id"],
+        [props["id"]],
+        "SemanticGroup",
+        ["id"],
+        [group_id],
+        "ofSemanticGroup",
+    )
+    if report.dataType == "metric" and metric_name:
+        for session_id in session_ids:
+            _create_rel(
+                db,
+                label,
+                ["id"],
+                [props["id"]],
+                "Metric",
+                ["metricName", "sessionId"],
+                [metric_name, session_id],
+                "aboutMetric",
+            )
     return True
 
 

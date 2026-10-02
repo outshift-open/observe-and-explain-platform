@@ -96,9 +96,8 @@ def build_session_group_query(
     MATCH (mas:MAS)<-[:executesSession]-(:Session {sessionId: $session_id})-[:hasInitialState]->(:State)<-[:represents]-(te:Embedding {embeddingModel: $embedding_model})
     WITH te.embeddingVector AS target_embedding
 
-    MATCH (sg:SemanticGroup)<-[:belongsToSemanticGroup]-(medioid_session:Session)-[:executesSession]->(mas)
-    WHERE sg.medioidSessionId = medioid_session.sessionId
-    AND NOT EXISTS { MATCH (:SemanticGroup)-[:belongsToSemanticGroup]->(sg) }
+    MATCH (sg:SemanticGroup)-[:hasMedioidSession]->(medioid_session:Session)-[:executesSession]->(mas)
+    WHERE NOT EXISTS { MATCH (sg)-[:containsSession]->(:SemanticGroup) }
     MATCH (medioid_session)-[:hasInitialState]->(:State)<-[:represents]-(medioid_embedding:Embedding {embeddingModel: $embedding_model})
 
     WITH sg, 1 - vector.similarity.cosine(medioid_embedding.embeddingVector, target_embedding) AS distance
@@ -185,7 +184,7 @@ def build_attach_session_fetch_query(
     WHERE $node_hash = "" OR sg.nodeHash = $node_hash
     WITH sg, coalesce(sg.sessionIds, []) AS direct_session_ids
 
-    OPTIONAL MATCH (sg)<-[:belongsToSemanticGroup*0..]-(child:Session)
+    OPTIONAL MATCH (sg)-[:containsSession*0..]->(child:Session)
     WITH direct_session_ids, child.sessionId AS sid
     ORDER BY sid
     WITH direct_session_ids, collect(DISTINCT sid) AS raw_all_session_ids
@@ -207,7 +206,7 @@ def build_attach_session_update_query(
 ) -> tuple[str, Dict[str, object]]:
     """Build the second (write) query used by ``attach_session_to_group``.
 
-    Conditionally creates the ``belongsToSemanticGroup`` relationship and
+    Conditionally creates the ``containsSession`` relationship and
     updates the group's session list and hash, guarded by *node_hash* to
     detect concurrent modifications.
 
@@ -220,7 +219,7 @@ def build_attach_session_update_query(
     MATCH (sg:SemanticGroup {id: $group_id})
     WHERE $node_hash = "" OR sg.nodeHash = $node_hash
     MATCH (s:Session {sessionId: $session_id})
-    MERGE (s)-[:belongsToSemanticGroup]->(sg)
+    MERGE (sg)-[:containsSession]->(s)
     SET sg.sessionIds = $new_session_ids,
         sg.nodeHash = $new_group_hash
     RETURN sg.id AS group_id
@@ -315,7 +314,7 @@ def build_semantic_groups_needing_analysis_query(
     query = """
     MATCH (sg:SemanticGroup {embeddingModel: $embedding_model})
     WHERE sg.nodeHash IS NOT NULL
-        AND NOT EXISTS { MATCH (:SemanticGroup)-[:belongsToSemanticGroup]->(sg) }
+        AND NOT EXISTS { MATCH (sg)-[:containsSession]->(:SemanticGroup) }
        OPTIONAL MATCH (sg)-[:hasAnomalyReport]->(ar:AnomalyReport)
        OPTIONAL MATCH (sg)-[:hasConsistencyReport]->(cr:ConsistencyReport)
        OPTIONAL MATCH (sg)-[:hasNormalBehaviourReport]->(nr:NormalBehaviourReport)
@@ -365,7 +364,7 @@ def build_analysis_pre_check_query(
     """
     if with_session_id:
         query += """
-    OPTIONAL MATCH (s:Session {sessionId: $session_id})-[:belongsToSemanticGroup]->(sg)
+    OPTIONAL MATCH (sg)-[:containsSession]->(s:Session {sessionId: $session_id})
     WITH hash_matches, report_exists, count(s) AS session_count
     RETURN hash_matches AND NOT report_exists AND session_count > 0 AS can_analyze
     """
@@ -488,11 +487,12 @@ def build_cleanup_semantic_groups_query(
     """Build the query that clears rels/reports for upserted semantic groups."""
     query = """
     MATCH (n:SemanticGroup) WHERE n.id IN $ids
-    OPTIONAL MATCH ()-[rel:belongsToSemanticGroup]->(n)
+    OPTIONAL MATCH (n)-[rel:containsSession]->()
+    OPTIONAL MATCH (n)-[medioid_rel:hasMedioidSession]->()
     OPTIONAL MATCH (n)-[]-(r)
     WHERE r:NormalBehaviourReport OR r:ConsistencyReport
        OR r:AnomalyReport OR r:Metric
-    DELETE rel
+    DELETE rel, medioid_rel
     DETACH DELETE r
     """
     return query, {"ids": ids}
@@ -501,10 +501,10 @@ def build_cleanup_semantic_groups_query(
 def build_delete_stale_child_edges_query(
     child_ids: List[str],
 ) -> tuple[str, Dict[str, object]]:
-    """Build the query that deletes stale child->parent semantic-group edges."""
+    """Build the query that deletes stale parent->child semantic-group edges."""
     query = """
     UNWIND $child_ids AS child_id
-    MATCH (child:SemanticGroup {id: child_id})-[rel:belongsToSemanticGroup]->(:SemanticGroup)
+    MATCH (:SemanticGroup)-[rel:containsSession]->(child:SemanticGroup {id: child_id})
     DELETE rel
     """
     return query, {"child_ids": child_ids}
@@ -585,7 +585,7 @@ def build_analysis_data_for_semantic_group_query(
     query = """
     MATCH (sg:SemanticGroup {id: $group_id})
     WHERE ($group_hash = "" OR sg.nodeHash = $group_hash)
-      AND NOT EXISTS { MATCH (:SemanticGroup)-[:belongsToSemanticGroup]->(sg) }
+      AND NOT EXISTS { MATCH (sg)-[:containsSession]->(:SemanticGroup) }
     WITH coalesce(sg.sessionIds, []) AS session_ids
     WITH CASE
         WHEN $limit > 0 THEN session_ids[$skip..($skip + $limit)]
