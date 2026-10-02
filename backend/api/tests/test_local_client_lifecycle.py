@@ -57,6 +57,26 @@ def test_settings_client_cleans_up_when_construction_fails(connectors, persist_m
         kg.return_value.close.assert_called_once()
 
 
+def test_injected_neo4j_connector_is_reused_and_left_open(connectors):
+    db, kg, provider = connectors
+    shared = Mock()
+    with LocalClient.from_settings(persist_metrics=True, neo4j=shared):
+        pass
+    kg.assert_not_called()
+    provider.assert_called_once_with(db=shared)
+    shared.close.assert_not_called()
+    db.return_value.close.assert_called_once()
+
+
+def test_injected_neo4j_connector_is_unused_without_persist_metrics(connectors):
+    db, kg, provider = connectors
+    shared = Mock()
+    LocalClient.from_settings(persist_metrics=False, neo4j=shared).close()
+    kg.assert_not_called()
+    provider.assert_called_once_with(db=db.return_value)
+    shared.close.assert_not_called()
+
+
 def test_external_connections_are_not_closed():
     db, provider = Mock(), Mock()
     with LocalClient(db=db, metrics_provider=provider):

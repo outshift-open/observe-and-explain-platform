@@ -62,7 +62,14 @@ class StatefulEvalWorker(BaseWorker):
         if self._oxp_client is None:
             from oxp.client.local import LocalClient
 
-            self._oxp_client = LocalClient.from_settings(persist_metrics=self.push_metrics)
+            neo4j = None
+            if self.push_metrics:
+                # Same shared connector BaseWorker and every other worker use, so
+                # metric writes reuse its driver and its NEO4J_URI/host:port handling.
+                from oxp.dependencies import get_neo4j_connector
+
+                neo4j = get_neo4j_connector()
+            self._oxp_client = LocalClient.from_settings(persist_metrics=self.push_metrics, neo4j=neo4j)
         return self._oxp_client
 
     def _close_db_handler(self):

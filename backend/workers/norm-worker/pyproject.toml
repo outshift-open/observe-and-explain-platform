@@ -8,6 +8,9 @@ build-backend = "hatchling.build"
 [project]
 name = "norm-worker"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "Standalone normalization worker for processing telemetry sessions"
 readme = "README.md"

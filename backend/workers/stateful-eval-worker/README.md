@@ -92,11 +92,15 @@ overrides `--max-inflight-messages`. From a source checkout, `cli.py` also loads
 | `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USERNAME`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DATABASE` | | `localhost`, `8123`, `admin`, `admin`, `default` | Span store |
 | `NEO4J_HOST`, `NEO4J_PORT`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` | | `localhost`, `7687`, `neo4j`, empty, `neo4j` | Knowledge graph, used when `PUSH_METRICS` is on. `NEO4J_AUTH=user/password` also sets the credentials |
 
-ClickHouse and Neo4j values come from `oxp.core.config.settings` in the
-[`api`](../../api/README.md) package. `LocalClient.from_settings` connects to
-`bolt://<NEO4J_HOST>:<NEO4J_PORT>` unless `NEO4J_HOST` is a URI, so a bare host
-must not include a port. The Neo4j connector that `BaseWorker` creates at
-startup is not used here; if it fails, it only logs a warning.
+ClickHouse values come from `oxp.core.config.settings` in the
+[`api`](../../api/README.md) package. Metric writes reuse the Neo4j connector
+from `oxp.dependencies.get_neo4j_connector()`, the one `BaseWorker` creates at
+startup and every other worker uses; the worker passes it to
+`LocalClient.from_settings`, so the client does not close it. It reads
+`NEO4J_URI` first, else `NEO4J_HOST`, which may be a bare host, `host:port`, or a
+URI, and uses `NEO4J_PORT` when the host has no port. Without a connector
+argument, `from_settings` connects to `bolt://<NEO4J_HOST>:<NEO4J_PORT>` unless
+`NEO4J_HOST` is a URI, so a bare host must not include a port there.
 
 ## Run locally
 
@@ -138,7 +142,8 @@ or the `INPUT_WORKFLOW` string when there are none, and prints the `--input`
 file to the log. `docker compose up stateful-eval` also starts RabbitMQ,
 and Neo4j. ClickHouse is not a compose service;
 `CLICKHOUSE_HOST` defaults to `host.docker.internal`. Compose sets `NEO4J_HOST`
-to `neo4j:7687`, which `from_settings` turns into `bolt://neo4j:7687:7687`.
+to `neo4j:7687` and `NEO4J_URI` to `bolt://neo4j:7687`, which the shared
+connector resolves to `bolt://neo4j:7687`.
 
 ## Tests
 

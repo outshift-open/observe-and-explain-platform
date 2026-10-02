@@ -3,9 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mce-core"
+name = "oxp-mce-core"
 version = "2.0.0rc1"
-description = "Metric Computation Engine core"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
+description = "Metrics Computation Engine core"
 requires-python = ">=3.13,<3.15"
 dependencies = [
     "pydantic>=2.0.0",
@@ -35,27 +39,27 @@ neo4j = [
     "neo4j>=6.1.0",
 ]
 deepeval = [
-    "mce-provider-deepeval>=0.1.0",
+    "oxp-mce-provider-deepeval>=0.1.0",
 ]
 llm = [
-    "mce-provider-native>=0.1.0",
+    "oxp-mce-provider-native>=0.1.0",
 ]
 opik = [
-    "mce-provider-opik>=0.1.0",
+    "oxp-mce-provider-opik>=0.1.0",
 ]
 ragas = [
-    "mce-provider-ragas>=0.1.0",
+    "oxp-mce-provider-ragas>=0.1.0",
 ]
 server = [
     "fastapi>=0.111.0",
     "uvicorn>=0.30.0",
 ]
 all = [
-    "mce-provider-native>=0.1.0",
-    "mce-provider-sdk>=0.1.0",
-    "mce-provider-deepeval>=0.1.0",
-    "mce-provider-opik>=0.1.0",
-    "mce-provider-ragas>=0.1.0",
+    "oxp-mce-provider-native>=0.1.0",
+    "oxp-mce-provider-sdk>=0.1.0",
+    "oxp-mce-provider-deepeval>=0.1.0",
+    "oxp-mce-provider-opik>=0.1.0",
+    "oxp-mce-provider-ragas>=0.1.0",
     "fastapi>=0.111.0",
     "uvicorn>=0.30.0",
 ]
@@ -64,9 +68,9 @@ all = [
 where = ["src"]
 
 [tool.uv.sources]
-mce-provider-native = { workspace = true }
-mce-provider-sdk = { workspace = true }
-mce-provider-deepeval = { workspace = true }
-mce-provider-opik = { workspace = true }
-mce-provider-ragas = { workspace = true }
+oxp-mce-provider-native = { workspace = true }
+oxp-mce-provider-sdk = { workspace = true }
+oxp-mce-provider-deepeval = { workspace = true }
+oxp-mce-provider-opik = { workspace = true }
+oxp-mce-provider-ragas = { workspace = true }
 

@@ -1,7 +1,11 @@
 [project]
 name = "oxp-api"
 version = "1.0.0"
-description = "Add your description here"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
+description = "OXP backend API service"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -39,8 +43,8 @@ dev = "oxp.app:main"
 dev = [
     "fakeredis>=2.0.0",
     "httpx>=0.28.1",
-    "mce-provider-native",
-    "mce-provider-sdk",
+    "oxp-mce-provider-native",
+    "oxp-mce-provider-sdk",
     "pytest>=9.0.2",
 ]
 

@@ -5,6 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "stateful-eval-worker"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "In-process stateful evaluation worker — runs temporal metric computation directly as a library, bypassing the HTTP service"
 classifiers = [
