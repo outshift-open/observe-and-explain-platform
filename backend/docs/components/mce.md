@@ -1,4 +1,4 @@
-# MCE
+# Metrics Computation Engine (MCE)
 
 The Metrics Computation Engine (MCE) — a pluggable framework that computes quantitative and
 LLM-judged metrics for MAS (Multi-Agent System) sessions and persists the results back to the
