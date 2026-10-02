@@ -29,7 +29,6 @@
 #   v1.0.0: initial draft — resource waste, failure
 #   classification, trajectory segment analysis, group
 #   consistency/anomaly/normal-behaviour reports.
-#   v1.1.0: Insight split out to insight-ontology.ttl.
 # ============================================================
 
 <https://outshift-open.github.io/oxp-ontology/analysis> rdf:type owl:Ontology ;
@@ -48,7 +47,7 @@
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/analysis/1.0.0-rc0> ;
     owl:versionInfo "0.0.1" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
-    rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft. v1.1.0: Insight split out to insight-ontology.ttl."@en .
+    rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft."@en .
 
 #################################################################
 #    ABSTRACT BASE

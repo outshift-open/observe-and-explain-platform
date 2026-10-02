@@ -3,12 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mce-provider-ragas"
+name = "oxp-mce-provider-ragas"
 version = "0.1.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
+license = "Apache-2.0"
 description = "Ragas provider package for MCE"
 requires-python = ">=3.13,<3.15"
 dependencies = [
-    "mce-core>=2.0.0rc1",
+    "oxp-mce-core>=2.0.0rc1",
     "ragas>=0.2.0,<0.3.0",
     "langchain-openai",
     "numpy>=1.26.0",
@@ -22,4 +26,4 @@ include = ["mce.providers.ragas*"]
 namespaces = true
 
 [tool.uv.sources]
-mce-core = { workspace = true }
+oxp-mce-core = { workspace = true }

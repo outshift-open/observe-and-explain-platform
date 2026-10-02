@@ -8,6 +8,9 @@ build-backend = "hatchling.build"
 [project]
 name = "dem"
 version = "1.0.0"
+authors = [
+    { name = "Outshift Open", email = "oss@cisco.com" }
+]
 license = "Apache-2.0"
 description = "Data Extraction and Mining - Advanced insights toolkit for anomaly detection, consistency checking, embeddings, and clustering"
 readme = "README.md"
