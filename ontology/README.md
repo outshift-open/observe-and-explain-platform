@@ -1,6 +1,6 @@
 # OXP Ontology
 
-**Multi-Agent System (MAS) Telemetry Ontology** for observability and governance of multi-agent systems.
+**Multi-Agent System (MAS) Execution Ontology** for observability and governance of multi-agent systems.
 
 ## 📖 Documentation
 
