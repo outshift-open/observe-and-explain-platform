@@ -24,7 +24,7 @@ dependencies = [
     "umap-learn>=0.5.7",
     "uvicorn>=0.41.0",
     "ruff<=0.15.22",
-    "oxp-ontology[models,verify]>=1.0.0",
+    "oxp-ontology[models,verify]>=1.0.1",
 ]
 
 

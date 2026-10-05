@@ -27,7 +27,7 @@ dependencies = [
     "dem[analysis,grouping,llm]",
     "worker-base",
     "oxp-api",
-    "oxp-ontology[models]>=1.0.0",
+    "oxp-ontology[models]>=1.0.1",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "click>=8.0.0",

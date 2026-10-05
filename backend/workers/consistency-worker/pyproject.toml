@@ -25,7 +25,7 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = [
     "oxp-api",
-    "oxp-ontology[models]>=1.0.0",
+    "oxp-ontology[models]>=1.0.1",
     "dem[grouping,llm]",
     "worker-base",
     "pydantic>=2.0.0",

@@ -167,7 +167,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "dem", extras = ["analysis", "grouping", "llm"], editable = "dem" },
     { name = "oxp-api", editable = "api" },
-    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.1" },
     { name = "pika", specifier = ">=1.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -231,7 +231,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "dem", extras = ["analysis"], editable = "dem" },
     { name = "oxp-api", editable = "api" },
-    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.1" },
     { name = "pika", specifier = ">=1.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -668,7 +668,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "dem", extras = ["grouping", "llm"], editable = "dem" },
     { name = "oxp-api", editable = "api" },
-    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.1" },
     { name = "pika", specifier = ">=1.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -1635,7 +1635,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "dem", editable = "dem" },
     { name = "oxp-api", editable = "api" },
-    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.1" },
     { name = "pika", specifier = ">=1.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -2378,7 +2378,7 @@ graph = [
 requires-dist = [
     { name = "neo4j", specifier = ">=6.3.1" },
     { name = "norm", extras = ["dev"], marker = "extra == 'all'", editable = "norm" },
-    { name = "oxp-ontology", specifier = ">=1.0.0" },
+    { name = "oxp-ontology", specifier = ">=1.0.1" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyshacl", marker = "extra == 'dev'", specifier = ">=0.25.0" },
     { name = "pyshacl", marker = "extra == 'graph'", specifier = ">=0.25.0" },
@@ -2463,7 +2463,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
     { name = "dem", extras = ["analysis"], editable = "dem" },
     { name = "oxp-api", editable = "api" },
-    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models"], specifier = ">=1.0.1" },
     { name = "pika", specifier = ">=1.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
@@ -2893,7 +2893,7 @@ requires-dist = [
     { name = "neo4j", specifier = ">=6.1.0" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numpy", specifier = ">=2.3.5" },
-    { name = "oxp-ontology", extras = ["models", "verify"], specifier = ">=1.0.0" },
+    { name = "oxp-ontology", extras = ["models", "verify"], specifier = ">=1.0.1" },
     { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
@@ -3234,14 +3234,14 @@ requires-dist = [{ name = "oxp-mce-core", editable = "mce/mce-core" }]
 
 [[package]]
 name = "oxp-ontology"
-version = "1.0.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "rdflib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/17/8c63a8a27fad859cde1eff38a50bd91b36597343a34743fc72e68e2fbea1/oxp_ontology-1.0.0.tar.gz", hash = "sha256:b8d6ace67695dc5d21a1f6925b12f31de2425bd53b755550b5b72c980d306412", size = 33128, upload-time = "2026-10-02T08:47:44.575Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/91/8417924447e804b7bb81aa6faced962e850890974b693d8b15e37bd3d20f/oxp_ontology-1.0.1.tar.gz", hash = "sha256:8a38a4430e1e467122d2b6078c1c7947e5a74f75a3c7033c57cd92ba4decad30", size = 33280, upload-time = "2026-10-05T16:17:24.099Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e9/da/33ec1fc05c18ee27e3da0b217ccfa983dffa7dd9c4cfe73f15a9535c1c42/oxp_ontology-1.0.0-py3-none-any.whl", hash = "sha256:6190d772ab90dd3f7f7b1d2d1b5af7ba2823fdb918b640cdaa9bcae356f58a66", size = 60299, upload-time = "2026-10-02T08:47:43.234Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/9d/0518552a39febabe9cf6aab015112db7f58efac1bceec34f8aa97a9049a7/oxp_ontology-1.0.1-py3-none-any.whl", hash = "sha256:d505e8336f61792aceca27293a76b3713d29ddab0ee8a9f892d6de6dac652692", size = 60834, upload-time = "2026-10-05T16:17:22.622Z" },
 ]
 
 [package.optional-dependencies]
