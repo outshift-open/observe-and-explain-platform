@@ -53,6 +53,23 @@ def test_agent_call_node_round_trips_to_json():
     assert payload["node_type"] == "AgentCall"
 
 
+def test_llm_call_accepts_success():
+    """mas:success sits on ExecutionElement so LLMCall (and every other
+    *Call / Session) can take the flag norm already passes. Without this
+    field, oxp-ontology 1.0.0 raises extra_forbidden and drops the session."""
+    from oxp_ontology.models.nodes.llm_call import LLMCall
+
+    node = LLMCall(
+        id="llm-1",
+        sessionId="session-1",
+        startTime=0.0,
+        endTime=1.0,
+        duration=1000.0,
+        success=True,
+    )
+    assert node.success is True
+
+
 def test_mandatory_field_missing_raises_at_construction():
     """id/sessionId/startTime/endTime/duration are sh:minCount 1 +
     sh:severity sh:Violation on Element/ExecutionElement -- the generator
