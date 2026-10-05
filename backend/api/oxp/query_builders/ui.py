@@ -2002,13 +2002,17 @@ def traces_by_session_id_query(
     )
 
 
-_LEVEL_TO_LABEL = {
-    "session": "Session",
-    "mas": "MASCall",
-    "agent": "AgentCall",
-    "tool": "ToolCall",
-    "llm": "LLMCall",
-    "processing": "ProcessingCall",
+_LEVEL_TO_LABELS = {
+    "session": ["Session"],
+    "mas": ["MASCall"],
+    "agent": ["AgentCall"],
+    "tool": ["ToolCall"],
+    "llm": ["LLMCall"],
+    "processing": ["ProcessingCall"],
+    # The UI groups all three capability call types into a single "Calls" row
+    # (see ExecutionTimeline.tsx's HIERARCHY_LEVELS / sessions.py's level_order,
+    # both of which use "call", never "llm"/"tool"/"processing" individually).
+    "call": ["ToolCall", "LLMCall", "ProcessingCall"],
 }
 
 
@@ -2024,35 +2028,71 @@ def state_machine_graph_query(
     a Transition belongs to is determined by the label of the node its
     ``representsExecution`` edge points to, not a ``t.hierarchyLevel``
     property.
+
+    Likewise, a State's initial/final role is not a property on
+    ``State`` itself (which only carries ``content``) -- the ontology
+    models it relationally via ``Session -[:hasInitialState]-> State``
+    and ``Session -[:hasFinalState]-> State``, so those boundary states
+    must be matched explicitly to tag ``fromType``/``toType``.
+
+    The trajectory is *not* a single flat chain hanging off ``Session``:
+    every ``ExecutionElement`` (``AgentCall``, ``LLMCall``, ``ToolCall``,
+    ``ProcessingCall``, ``MASCall``) has its own nested ``hasState``
+    sub-trajectory, so walking only ``Session -[:hasState]-> State``
+    reaches just the session's two boundary states and misses the rest
+    of the execution tree entirely. ``Transition``/``State`` are
+    ``TrajectoryElement``s and carry ``sessionId`` directly, so the walk
+    is scoped by that property instead of by containment under Session.
+
+    ``level`` filtering must act as a genuine row filter, applied after
+    ``e`` (and ``structural``) are fully resolved via a ``WITH`` boundary.
+    A bare ``WHERE`` placed directly after an ``OPTIONAL MATCH`` only
+    qualifies *that* optional pattern -- rows outside the requested
+    levels would still be returned, just with ``e`` (and therefore
+    ``duration``/``entityName``/``hierarchyLevel``/``spanId``/
+    ``executionId``) silently nulled out instead of the row being
+    excluded.
     """
-    labels = [
-        _LEVEL_TO_LABEL[item.strip()]
-        for item in (level.split(",") if level else [])
-        if item.strip() in _LEVEL_TO_LABEL
-    ]
+    labels: list[str] = []
+    for item in level.split(",") if level else []:
+        labels.extend(_LEVEL_TO_LABELS.get(item.strip(), []))
+    labels = list(dict.fromkeys(labels))
     level_filter = (
         "WHERE any(lbl IN $levelLabels WHERE lbl IN labels(e))" if labels else ""
     )
 
     query = f"""
-        MATCH (s:Session {{sessionId: $sessionId}})-[:hasState]->(from:State)
-            -[:inputTo]->(t:Transition)-[:leadsTo]->(to:State)
+        MATCH (s:Session {{sessionId: $sessionId}})
+        OPTIONAL MATCH (s)-[:hasInitialState]->(initialState:State)
+        OPTIONAL MATCH (s)-[:hasFinalState]->(finalState:State)
+        MATCH (from:State)-[:inputTo]->(t:Transition {{sessionId: $sessionId}})-[:leadsTo]->(to:State)
         OPTIONAL MATCH (t)-[:representsExecution]->(e)
+        OPTIONAL MATCH (e)-[:executesAgent|executesTool|executesLLM|executesProcessing|executesMAS|executesSession]->(structural)
+        WITH from, to, t, e, structural, initialState, finalState
         {level_filter}
-        OPTIONAL MATCH (e)-[:executesAgent|executesTool|executesLLM|executesProcessing|executesMAS]->(structural)
         RETURN DISTINCT
             from.id as fromStateId,
             from.content as fromContent,
+            CASE
+                WHEN from.id = initialState.id THEN 'initial'
+                WHEN from.id = finalState.id THEN 'final'
+                ELSE 'intermediate'
+            END as fromType,
             to.id as toStateId,
             to.content as toContent,
+            CASE
+                WHEN to.id = initialState.id THEN 'initial'
+                WHEN to.id = finalState.id THEN 'final'
+                ELSE 'intermediate'
+            END as toType,
             t.id as transitionId,
             e.duration as duration,
             structural.name as entityName,
             CASE
                 WHEN 'AgentCall' IN labels(e) THEN 'agent'
-                WHEN 'LLMCall' IN labels(e) THEN 'llm'
-                WHEN 'ToolCall' IN labels(e) THEN 'tool'
-                WHEN 'ProcessingCall' IN labels(e) THEN 'processing'
+                WHEN 'LLMCall' IN labels(e) THEN 'call'
+                WHEN 'ToolCall' IN labels(e) THEN 'call'
+                WHEN 'ProcessingCall' IN labels(e) THEN 'call'
                 WHEN 'MASCall' IN labels(e) THEN 'mas'
                 WHEN 'Session' IN labels(e) THEN 'session'
                 ELSE null
