@@ -299,6 +299,17 @@ export const useHierarchy = (sessionId: string) => {
 };
 
 // Agent conversation types
+export interface AgentSubCallMessage {
+  transition_id: string;
+  execution_id: string | null;
+  call_type: 'llm' | 'tool';
+  name: string | null;
+  timestamp: number;
+  duration: number;
+  input: string | null;
+  output: string | null;
+}
+
 export interface AgentConversationMessage {
   transition_id: string;
   agent_name: string | null;
@@ -308,6 +319,7 @@ export interface AgentConversationMessage {
   edge_type: string;
   input: string | null;
   output: string | null;
+  calls: AgentSubCallMessage[];
 }
 
 export interface AgentConversationMetadata {

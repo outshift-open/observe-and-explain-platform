@@ -40,6 +40,7 @@ interface TimelineEdge {
   entityName: string;
   duration: number;
   hierarchyLevel: HierarchyLevel;
+  callType?: string;
   spanId?: string;
   executionId?: string;
 }
@@ -98,28 +99,24 @@ const LEVEL_LABELS: Record<HierarchyLevel, string> = {
 const CALL_TYPE_COLORS: Record<string, string> = {
   llm: '#FFE659',
   tool: '#74FFC7',
-  memory: '#FF007F',
+  memory: '#B967FF',
   rag: '#464C54',
-  processing: '#2E3E57',
+  processing: '#FF007F',
   user: '#F44336',
-  unknown: '#FF007F'
+  unknown: '#9E9E9E'
 };
 
-const HIERARCHY_LEGEND_ITEMS: HierarchyLevel[] = [
-  'session',
-  'mas',
-  'agent',
-  'task',
-  'call'
-];
-
+// One flat legend covering both the capability-call types (colored via
+// CALL_TYPE_COLORS) and the hierarchy levels (colored via getHierarchyColor)
+// -- "memory"/"rag"/"user" are dropped since they never actually occur in
+// real data (the ontology only produces tool/llm/processing calls).
 const CALL_LEGEND_ITEMS = [
   { type: 'llm', label: 'llm' },
   { type: 'tool', label: 'tool' },
-  { type: 'memory', label: 'memory' },
-  { type: 'rag', label: 'rag' },
-  { type: 'processing', label: 'processing' }
-  // { type: 'user', label: 'user' }
+  { type: 'processing', label: 'processing' },
+  { type: 'agent', label: 'agent' },
+  { type: 'mas', label: 'mas' },
+  { type: 'session', label: 'session' }
 ];
 
 const TIER_COLORS: Record<string, string> = {
@@ -228,6 +225,7 @@ export const ExecutionTimeline = ({
       duration: edge.data?.duration || 0,
       hierarchyLevel: (edge.metadata?.hierarchy_level ||
         'call') as HierarchyLevel,
+      callType: edge.data?.call_type,
       spanId: edge.data?.spanId,
       executionId: edge.data?.executionId
     }));
@@ -306,7 +304,12 @@ export const ExecutionTimeline = ({
     );
 
     const callSegments: TimelineSegment[] = callEdges.map((edge, index) => {
-      const entityType = getEntityTypeFromLabel(edge.entityName, 'call');
+      // The ontology distinguishes tool/llm/processing calls directly
+      // (ToolCall/LLMCall/ProcessingCall); prefer that over guessing the
+      // type from the call's label text, which misses real labels like
+      // "capability_chain_boundary" and silently falls back to 'unknown'.
+      const entityType =
+        edge.callType || getEntityTypeFromLabel(edge.entityName, 'call');
       const startPosition =
         index *
         (NODE_SIZE + SEGMENT_NODE_GAP + MIN_SEGMENT_WIDTH + SEGMENT_NODE_GAP);
@@ -454,10 +457,22 @@ export const ExecutionTimeline = ({
       return [...segmentsWithChildren, ...childlessSegments];
     };
 
+    // No ontology concept sits between "agent" and the capability calls
+    // (llm/tool/processing), so "task" segments are always empty.
+    //
+    // Every level above "call" is positioned directly against
+    // callSegments rather than against the immediately-adjacent parent
+    // tier: consecutive agent (or mas) calls are bridged by an
+    // intervening capability-call edge (e.g. a "capability_chain_boundary"
+    // processing call), so the agent-only (or mas-only) edge graph is not
+    // connected end-to-end on its own -- only the leaf "call" level is.
+    // findNodesOnPath would otherwise fail to find a path from a parent
+    // edge's source to its target, leaving it positioned as a tiny
+    // "childless" segment instead of spanning the real timeline.
     const taskSegments = buildParentSegments('task', callSegments);
-    const agentSegments = buildParentSegments('agent', taskSegments);
-    const masSegments = buildParentSegments('mas', agentSegments);
-    const sessionSegments = buildParentSegments('session', masSegments);
+    const agentSegments = buildParentSegments('agent', callSegments);
+    const masSegments = buildParentSegments('mas', callSegments);
+    const sessionSegments = buildParentSegments('session', callSegments);
 
     const nodeMap = new Map<
       string,
@@ -474,7 +489,8 @@ export const ExecutionTimeline = ({
 
     const buildStateNodesForLevel = (
       segments: TimelineSegment[],
-      level: HierarchyLevel
+      level: HierarchyLevel,
+      referencePositions?: Map<string, number>
     ): TimelineStateNode[] => {
       const nodePositionsForLevel = new Map<string, number>();
       const sortedSegments = [...segments].sort(
@@ -502,18 +518,28 @@ export const ExecutionTimeline = ({
             nodePositionsForLevel.set(seg.targetNodeId, targetPos);
           }
         } else {
+          // A state that also appears in the call row (e.g. a handoff state
+          // shared between two adjacent agent/mas segments) must render at
+          // that same x-position here -- otherwise this row's midpoint-based
+          // placement drifts away from the call row's segment-anchored one,
+          // and the two rows' markers for the same state fall out of
+          // vertical alignment.
+          const refSourcePos = referencePositions?.get(seg.sourceNodeId);
           if (!nodePositionsForLevel.has(seg.sourceNodeId)) {
             nodePositionsForLevel.set(
               seg.sourceNodeId,
-              seg.startPosition - NODE_SIZE / 2
+              refSourcePos ?? seg.startPosition - NODE_SIZE / 2
             );
           }
 
           const segEnd = seg.startPosition + seg.width;
           const nextSeg = sortedSegments[index + 1];
+          const refTargetPos = referencePositions?.get(seg.targetNodeId);
           let targetPos: number;
 
-          if (nextSeg) {
+          if (refTargetPos !== undefined) {
+            targetPos = refTargetPos;
+          } else if (nextSeg) {
             targetPos = segEnd + (nextSeg.startPosition - segEnd) / 2;
           } else {
             targetPos = segEnd + SEGMENT_NODE_GAP + NODE_SIZE / 2;
@@ -542,31 +568,48 @@ export const ExecutionTimeline = ({
         .sort((a, b) => a.position - b.position);
     };
 
+    const callStateNodes = buildStateNodesForLevel(callSegments, 'call');
+    const callNodePositions = new Map(
+      callStateNodes.map((n) => [n.id, n.position])
+    );
+
     const allRows: TimelineRow[] = [
       {
         level: 'session',
         segments: sessionSegments,
-        stateNodes: buildStateNodesForLevel(sessionSegments, 'session')
+        stateNodes: buildStateNodesForLevel(
+          sessionSegments,
+          'session',
+          callNodePositions
+        )
       },
       {
         level: 'mas',
         segments: masSegments,
-        stateNodes: buildStateNodesForLevel(masSegments, 'mas')
+        stateNodes: buildStateNodesForLevel(masSegments, 'mas', callNodePositions)
       },
       {
         level: 'agent',
         segments: agentSegments,
-        stateNodes: buildStateNodesForLevel(agentSegments, 'agent')
+        stateNodes: buildStateNodesForLevel(
+          agentSegments,
+          'agent',
+          callNodePositions
+        )
       },
       {
         level: 'task',
         segments: taskSegments,
-        stateNodes: buildStateNodesForLevel(taskSegments, 'task')
+        stateNodes: buildStateNodesForLevel(
+          taskSegments,
+          'task',
+          callNodePositions
+        )
       },
       {
         level: 'call',
         segments: callSegments,
-        stateNodes: buildStateNodesForLevel(callSegments, 'call')
+        stateNodes: callStateNodes
       }
     ];
 
@@ -818,26 +861,6 @@ export const ExecutionTimeline = ({
           justifyContent="center"
           flexWrap="wrap"
         >
-          {/* <Stack direction="row" gap={1} alignItems="center">
-            <Typography variant="caption" sx={{ color: theme.palette.text.secondary, mr: 0.5 }}>
-              LEVELS:
-            </Typography>
-            {HIERARCHY_LEGEND_ITEMS.map((level) => (
-              <Stack key={level} direction="row" gap={0.5} alignItems="center">
-                <Box
-                  sx={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: '2px',
-                    backgroundColor: getHierarchyColor(level, theme)
-                  }}
-                />
-                <Typography variant="caption" sx={{ color: theme.palette.text.secondary }}>
-                  {level}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack> */}
           <Stack direction="row" gap={1} alignItems="center">
             <Typography
               variant="caption"
@@ -857,7 +880,9 @@ export const ExecutionTimeline = ({
                     width: 12,
                     height: 12,
                     borderRadius: '2px',
-                    backgroundColor: CALL_TYPE_COLORS[item.type]
+                    backgroundColor:
+                      CALL_TYPE_COLORS[item.type] ||
+                      getHierarchyColor(item.type, theme)
                   }}
                 />
                 <Typography

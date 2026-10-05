@@ -17,7 +17,7 @@ def active_symbolic_model_by_application_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return the active symbolic model for an application."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel)
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel)
     WHERE coalesce(sm.isActive, false) = true
     RETURN
         sm.modelId AS modelId,
@@ -39,7 +39,7 @@ def symbolic_model_by_application_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return a specific symbolic model attached to an application."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     RETURN
         sm.modelId AS modelId,
         sm.version AS version,
@@ -61,7 +61,7 @@ def symbolic_models_by_application_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return symbolic models attached to an application."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel)
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel)
     """
     if active_only:
         query += """
@@ -101,7 +101,7 @@ def upsert_symbolic_model_query(
 ) -> tuple[str, dict[str, Any]]:
     """Create or update one symbolic model on an application."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})
+    MATCH (mas:MAS {id: $application_id})
     MERGE (mas)-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     ON CREATE SET sm.createdAt = coalesce($created_at, $updated_at)
     SET
@@ -134,7 +134,7 @@ def delete_symbolic_model_query(
 ) -> tuple[str, dict[str, Any]]:
     """Delete a symbolic model and symbolic variables defined under it."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     OPTIONAL MATCH (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable)
     WITH sm, collect(DISTINCT sv) AS variables
     FOREACH (variable IN variables | DETACH DELETE variable)
@@ -197,7 +197,7 @@ def application_symbolic_variables_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return symbolic variables for one model on an application."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     OPTIONAL MATCH (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable)
     OPTIONAL MATCH (sv)-[:DEPENDS_ON]->(dep:SymbolicVariable)
     WITH sv, collect(DISTINCT coalesce(dep.variableId, dep.name)) AS dependsOn
@@ -238,7 +238,7 @@ def symbolic_variable_exists_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return the variable if it already exists on the target model."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     MATCH (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable {variableId: $variable_id})
     RETURN sv.variableId AS variableId
     LIMIT 1
@@ -269,7 +269,7 @@ def upsert_symbolic_variable_query(
 ) -> tuple[str, dict[str, Any]]:
     """Create or update one symbolic variable on a symbolic model."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     MERGE (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable {variableId: $variable_id})
     ON CREATE SET sv.createdAt = coalesce($created_at, $updated_at)
     SET
@@ -310,7 +310,7 @@ def clear_symbolic_variable_dependencies_query(
 ) -> tuple[str, dict[str, Any]]:
     """Delete outgoing dependency edges for one symbolic variable."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     MATCH (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable {variableId: $variable_id})-[rel:DEPENDS_ON]->(:SymbolicVariable)
     DELETE rel
     """
@@ -329,7 +329,7 @@ def create_symbolic_variable_dependency_query(
 ) -> tuple[str, dict[str, Any]]:
     """Create one dependency edge between symbolic variables on a model."""
     query = """
-    MATCH (mas:MAS {masName: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
+    MATCH (mas:MAS {id: $application_id})-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel {modelId: $model_id})
     MATCH (sm)-[:DEFINES_VARIABLE]->(sv:SymbolicVariable {variableId: $variable_id})
     MATCH (sm)-[:DEFINES_VARIABLE]->(dep:SymbolicVariable {variableId: $depends_on_variable_id})
     MERGE (sv)-[:DEPENDS_ON]->(dep)

@@ -13,11 +13,11 @@ from typing import Any, Callable, Optional
 from oxp.client.constants import (
     ANSWER_RELEVANCY,
     APP_GROUNDEDNESS,
-    COMPLETION_TOKENS_KEY,
     COST_PER_TOKEN,
     DASH_SEPARATOR,
+    INPUT_TOKENS_KEY,
+    OUTPUT_TOKENS_KEY,
     PERIODS_COUNT,
-    PROMPT_TOKENS_KEY,
     RESPONSE_COMPLETENESS,
     SPACE_SEPARATOR,
     TASK_STATUS_DONE,
@@ -232,8 +232,8 @@ def _get_applications_from_clickhouse_multiquery(
             if dialect is Dialect.SQLITE:
                 for cr in cost_rows:
                     attrs = parse_span_attributes(str(cr[0]) if cr[0] else "")
-                    total_tokens += safe_int(attrs.get(PROMPT_TOKENS_KEY, ""))
-                    total_tokens += safe_int(attrs.get(COMPLETION_TOKENS_KEY, ""))
+                    total_tokens += safe_int(attrs.get(INPUT_TOKENS_KEY, ""))
+                    total_tokens += safe_int(attrs.get(OUTPUT_TOKENS_KEY, ""))
             else:
                 if cost_rows and cost_rows[0][0]:
                     total_tokens = int(float(cost_rows[0][0]))
@@ -1310,8 +1310,8 @@ def _get_application_agents(
         session_set: set[str] = set()
         for trow in token_rows:
             attrs = parse_span_attributes(str(trow[0]) if trow[0] else "")
-            llm_total_tokens += safe_int(attrs.get(PROMPT_TOKENS_KEY, ""))
-            llm_total_tokens += safe_int(attrs.get(COMPLETION_TOKENS_KEY, ""))
+            llm_total_tokens += safe_int(attrs.get(INPUT_TOKENS_KEY, ""))
+            llm_total_tokens += safe_int(attrs.get(OUTPUT_TOKENS_KEY, ""))
             session_set.add(str(trow[1]))
 
         llm_cost_dollars = llm_total_tokens * COST_PER_TOKEN

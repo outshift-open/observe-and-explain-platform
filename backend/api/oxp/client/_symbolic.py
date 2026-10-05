@@ -662,7 +662,7 @@ class SymbolicClient:
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         query = (
-            "MATCH (s:Session)-[]-(ma:MAS) WHERE ma.masName = $application_id "
+            "MATCH (s:Session)-[]-(ma:MAS) WHERE ma.id = $application_id "
             "WITH DISTINCT s "
             f"{where_clause} "
             "RETURN count(s) AS count"
@@ -1094,7 +1094,7 @@ class SymbolicClient:
     def get_application_reasoning_path(self, *, mas_name: str) -> dict[str, Any]:
         """Return an aggregated symbolic reasoning path across MAS sessions."""
         skeleton_query = (
-            "MATCH (mas:MAS {masName: $mas_name}) "
+            "MATCH (mas:MAS {id: $mas_name}) "
             "MATCH (mas)-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel) "
             "WHERE coalesce(sm.isActive, false) = true "
             "MATCH (sm)-[:DEFINES_VARIABLE]->(var:SymbolicVariable) "
@@ -1146,7 +1146,7 @@ class SymbolicClient:
         variable_ids = [row.get("variableId") for row in skeleton_records]
 
         scores_query = (
-            "MATCH (mas:MAS {masName: $mas_name})<-[:executesSession]-(s:Session) "
+            "MATCH (mas:MAS {id: $mas_name})<-[:executesSession]-(s:Session) "
             "MATCH (s)-[:hasMetric]->(m:Metric) "
             "WHERE m.metricName = 'trajectory_score' "
             "  AND m.source = 'SymbolicDiscovery' "
@@ -1164,7 +1164,7 @@ class SymbolicClient:
         valid_session_ids = list(score_by_session.keys())
 
         agg_query = (
-            "MATCH (mas:MAS {masName: $mas_name}) "
+            "MATCH (mas:MAS {id: $mas_name}) "
             "MATCH (mas)-[:HAS_SYMBOLIC_MODEL]->(sm:SymbolicModel) "
             "WHERE coalesce(sm.isActive, false) = true "
             "MATCH (sm)-[:DEFINES_VARIABLE]->(var:SymbolicVariable) "
@@ -1313,7 +1313,7 @@ class SymbolicClient:
             "MATCH (s)-[:hasMetric]->(m:Metric) "
             "WHERE m.metricName IN ['trajectory_score', 'statefulEval'] "
             "  AND m.reasoning IS NOT NULL "
-            "RETURN ma.masName AS applicationName, "
+            "RETURN ma.id AS applicationName, "
             "  collect(m.reasoning) AS reasonings"
         )
         rows = self._fetch_all(

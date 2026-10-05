@@ -11,10 +11,10 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
 from oxp.client.constants import (
-    COMPLETION_TOKENS_KEY,
     COST_PER_TOKEN,
     ERROR_STATUS,
-    PROMPT_TOKENS_KEY,
+    INPUT_TOKENS_KEY,
+    OUTPUT_TOKENS_KEY,
 )
 from oxp.client.utils import (
     extract_agent_description,
@@ -30,6 +30,7 @@ from oxp.models.otel_traces import (
     AgentConversationResponse,
     AgentDetailsItem,
     AgentDetailsResponse,
+    AgentSubCallMessage,
     Filters,
     GraphEdge,
     GraphNode,
@@ -223,6 +224,9 @@ def _fetch_state_machine_graph(
             execution_id = record.get("executionId")
             if execution_id:
                 edge_data["executionId"] = execution_id
+            call_type = record.get("callType")
+            if call_type:
+                edge_data["call_type"] = call_type
             edges.append(
                 GraphEdge(
                     id=str(
@@ -404,8 +408,8 @@ def _get_session_agent_details(
 
     for row in token_rows:
         attrs = parse_span_attributes(str(row[0]) if row[0] else "")
-        total_input_tokens += safe_int(attrs.get(PROMPT_TOKENS_KEY, ""))
-        total_output_tokens += safe_int(attrs.get(COMPLETION_TOKENS_KEY, ""))
+        total_input_tokens += safe_int(attrs.get(INPUT_TOKENS_KEY, ""))
+        total_output_tokens += safe_int(attrs.get(OUTPUT_TOKENS_KEY, ""))
         model_name = attrs.get("gen_ai.request.model", "")
         if model_name and model_name not in llm_names:
             llm_names.append(model_name)
@@ -1219,6 +1223,7 @@ def fetch_execution_hierarchy_graph(
 
         timestamp = record.get("timestamp") or 0
         model_name = record.get("modelName")
+        parent_agent_exec_id = record.get("parentAgentExecId")
 
         nodes.append(
             GraphNode(
@@ -1263,12 +1268,32 @@ def fetch_execution_hierarchy_graph(
                         if record.get("outputContent") is not None
                         else None
                     ),
+                    parent_agent_exec_id=(
+                        str(parent_agent_exec_id)
+                        if parent_agent_exec_id is not None
+                        else None
+                    ),
                 ).model_dump(),
                 metadata={},
             )
         )
         node_ids.add(transition_id)
         call_nodes.append({"id": transition_id, "timestamp": timestamp})
+
+        if parent_agent_exec_id:
+            parent_agent_id = agent_exec_to_transition_id.get(
+                str(parent_agent_exec_id)
+            )
+            if parent_agent_id:
+                hierarchy_edges.append(
+                    {
+                        "id": f"{parent_agent_id}_to_{transition_id}",
+                        "source": parent_agent_id,
+                        "target": transition_id,
+                        "level": 3,
+                        "timestamp": timestamp,
+                    }
+                )
 
     _append_sequence_edges(edges, call_nodes)
     _append_hierarchy_edges(edges, hierarchy_edges)
@@ -1309,16 +1334,39 @@ def fetch_agent_conversation(
     *,
     session_id: str,
 ) -> AgentConversationResponse:
-    """Fetch the ordered list of agent-level turns (the agent "conversation") for a session."""
+    """Fetch the ordered "conversation" for a session.
+
+    Agent-level turns alone only carry each agent's own routing
+    input/output (e.g. a ``Command`` to hand off to another agent) --
+    the actual substance of the conversation is each agent's LLM and tool
+    calls, so those are nested under the agent turn that made them (via
+    the ``hasLLMCall``/``hasToolCall`` edges), interleaved in the
+    chronological order they actually happened, rather than listed as
+    separate top-level entries.
+    """
     agent_records = _fetch_execution_hierarchy_records(
         db,
         session_id=session_id,
         query_builder=ui_queries.execution_hierarchy_agent_query,
         scope="agent",
     )
+    llm_records = _fetch_execution_hierarchy_records(
+        db,
+        session_id=session_id,
+        query_builder=ui_queries.execution_hierarchy_llm_call_query,
+        scope="llm_call",
+    )
+    tool_records = _fetch_execution_hierarchy_records(
+        db,
+        session_id=session_id,
+        query_builder=ui_queries.execution_hierarchy_tool_call_query,
+        scope="tool_call",
+    )
 
     messages: list[AgentConversationMessage] = []
+    messages_by_agent_exec_id: dict[str, AgentConversationMessage] = {}
     seen_transition_ids: set[str] = set()
+
     for record in agent_records:
         transition_id = str(record.get("transitionId") or "")
         if not transition_id or transition_id in seen_transition_ids:
@@ -1328,18 +1376,77 @@ def fetch_agent_conversation(
         agent_name = record.get("agentName")
         execution_id = record.get("executionId")
 
-        messages.append(
-            AgentConversationMessage(
+        message = AgentConversationMessage(
+            transition_id=transition_id,
+            agent_name=str(agent_name) if agent_name is not None else None,
+            execution_id=str(execution_id) if execution_id is not None else None,
+            timestamp=record.get("timestamp") or 0,
+            duration=record.get("duration") or 0,
+            edge_type="agent",
+            input=record.get("inputContent"),
+            output=record.get("outputContent"),
+        )
+        messages.append(message)
+        if message.execution_id:
+            messages_by_agent_exec_id[message.execution_id] = message
+
+    def _add_sub_calls(
+        records: list[dict[str, Any]], call_type: str, name_field: str
+    ) -> None:
+        for record in records:
+            transition_id = str(record.get("transitionId") or "")
+            if not transition_id or transition_id in seen_transition_ids:
+                continue
+            seen_transition_ids.add(transition_id)
+
+            execution_id = record.get("executionId")
+            sub_call = AgentSubCallMessage(
                 transition_id=transition_id,
-                agent_name=str(agent_name) if agent_name is not None else None,
-                execution_id=str(execution_id) if execution_id is not None else None,
+                execution_id=(
+                    str(execution_id) if execution_id is not None else None
+                ),
+                call_type=call_type,
+                name=record.get(name_field),
                 timestamp=record.get("timestamp") or 0,
                 duration=record.get("duration") or 0,
-                edge_type=str(record.get("edgeType") or ""),
                 input=record.get("inputContent"),
                 output=record.get("outputContent"),
             )
-        )
+
+            parent_agent_exec_id = record.get("parentAgentExecId")
+            parent_message = (
+                messages_by_agent_exec_id.get(str(parent_agent_exec_id))
+                if parent_agent_exec_id
+                else None
+            )
+            if parent_message is not None:
+                parent_message.calls.append(sub_call)
+            else:
+                # No AgentCall claims this call (e.g. a top-level/MAS-level
+                # LLM call) -- surface it as its own top-level entry rather
+                # than silently dropping it.
+                agent_name = record.get("agentName")
+                messages.append(
+                    AgentConversationMessage(
+                        transition_id=transition_id,
+                        agent_name=(
+                            str(agent_name) if agent_name is not None else None
+                        ),
+                        execution_id=sub_call.execution_id,
+                        timestamp=sub_call.timestamp,
+                        duration=sub_call.duration,
+                        edge_type=call_type,
+                        input=sub_call.input,
+                        output=sub_call.output,
+                    )
+                )
+
+    _add_sub_calls(llm_records, "llm", "modelName")
+    _add_sub_calls(tool_records, "tool", "toolName")
+
+    for message in messages:
+        message.calls.sort(key=lambda sub_call: sub_call.timestamp)
+    messages.sort(key=lambda message: message.timestamp)
 
     return AgentConversationResponse(
         session_id=session_id,
