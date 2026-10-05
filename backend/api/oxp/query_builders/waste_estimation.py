@@ -30,7 +30,7 @@ def top_wasteful_sessions_query(
     WHERE ($start_time IS NULL OR s.startTime >= $start_time)
       AND ($end_time IS NULL OR s.startTime <= $end_time)
       AND EXISTS {
-        MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
+        MATCH (s)-[:executesSession]->(:MAS {id: $application_name})
       }
     OPTIONAL MATCH (g:SemanticGroup)-[:containsSession]->(s)
     WITH n, s, head(collect(g.groupName)) AS semanticGroup,
@@ -72,7 +72,7 @@ def cost_efficiency_grouped_sessions_query(
     MATCH (w:WasteEstimation {sessionId: s.sessionId})
     WHERE w.actualCost <> 0
       AND EXISTS {
-        MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
+        MATCH (s)-[:executesSession]->(:MAS {id: $application_name})
       }
     RETURN s.sessionId AS sessionId,
            s.startTime AS startTime,
@@ -157,7 +157,7 @@ def sessions_insights_query(
     WHERE ($start_time IS NULL OR datetime(i.createdAt) >= datetime({epochSeconds: $start_time}))
       AND ($end_time IS NULL OR datetime(i.createdAt) <= datetime({epochSeconds: $end_time}))
       AND ($application_name IS NULL OR EXISTS {
-        MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
+        MATCH (s)-[:executesSession]->(:MAS {id: $application_name})
       })
       AND ($semantic_group_id IS NULL OR EXISTS {
         MATCH (:SemanticGroup {id: $semantic_group_id})-[:containsSession*1..]->(s)

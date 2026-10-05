@@ -384,10 +384,10 @@ def applications_with_sessions_and_tokens_query(
     r = _refs(dialect)
 
     prompt_tokens = literal_column(
-        "toFloat64OrZero(SpanAttributes['gen_ai.usage.prompt_tokens'])"
+        "toFloat64OrZero(SpanAttributes['gen_ai.usage.input_tokens'])"
     )
     completion_tokens = literal_column(
-        "toFloat64OrZero(SpanAttributes['gen_ai.usage.completion_tokens'])"
+        "toFloat64OrZero(SpanAttributes['gen_ai.usage.output_tokens'])"
     )
     agent_base = literal_column("splitByChar('.', agent_id)[1]")
     llm_expr = literal_column("SpanAttributes['gen_ai.request.model']")
@@ -1525,10 +1525,10 @@ def token_sum_by_sessions_clickhouse_query(
         )
 
     prompt_tokens = literal_column(
-        "toFloat64OrZero(SpanAttributes['gen_ai.usage.prompt_tokens'])"
+        "toFloat64OrZero(SpanAttributes['gen_ai.usage.input_tokens'])"
     )
     completion_tokens = literal_column(
-        "toFloat64OrZero(SpanAttributes['gen_ai.usage.completion_tokens'])"
+        "toFloat64OrZero(SpanAttributes['gen_ai.usage.output_tokens'])"
     )
     return (
         select(func.sum(prompt_tokens + completion_tokens).label("total_tokens"))
@@ -1801,6 +1801,7 @@ def collect_chat_spans_for_sessions_query(
         llm_filter = or_(
             r.span_name.like("%.chat"),
             r.span_attributes.like("%llm.usage.total_tokens%"),
+            r.span_attributes.like("%gen_ai.usage.input_tokens%"),
             r.span_attributes.like("%gen_ai.usage.prompt_tokens%"),
         )
     else:

@@ -261,10 +261,10 @@ def metrics_query(
     """Return metrics for an application filtered by a list of metric names.
 
     Traversal (no agent filter):
-        ``Session -[:executesSession]-> MAS {masName}``
+        ``Session -[:executesSession]-> MAS {id}``
         ``Session -[:hasMetric|measuresCall]- Metric``
     Traversal (with agent filter):
-        ``Session -[:executesSession]-> MAS {masName}``
+        ``Session -[:executesSession]-> MAS {id}``
         ``Session -[:hasSpan]-> Span {agentId} -[:hasMetric|measuresCall]- Metric``
 
     Both ``hasMetric`` (Session→Metric) and ``measuresCall``
@@ -295,7 +295,7 @@ def metrics_query(
         # Return both session-attached metrics and span-attached metrics
         # for spans associated with the requested agent.
         query = f"""
-        MATCH (s:Session)-[:executesSession]->(:MAS {{masName: $application_id}})
+        MATCH (s:Session)-[:executesSession]->(:MAS {{id: $application_id}})
         WHERE EXISTS {{
             MATCH (a:AgentCall {{sessionId: s.sessionId, agentName: $agent_id}})
         }}
@@ -356,7 +356,7 @@ def metrics_query(
         """
     else:
         query = f"""
-        MATCH (s:Session)-[:executesSession]->(:MAS {{masName: $application_id}})
+        MATCH (s:Session)-[:executesSession]->(:MAS {{id: $application_id}})
         MATCH (s)-[:hasMetric|measuresCall]-(m:Metric)
         WHERE m.metricName IN $metric_names
         {where}
@@ -508,7 +508,7 @@ def get_application_metrics_timeline(
 ) -> tuple[str, dict[str, Any]]:
     params = {"application_id": application_id, "metrics": metrics}
     query = """
-    MATCH (s:Session)-[]-(mas:MAS {masName: $application_id})
+    MATCH (s:Session)-[]-(mas:MAS {id: $application_id})
         MATCH (s)-[]-(m:Metric)
     WHERE m.metricName IN $metrics
             AND m.metricName IS NOT NULL
@@ -524,16 +524,26 @@ def get_application_metrics_timeline(
     return query, params
 
 
-# TODO Hack to get completion rate
 def reliability_metrics(
     application_id: str,
     start_time: str | None = None,
     end_time: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """Reliability sub-scores for the application's health score.
+
+    ``ConsistencyReport`` isn't linked to ``MAS`` directly -- it's scoped
+    to the application via the ``SemanticGroup`` whose sessions it was
+    computed over (``ConsistencyReport -[:ofSemanticGroup]-> SemanticGroup
+    -[:containsSession]-> Session -[:executesSession]-> MAS``), so that
+    walk is used instead of matching ``ConsistencyReport`` globally across
+    every application.
+    """
     params = {"application_id": application_id}
     query = """
-    // Consistency
-    MATCH (cr:ConsistencyReport)
+    // Consistency (scoped to this application via its semantic groups' sessions)
+    MATCH (cr:ConsistencyReport)-[:ofSemanticGroup]->(:SemanticGroup)
+        -[:containsSession]->(:Session)-[:executesSession]->(:MAS {id: $application_id})
+    WITH DISTINCT cr
     WITH cr.dataType AS rawType, AVG(cr.mean) AS Reliability
     WITH (CASE rawType
         WHEN 'metric' THEN 'MetricConsistency'
@@ -543,7 +553,7 @@ def reliability_metrics(
     WITH collect({col1: DataType, col2: Reliability}) AS reliabilityStats
 
     // Completion Rate
-    MATCH (m:Metric)-[]-(s:Session)-[]-(mas:MAS {masName:$application_id})
+    MATCH (m:Metric)-[]-(s:Session)-[]-(mas:MAS {id:$application_id})
     WHERE m.metricName IN ['ToolErrorRate', 'LLMErrorRate']
     WITH reliabilityStats, 1 - AVG(m.metricResult) AS CompletionRate
 

@@ -11,10 +11,10 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
 from oxp.client.constants import (
-    COMPLETION_TOKENS_KEY,
     COST_PER_TOKEN,
     ERROR_STATUS,
-    PROMPT_TOKENS_KEY,
+    INPUT_TOKENS_KEY,
+    OUTPUT_TOKENS_KEY,
 )
 from oxp.client.utils import (
     extract_agent_description,
@@ -408,8 +408,8 @@ def _get_session_agent_details(
 
     for row in token_rows:
         attrs = parse_span_attributes(str(row[0]) if row[0] else "")
-        total_input_tokens += safe_int(attrs.get(PROMPT_TOKENS_KEY, ""))
-        total_output_tokens += safe_int(attrs.get(COMPLETION_TOKENS_KEY, ""))
+        total_input_tokens += safe_int(attrs.get(INPUT_TOKENS_KEY, ""))
+        total_output_tokens += safe_int(attrs.get(OUTPUT_TOKENS_KEY, ""))
         model_name = attrs.get("gen_ai.request.model", "")
         if model_name and model_name not in llm_names:
             llm_names.append(model_name)

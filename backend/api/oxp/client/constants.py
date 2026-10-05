@@ -13,8 +13,6 @@ PROMPT_CONTENT = "gen_ai.prompt.{}.content"
 COMPLETION_ROLE = "gen_ai.completion.{}.role"
 COMPLETION_CONTENT = "gen_ai.completion.{}.content"
 
-PROMPT_TOKENS_KEY = "gen_ai.usage.prompt_tokens"
-COMPLETION_TOKENS_KEY = "gen_ai.usage.completion_tokens"
 INPUT_TOKENS_KEY = "gen_ai.usage.input_tokens"
 OUTPUT_TOKENS_KEY = "gen_ai.usage.output_tokens"
 LLM_USAGE_TOTAL_TOKENS = "llm.usage.total_tokens"

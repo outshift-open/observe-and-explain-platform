@@ -13,12 +13,12 @@ from datetime import datetime, timezone
 from oxp.client.constants import (
     COMPLETION_CONTENT,
     COMPLETION_ROLE,
-    COMPLETION_TOKENS_KEY,
     COST_PER_TOKEN,
     ENTITY_INPUT,
     ENTITY_OUTPUT,
     ERROR_STATUS,
     EXCEPTION_MESSAGE,
+    INPUT_TOKENS_KEY,
     KEY_INPUT_COST,
     KEY_INPUT_TOKENS,
     KEY_OUTPUT_COST,
@@ -26,9 +26,9 @@ from oxp.client.constants import (
     KEY_TOTAL_COST,
     KEY_TOTAL_TOKENS,
     LLM_USAGE_TOTAL_TOKENS,
+    OUTPUT_TOKENS_KEY,
     PROMPT_CONTENT,
     PROMPT_ROLE,
-    PROMPT_TOKENS_KEY,
     SCOPE_NAME_TRACER,
     TRACELOOP_INPUT,
     TRACELOOP_OUTPUT,
@@ -277,13 +277,13 @@ def build_chat_attributes(attrs: dict[str, str]) -> list[SpanAttribute]:
                 result.append(SpanAttribute(key=key, value=clean))
 
     # Token counts + costs
-    input_tokens = attrs.get(PROMPT_TOKENS_KEY, "")
+    input_tokens = attrs.get(INPUT_TOKENS_KEY, "")
     if input_tokens:
         result.append(SpanAttribute(key=KEY_INPUT_TOKENS, value=input_tokens))
         cost = safe_int(input_tokens) * COST_PER_TOKEN
         result.append(SpanAttribute(key=KEY_INPUT_COST, value=f"{cost:f}$"))
 
-    output_tokens = attrs.get(COMPLETION_TOKENS_KEY, "")
+    output_tokens = attrs.get(OUTPUT_TOKENS_KEY, "")
     if output_tokens:
         result.append(SpanAttribute(key=KEY_OUTPUT_TOKENS, value=output_tokens))
         cost = safe_int(output_tokens) * COST_PER_TOKEN
