@@ -130,3 +130,11 @@ mas:embeddingModel rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     rdfs:range [ owl:unionOf ( mas:Session mas:SemanticGroup ) ] ;
     rdfs:comment "SemanticGroup contains this Session or nested SemanticGroup (hierarchical clustering)." .
 
+:containsSemanticGroup rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path :containsSession ;
+    sh:targetClass mas:MAS ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:SemanticGroup ;
+    rdfs:range mas:MAS ;
+    rdfs:comment "MAS contains this SemanticGroup." .
