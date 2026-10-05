@@ -273,6 +273,15 @@
     rdfs:range xsd:string ;
     rdfs:comment "ID of the corresponding parent span in OTel traces, where one exists." .
 
+:success rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path :success ;
+    sh:targetClass :ExecutionElement ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain :ExecutionElement ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "Whether this execution completed successfully (from the span StatusCode or execution.success)." .
+
 # --- Session
 
 :Session rdf:type owl:Class ;
