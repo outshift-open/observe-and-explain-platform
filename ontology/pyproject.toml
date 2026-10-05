@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "oxp-ontology"
-version = "1.0.0"
+version = "1.0.1"
 description = "The MAS execution ontology for the Observe and eXplain Platform."
 readme = "PACKAGE_README.md"
 requires-python = ">=3.9"

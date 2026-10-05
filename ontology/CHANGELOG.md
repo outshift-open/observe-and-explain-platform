@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versioning starts at `1.0.0` with this open-source release.
 
+## [1.0.1] - 2026-10-05
+
+### Added
+
+- `semantic-ontology.ttl`: `containsSemanticGroup` link from `MAS` to `SemanticGroup`.
+
+### Fixed
+
+- `mas-ontology.ttl`: optional `mas:success` boolean on `ExecutionElement`, so `Session` and every
+  `*Call` model accepts the success flag already set by `norm`.
+
 ## [1.0.0] - 2026-09-30
 
 ### Added
