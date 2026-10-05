@@ -709,6 +709,20 @@ class GraphResponse(BaseModel):
 # ── Agent conversation endpoint models ───────────────────────────────────────
 
 
+class AgentSubCallMessage(BaseModel):
+    """A single LLM or tool call nested under the agent-level turn that made
+    it, in the chronological order it actually happened."""
+
+    transition_id: str
+    execution_id: Optional[str] = None
+    call_type: str  # "llm" | "tool"
+    name: Optional[str] = None  # model name (llm) or tool name (tool)
+    timestamp: float
+    duration: float = 0.0
+    input: Optional[str] = None
+    output: Optional[str] = None
+
+
 class AgentConversationMessage(BaseModel):
     """A single agent-level turn, used to render the Conversation tab."""
 
@@ -720,6 +734,7 @@ class AgentConversationMessage(BaseModel):
     edge_type: str = ""
     input: Optional[str] = None
     output: Optional[str] = None
+    calls: List[AgentSubCallMessage] = []
 
 
 class AgentConversationResponse(BaseModel):

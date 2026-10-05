@@ -2097,6 +2097,12 @@ def state_machine_graph_query(
                 WHEN 'Session' IN labels(e) THEN 'session'
                 ELSE null
             END as hierarchyLevel,
+            CASE
+                WHEN 'ToolCall' IN labels(e) THEN 'tool'
+                WHEN 'LLMCall' IN labels(e) THEN 'llm'
+                WHEN 'ProcessingCall' IN labels(e) THEN 'processing'
+                ELSE null
+            END as callType,
             e.spanId as spanId,
             e.id as executionId
         ORDER BY from.id
@@ -2159,11 +2165,16 @@ def execution_hierarchy_mas_query(
     *,
     session_id: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the Cypher query for MAS-level transitions."""
+    """Build the Cypher query for MAS-level transitions.
+
+    Scoped by ``Transition.sessionId`` rather than by ``Session
+    -[:hasState]->`` (see ``state_machine_graph_query``'s docstring):
+    the latter only reaches the session's two boundary states, missing
+    every MAS/agent/call nested further down the trajectory tree.
+    """
     query = """
-        MATCH (s:Session {sessionId: $sessionId})-[:hasState]->(inputState:State)
-            -[:inputTo]->(t:Transition)
-        MATCH (t)-[:representsExecution]->(mc:MASCall)
+        MATCH (inputState:State)-[:inputTo]->(t:Transition {sessionId: $sessionId})
+            -[:representsExecution]->(mc:MASCall)
         OPTIONAL MATCH (t)-[:leadsTo]->(outputState:State)
         RETURN t.id as transitionId,
                mc.startTime as timestamp,
@@ -2179,11 +2190,14 @@ def execution_hierarchy_agent_query(
     *,
     session_id: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the Cypher query for agent-level transitions."""
+    """Build the Cypher query for agent-level transitions.
+
+    Scoped by ``Transition.sessionId`` rather than by ``Session
+    -[:hasState]->`` -- see ``execution_hierarchy_mas_query``.
+    """
     query = """
-        MATCH (s:Session {sessionId: $sessionId})-[:hasState]->(inputState:State)
-            -[:inputTo]->(t:Transition)
-        MATCH (t)-[:representsExecution]->(ac:AgentCall)
+        MATCH (inputState:State)-[:inputTo]->(t:Transition {sessionId: $sessionId})
+            -[:representsExecution]->(ac:AgentCall)
         OPTIONAL MATCH (ac)-[:executesAgent]->(agent:Agent)
         OPTIONAL MATCH (t)-[:leadsTo]->(outputState:State)
         RETURN t.id as transitionId,
@@ -2202,11 +2216,14 @@ def execution_hierarchy_tool_call_query(
     *,
     session_id: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the Cypher query for tool call-level transitions."""
+    """Build the Cypher query for tool call-level transitions.
+
+    Scoped by ``Transition.sessionId`` rather than by ``Session
+    -[:hasState]->`` -- see ``execution_hierarchy_mas_query``.
+    """
     query = """
-        MATCH (s:Session {sessionId: $sessionId})-[:hasState]->(inputState:State)
-            -[:inputTo]->(t:Transition)
-        MATCH (t)-[:representsExecution]->(tc:ToolCall)
+        MATCH (inputState:State)-[:inputTo]->(t:Transition {sessionId: $sessionId})
+            -[:representsExecution]->(tc:ToolCall)
         OPTIONAL MATCH (tc)-[:executesTool]->(tool:Tool)
         OPTIONAL MATCH (ac:AgentCall)-[:hasToolCall]->(tc)
         OPTIONAL MATCH (t)-[:leadsTo]->(outputState:State)
@@ -2228,12 +2245,17 @@ def execution_hierarchy_llm_call_query(
     *,
     session_id: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Build the Cypher query for LLM call-level transitions."""
+    """Build the Cypher query for LLM call-level transitions.
+
+    Scoped by ``Transition.sessionId`` rather than by ``Session
+    -[:hasState]->`` -- see ``execution_hierarchy_mas_query``.
+    """
     query = """
-        MATCH (s:Session {sessionId: $sessionId})-[:hasState]->(inputState:State)
-            -[:inputTo]->(t:Transition)
-        MATCH (t)-[:representsExecution]->(lc:LLMCall)
+        MATCH (inputState:State)-[:inputTo]->(t:Transition {sessionId: $sessionId})
+            -[:representsExecution]->(lc:LLMCall)
         OPTIONAL MATCH (lc)-[:executesLLM]->(llm:LLM)
+        OPTIONAL MATCH (ac:AgentCall)-[:hasLLMCall]->(lc)
+        OPTIONAL MATCH (ac)-[:executesAgent]->(agent:Agent)
         OPTIONAL MATCH (t)-[:leadsTo]->(outputState:State)
         RETURN t.id as transitionId,
                lc.startTime as timestamp,
@@ -2247,6 +2269,8 @@ def execution_hierarchy_llm_call_query(
                lc.temperature as temperature,
                lc.finishReason as finishReason,
                lc.id as executionId,
+               agent.name as agentName,
+               ac.id as parentAgentExecId,
                inputState.content as inputContent,
                outputState.content as outputContent
         ORDER BY lc.startTime
