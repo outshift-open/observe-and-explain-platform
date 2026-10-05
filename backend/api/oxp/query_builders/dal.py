@@ -279,7 +279,7 @@ def build_semantic_group_hierarchy_query(
     Mirrors ``Neo4jDBHandler.get_semantic_group_hierarchy`` in *oxp-lib*.
     """
     query = """
-    MATCH (:MAS {id: $application_id})-[:hasSemanticGroup]->(sg:SemanticGroup {embeddingModel: $embedding_model})
+    MATCH (:MAS {id: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup {embeddingModel: $embedding_model})
     RETURN sg
     ORDER BY sg.nSessions DESC
     """

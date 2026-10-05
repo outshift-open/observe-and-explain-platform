@@ -53,7 +53,7 @@ def top_wasteful_sessions_query(
 def waste_estimations_semantic_groups_query() -> tuple[str, dict[str, Any]]:
     query = """
     MATCH (sg:SemanticGroup {childrenNodes: []})
-    OPTIONAL MATCH (sg)-[]-(s:Session)
+    OPTIONAL MATCH (sg)-[:containsSession]->(s:Session)
     WITH sg, collect(DISTINCT s.sessionId) AS sessionIds
     UNWIND sessionIds AS sid
     OPTIONAL MATCH (w:WasteEstimation {sessionId: sid})
@@ -68,7 +68,7 @@ def cost_efficiency_grouped_sessions_query(
     application_name: str,
 ) -> tuple[str, dict[str, Any]]:
     query = """
-    MATCH (sg:SemanticGroup {childrenNodes: []})-[]-(s:Session)
+    MATCH (sg:SemanticGroup {childrenNodes: []})-[:containsSession]->(s:Session)
     MATCH (w:WasteEstimation {sessionId: s.sessionId})
     WHERE w.actualCost <> 0
       AND EXISTS {
@@ -122,7 +122,7 @@ def semantic_groups_insights_query(
     WHERE ($start_time IS NULL OR datetime(i.createdAt) >= datetime({epochSeconds: $start_time}))
       AND ($end_time IS NULL OR datetime(i.createdAt) <= datetime({epochSeconds: $end_time}))
       AND ($application_name IS NULL OR EXISTS {
-        MATCH (:MAS {masName: $application_name})-[:hasSemanticGroup]->(s)
+        MATCH (:MAS {masName: $application_name})-[:containsSemanticGroup]->(s)
       })
     RETURN s.groupName AS groupName,
            s.groupSummary AS groupSummary,
@@ -160,7 +160,7 @@ def sessions_insights_query(
         MATCH (s)-[:executesSession]->(:MAS {masName: $application_name})
       })
       AND ($semantic_group_id IS NULL OR EXISTS {
-        MATCH (:SemanticGroup {id: $semantic_group_id})-[:containsSession]->(s)
+        MATCH (:SemanticGroup {id: $semantic_group_id})-[:containsSession*1..]->(s)
       })
     RETURN s.duration AS duration,
            s.endTime AS endTime,

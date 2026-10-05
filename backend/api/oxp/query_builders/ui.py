@@ -988,7 +988,7 @@ def semantic_groups_table_query(
     Semantic groups are currently sourced from Neo4j semantic nodes.
     """
     query = """
-    MATCH (:MAS {name: $application_id})-[:hasSemanticGroup]->(sg:SemanticGroup {childrenNodes: []})
+    MATCH (:MAS {name: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup {childrenNodes: []})
     // First, gather all consistency reports from the semantic groups
     OPTIONAL MATCH (sg)-[r]-(cr:ConsistencyReport)
     WITH sg, cr.dataType AS rawType, AVG(cr.mean) AS Value
@@ -1002,7 +1002,7 @@ def semantic_groups_table_query(
     WITH sg,
       collect({col1: DataType, col2: Value}) AS consistency
     // Collect sessions attached to the semantic groups
-    OPTIONAL MATCH (sg)-[]-(s:Session)
+    OPTIONAL MATCH (sg)-[:containsSession]->(s:Session)
     // Collect Metrics associated to the sessions
     OPTIONAL MATCH (s)-[]-(m:Metric)
     WHERE m.metricName IN ["LLMErrorRate",
@@ -1043,7 +1043,7 @@ def semantic_groups_query(
     The current Neo4j model stores semantic groups as ``SemanticGroup`` nodes.
     """
     query = """
-    MATCH (:MAS {name: $application_id})-[:hasSemanticGroup]->(sg:SemanticGroup)
+    MATCH (:MAS {name: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup)
     // First, gather all consistency reports from the semantic groups
     OPTIONAL MATCH (sg)-[r]-(cr:ConsistencyReport)
     WITH sg, cr.dataType AS rawType, AVG(cr.mean) AS Value
@@ -1057,7 +1057,7 @@ def semantic_groups_query(
     WITH sg,
       collect({col1: DataType, col2: Value}) AS consistency
     // Collect sessions attached to the semantic groups
-    OPTIONAL MATCH (sg)-[]-(s:Session)
+    OPTIONAL MATCH (sg)-[:containsSession*1..]->(s:Session)
     // Collect Metrics associated to the sessions
     OPTIONAL MATCH (s)-[]-(m:Metric)
     WHERE m.metricName IN ["LLMErrorRate",
@@ -1097,11 +1097,11 @@ def semantic_group_impact_assessment_query(
     # TODO: need to find a better way to handle this
     # Currently this is parsing manually a string into a json object and extracting the different fields and values.
     # It works, but it's ugly
-    return f"""
-    MATCH (sg:SemanticGroup {{id: '{semanticgroup_id}'}})-[]-(s:Session)-[]-(ia:ImpactAssessment)
+    query = """
+    MATCH (sg:SemanticGroup {id: $semanticgroup_id})-[:containsSession*1..]->(s:Session)-[:hasImpactAssessment]->(ia:ImpactAssessment)
     WITH ia.metricName AS metricName, ia.contributions AS contributionsStr
     // Remove braces and quotes, then split by comma to get agent-value pairs
-    WITH metricName, split(replace(replace(contributionsStr, '{{', ''), '}}', ''), ',') AS agentValuePairs
+    WITH metricName, split(replace(replace(contributionsStr, '{', ''), '}', ''), ',') AS agentValuePairs
     UNWIND agentValuePairs AS pair
     //Split each pair by colon to separate agent and value
     WITH metricName, split(pair, ':') AS parts
@@ -1109,9 +1109,10 @@ def semantic_group_impact_assessment_query(
     //Remove quotes from agent name
     WITH metricName, replace(agentRaw, '"', '') AS agent, toFloat(valueRaw) AS value
     WITH metricName, agent, avg(value) as avgValue
-    WITH metricName, collect({{agent: agent, value: avgValue}}) AS contributions
+    WITH metricName, collect({agent: agent, value: avgValue}) AS contributions
     RETURN metricName, contributions
     """
+    return query, {"semanticgroup_id": semanticgroup_id}
 
 
 def session_ids_graph_query(
@@ -1664,7 +1665,7 @@ def collect_page_sessions_with_stateful_eval_query(
         WHERE ($start_time IS NULL OR s.startTime >= $start_time)
           AND ($end_time IS NULL OR s.startTime <= $end_time)
           AND ($semantic_group_id IS NULL OR EXISTS {
-                MATCH (sg:SemanticGroup {id: $semantic_group_id})-[]-(s)
+                MATCH (sg:SemanticGroup {id: $semantic_group_id})-[:containsSession*1..]->(s)
           })
         OPTIONAL MATCH (s) - [] - (mCost:Metric) WHERE mCost.metricName = 'Cost'
         WITH s, head(collect(DISTINCT mCost.metricResult)) AS cost
