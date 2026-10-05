@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versioning starts at `1.0.0` with this open-source release.
 
+## [1.0.2] - 2026-10-05
+
+### Fixed
+
+- `semantic-ontology.ttl`: `containsSemanticGroup` had its `sh:path` and `rdfs:domain`/`rdfs:range`
+  reversed (copy-pasted from `containsSession`). Corrected to `domain mas:MAS`, `range
+  mas:SemanticGroup`, `sh:path :containsSemanticGroup`, matching its own description ("MAS contains
+  this SemanticGroup").
+
 ## [1.0.1] - 2026-10-05
 
 ### Added

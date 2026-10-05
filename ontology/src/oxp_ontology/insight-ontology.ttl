@@ -35,7 +35,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/insight/1.0.0-rc0> ;
-    owl:versionInfo "1.0.1" ;
+    owl:versionInfo "1.0.2" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ,
                 <https://outshift-open.github.io/oxp-ontology/analysis> ;
     rdfs:comment "Insight ontology — rendered, catalog-templated insights attached to a target KG node. v1.0.0: split out of analysis-ontology.ttl."@en .
