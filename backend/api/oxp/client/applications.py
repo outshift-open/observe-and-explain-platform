@@ -1979,14 +1979,14 @@ def _get_application_semanticgroup_impact_assessment(
 
     import json
 
-    stmt = ui_queries.semantic_group_impact_assessment_query(
+    stmt, params = ui_queries.semantic_group_impact_assessment_query(
         dialect,
         application_id=application_id,
         semanticgroup_id=semanticgroup_id,
     )
 
     try:
-        rows = db.execute(stmt)
+        rows = db.execute(stmt, params)
     except Exception as exc:
         raise DatabaseError(
             f"Failed to get impact assessment for semantic group '{semanticgroup_id}' in application '{application_id}': {exc}"

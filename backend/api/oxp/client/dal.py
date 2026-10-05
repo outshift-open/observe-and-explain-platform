@@ -866,7 +866,7 @@ def ingest_semantic_groups(
                 "SemanticGroup",
                 ["id"],
                 [group_id],
-                "hasSemanticGroup",
+                "containsSemanticGroup",
             )
             _run_write(rel_query, rel_params, tx)
 
