@@ -10,7 +10,7 @@ tasks:
     desc: Verify that pyproject.toml matches the VERSION file
     cmds:
       - |
-        FILE_VER=$(cat VERSION)
+        FILE_VER=$(grep '^mas=' VERSION | cut -d '=' -f 2)
         PROJ_VER=$(grep 'version = ' pyproject.toml | head -1 | cut -d '"' -f 2)
         if [ "$FILE_VER" != "$PROJ_VER" ]; then
           echo "Error: Version mismatch! file=$FILE_VER, toml=$PROJ_VER"

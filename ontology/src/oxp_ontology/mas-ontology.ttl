@@ -26,7 +26,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/mas/1.0.0-rc0> ;
-    owl:versionInfo "1.0.1" ;
+    owl:versionInfo "1.0.2" ;
     rdfs:comment "Multi-Agent System telemetry ontology for observability and governance, independent of any specific telemetry source format. v1.0.0: initial proposal."@en .
 
 #################################################################
