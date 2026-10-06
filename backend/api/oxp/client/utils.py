@@ -368,13 +368,25 @@ def parse_tools_from_repr(data: str) -> list[dict[str, str]]:
         }, ...)
 
     Returns a list of ``{"name": ..., "description": ...}`` dicts.
+
+    Python's ``repr()`` switches a string's quoting to double quotes
+    whenever the string itself contains an apostrophe (to avoid escaping
+    it) -- e.g. ``description="List all documents in the agent's data
+    directory."``. A description without an apostrophe stays single-quoted.
+    Matching only the single-quoted form silently drops every tool whose
+    description contains a contraction/possessive, which is common in
+    natural-language tool descriptions.
     """
     results: list[dict[str, str]] = []
     for m in re.finditer(
-        r"StructuredTool\(name='([^']+)',\s*description='(.*?)',\s*args_schema=",
+        r"StructuredTool\(name='([^']+)',\s*description=(['\"])"
+        r"((?:\\.|(?!\2).)*)\2,\s*args_schema=",
         data,
     ):
         name = m.group(1)
-        description = m.group(2).replace("\\n", "\n").strip()
+        quote = m.group(2)
+        description = (
+            m.group(3).replace(f"\\{quote}", quote).replace("\\n", "\n").strip()
+        )
         results.append({"name": name, "description": description, "isTool": True})
     return results

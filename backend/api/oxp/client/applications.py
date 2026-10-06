@@ -50,6 +50,9 @@ from oxp.connectors.neo4j import (
 )
 from oxp.core.exceptions import DatabaseError
 from oxp.models.otel_traces import (
+    AgentToolItem,
+    ApplicationAgentTools,
+    ApplicationAgentToolsResponse,
     ApplicationItem,
     ApplicationNameItem,
     ApplicationNamesResponse,
@@ -1172,6 +1175,51 @@ def _get_application_details(
         tl_item_cost.value.value = round(bucket_tokens * COST_PER_TOKEN, 6)
 
     return result
+
+
+# ── get_application_agent_tools ──────────────────────────────────────────────
+
+
+def _get_application_agent_tools(
+    db: Connector,
+    *,
+    application_id: str,
+) -> ApplicationAgentToolsResponse:
+    """Return each agent's tools for an application, from Neo4j structural data."""
+    query, params = ui_queries.agent_tools_by_application_query(
+        application_id=application_id,
+    )
+    try:
+        rows = db.execute(query, params)
+    except Exception as exc:
+        raise DatabaseError(
+            f"Failed to get agent tools for application '{application_id}': {exc}"
+        ) from exc
+
+    agents: list[ApplicationAgentTools] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        agents.append(
+            ApplicationAgentTools(
+                agent_id=str(row.get("agentId") or ""),
+                agent_name=str(row.get("agentName") or ""),
+                agent_description=row.get("agentDescription") or None,
+                tools=[
+                    AgentToolItem(
+                        name=str(tool.get("name") or ""),
+                        description=tool.get("description") or None,
+                    )
+                    for tool in (row.get("tools") or [])
+                    if tool and tool.get("name")
+                ],
+            )
+        )
+
+    return ApplicationAgentToolsResponse(
+        application_id=application_id,
+        agents=agents,
+    )
 
 
 # ── get_application_agents ───────────────────────────────────────────────────

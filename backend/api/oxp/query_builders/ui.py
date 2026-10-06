@@ -627,6 +627,53 @@ def neo4j_applications_with_metrics_optimized_query(
     }
 
 
+def agent_tools_by_application_query(
+    *,
+    application_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Build the Cypher query for each agent's tools in an application (Neo4j only).
+
+    Reads what each agent actually invoked within *this application's own*
+    sessions (``Session -[:hasMASCall]-> MASCall -[:hasAgentCall]->
+    AgentCall -[:hasToolCall]-> ToolCall -[:executesTool]-> Tool``),
+    scoped via ``Session -[:executesSession]-> MAS``.
+
+    This is deliberately *not* the structural ``Agent -[:usesTool]->
+    Tool`` edge: ``Agent``/``Tool`` nodes are declared once per name (not
+    per application) and get merged across every MAS that happens to
+    have an agent/tool with the same id -- e.g. an agent named
+    "moderator" is one shared node across multiple unrelated
+    applications. Matching on that structural edge alone would return
+    the union of every application's tool usage for any agent name this
+    application happens to share with another one. Walking the
+    execution layer instead -- where ``AgentCall``/``ToolCall`` are
+    per-session instances, not shared -- ties each tool back to actual
+    executions within this application's own sessions.
+
+    Nor does the agent framework's self-reported ``gen_ai.ioa.graph``
+    span attribute work as a source: it's produced by the instrumented
+    application itself and isn't guaranteed to include tool nodes at all
+    (e.g. when tools are bound directly to the LLM rather than
+    represented as separate graph nodes).
+    """
+    query = """
+        MATCH (mas:MAS {id: $applicationId})<-[:executesSession]-(s:Session)
+        MATCH (s)-[:hasMASCall]->(:MASCall)-[:hasAgentCall]->(ac:AgentCall)
+            -[:executesAgent]->(a:Agent)
+        OPTIONAL MATCH (ac)-[:hasToolCall]->(:ToolCall)-[:executesTool]->(t:Tool)
+        WITH a, collect(DISTINCT CASE WHEN t IS NULL THEN null ELSE {
+            name: t.name,
+            description: t.description
+        } END) as rawTools
+        RETURN a.id as agentId,
+               a.name as agentName,
+               a.description as agentDescription,
+               [x IN rawTools WHERE x IS NOT NULL] as tools
+        ORDER BY a.name
+    """
+    return query, {"applicationId": application_id}
+
+
 def agents_by_application_and_sessions_query(
     dialect: Dialect = Dialect.CLICKHOUSE,
     *,

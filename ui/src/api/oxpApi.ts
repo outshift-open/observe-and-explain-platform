@@ -442,6 +442,45 @@ export const useStaticTopology = (applicationId: string) => {
   });
 };
 
+export interface AgentToolItem {
+  name: string;
+  description: string | null;
+}
+
+export interface ApplicationAgentTools {
+  agent_id: string;
+  agent_name: string;
+  agent_description: string | null;
+  tools: AgentToolItem[];
+}
+
+export interface ApplicationAgentToolsResponse {
+  application_id: string;
+  agents: ApplicationAgentTools[];
+}
+
+export const fetchApplicationAgentTools = async (
+  applicationId: string
+): Promise<ApplicationAgentToolsResponse> => {
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/applications/${applicationId}/agent-tools`
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch agent tools: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
+export const useApplicationAgentTools = (applicationId: string) => {
+  return useQuery<ApplicationAgentToolsResponse>({
+    queryKey: ['applicationAgentTools', applicationId],
+    queryFn: () => fetchApplicationAgentTools(applicationId),
+    enabled: !!applicationId
+  });
+};
+
 const fetchSemanticGroups = async (
   applicationId: string
 ): Promise<SemanticGroup[]> => {

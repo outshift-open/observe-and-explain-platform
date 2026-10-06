@@ -10,6 +10,7 @@ from oxp.client.application_charts import (
     _get_application_charts,
 )
 from oxp.client.applications import (
+    _get_application_agent_tools,
     _get_application_agents,
     _get_application_details,
     _get_application_names,
@@ -48,6 +49,7 @@ from oxp.models.otel_traces import (
     AgentConversationResponse,
     AgentDetailsResponse,
     AgenticProtocolsMetricsResponse,
+    ApplicationAgentToolsResponse,
     ApplicationNamesResponse,
     ApplicationsResponse,
     CollectByApplicationResponse,
@@ -445,6 +447,17 @@ class UIClient:
         return _get_application_topology(
             self.db,
             self._dialect,
+            application_id=application_id,
+        )
+
+    def get_application_agent_tools(
+        self,
+        *,
+        application_id: str,
+    ) -> ApplicationAgentToolsResponse:
+        """Return each agent's tools for an application (Neo4j-backed)."""
+        return _get_application_agent_tools(
+            self.db,
             application_id=application_id,
         )
 
