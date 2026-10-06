@@ -4,7 +4,7 @@
   "kgQuery": [
     "MATCH (sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
     "WHERE ar.dataType = 'graph'",
-    "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg)",
+    "MATCH (sg)-[:containsSession]->(s:Session)",
     "WHERE toString(ar.outliersValues) CONTAINS s.sessionId",
     "RETURN s.sessionId AS sessionId,",
     "  sg.groupName AS groupName,",

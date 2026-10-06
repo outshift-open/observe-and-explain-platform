@@ -2,7 +2,8 @@
   "nameTemplate": "High metric consistency risk on $metricName",
   "descriptionTemplate": "Session $sessionId has non-anomalous $metricName=$metricValue, but group consistency is critically low ($meanValue < $criticalThreshold).",
   "kgQuery": [
-    "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg:SemanticGroup)-[:hasConsistencyReport]->(cr:ConsistencyReport)",
+    "MATCH (sg:SemanticGroup)-[:hasConsistencyReport]->(cr:ConsistencyReport)",
+    "MATCH (sg)-[:containsSession]->(s:Session)",
     "WHERE cr.dataType = 'metric'",
     "MATCH (s)-[:hasMetric]->(m:Metric)",
     "WHERE toString(cr.metadata) CONTAINS m.metricName",

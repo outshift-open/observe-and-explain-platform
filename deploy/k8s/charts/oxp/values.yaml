@@ -581,6 +581,7 @@ workers:
           - WorkflowEfficiency
           - CyclesCount
           - ToolErrorRate
+          - LLMErrorRate
     volumeMounts:
       - name: mce-config
         mountPath: /oxp/mce_config.yaml
