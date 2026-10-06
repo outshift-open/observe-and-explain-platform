@@ -83,7 +83,7 @@ jobs:
 
       - name: Push umbrella chart
         if: github.ref_type == 'tag'
-        run: helm push dist/oxp-*.tgz "oci://$OCI_REPO"
+        run: helm push dist/oxp-[0-9]*.tgz "oci://$OCI_REPO"
 
       - name: Create GitHub release
         if: github.ref_type == 'tag'
