@@ -269,6 +269,32 @@ class MonitorByApplicationResponse(BaseModel):
     agents: list[MonitorAgentItem] = []
 
 
+# ── Agent tools (Overview page) models ────────────────────────────────────────
+
+
+class AgentToolItem(BaseModel):
+    """A single tool used by an agent."""
+
+    name: str
+    description: Optional[str] = None
+
+
+class ApplicationAgentTools(BaseModel):
+    """An agent and the tools it uses, for a given application."""
+
+    agent_id: str
+    agent_name: str
+    agent_description: Optional[str] = None
+    tools: list[AgentToolItem] = []
+
+
+class ApplicationAgentToolsResponse(BaseModel):
+    """Response body for ``GET /applications/{application_id}/agent-tools``."""
+
+    application_id: str
+    agents: list[ApplicationAgentTools] = []
+
+
 # ── Collect By Application models ─────────────────────────────────────────────
 
 

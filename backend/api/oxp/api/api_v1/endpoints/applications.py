@@ -15,6 +15,7 @@ from oxp.connectors.base import Connector
 from oxp.core.config import settings
 from oxp.dependencies import get_db, get_neo4j_db, get_redis
 from oxp.models.otel_traces import (
+    ApplicationAgentToolsResponse,
     CollectByApplicationResponse,
     ImpactAssessmentResponse,
     MonitorApplicationLevelData,
@@ -206,6 +207,36 @@ def application_topology(
         redis_client=redis_client,
         key=key,
         fetch=lambda: ui_client.get_application_topology(
+            application_id=application_id,
+        ),
+        ttl=settings.CACHE_TTL_SECONDS,
+        enabled=settings.CACHE_ENABLED,
+    )
+
+
+@router.get(
+    "/{application_id}/agent-tools", response_model=ApplicationAgentToolsResponse
+)
+def application_agent_tools(
+    application_id: str,
+    ui_client=Depends(_kg_client),  # noqa: B008
+    redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
+) -> Any:
+    """Return each agent's tools for an application.
+
+    Sourced from the knowledge graph's structural ``Agent -[:usesTool]->
+    Tool`` edges rather than the topology endpoint's self-reported
+    ``gen_ai.ioa.graph`` span attribute, which is not guaranteed to
+    include tool nodes.
+    """
+    key = make_cache_key(
+        "applications:agent_tools",
+        {"app": application_id},
+    )
+    return cached(
+        redis_client=redis_client,
+        key=key,
+        fetch=lambda: ui_client.get_application_agent_tools(
             application_id=application_id,
         ),
         ttl=settings.CACHE_TTL_SECONDS,

@@ -10,13 +10,20 @@ import {
   StaticTopology as StaticTopologyType,
   StaticTopologyTool
 } from '@/types/oxp.type';
-import { useStaticTopology } from '@/api/oxpApi';
+import {
+  ApplicationAgentToolsResponse,
+  useApplicationAgentTools,
+  useStaticTopology
+} from '@/api/oxpApi';
 import { TagBackgroundColorVariants } from '@open-ui-kit/core';
 import { isToolDataArray } from '@/utils';
 
 const FILTERED_NODE_IDS: string[] = ['__start__', '__end__', 'finalize'];
 
-const transformTopologyToGraphData = (topology: StaticTopologyType) => {
+const transformTopologyToGraphData = (
+  topology: StaticTopologyType,
+  agentToolsData?: ApplicationAgentToolsResponse
+) => {
   const nodesArray = Object.values(topology.nodes).filter(
     (node) => !FILTERED_NODE_IDS.includes(node.id)
   );
@@ -91,6 +98,41 @@ const transformTopologyToGraphData = (topology: StaticTopologyType) => {
     }
   });
 
+  // Supplement with tools from the knowledge graph's structural
+  // Agent->Tool edges: the topology's self-reported graph is not
+  // guaranteed to include tool nodes at all (e.g. when tools are bound
+  // directly to the LLM rather than represented as separate graph
+  // nodes), so it can't be relied on as the only source of tool data.
+  // Only agents actually present in this topology graph are matched, and
+  // tools already covered by the topology's own data are not duplicated.
+  if (agentToolsData) {
+    const agentNodeIds = new Set(
+      nodes.filter((n) => n.type === 'agent').map((n) => n.id)
+    );
+    const coveredToolKeys = new Set(
+      expandedToolNodes.map((t) => `${t.agentId}::${t.label}`)
+    );
+
+    agentToolsData.agents.forEach((agent) => {
+      if (!agentNodeIds.has(agent.agent_id)) {
+        return;
+      }
+      agent.tools.forEach((tool) => {
+        const key = `${agent.agent_id}::${tool.name}`;
+        if (coveredToolKeys.has(key)) {
+          return;
+        }
+        coveredToolKeys.add(key);
+        expandedToolNodes.push({
+          id: `tool-kg-${agent.agent_id}-${tool.name}`,
+          label: tool.name,
+          agentId: agent.agent_id,
+          description: tool.description ?? ''
+        });
+      });
+    });
+  }
+
   // Add expanded tool nodes to the nodes array
   expandedToolNodes.forEach((toolNode) => {
     nodes.push({
@@ -164,8 +206,10 @@ export const StaticTopology = () => {
     isLoading,
     error
   } = useStaticTopology(applicationId ?? '');
+  const { data: agentToolsData, isLoading: agentToolsLoading } =
+    useApplicationAgentTools(applicationId ?? '');
 
-  if (isLoading) {
+  if (isLoading || agentToolsLoading) {
     return (
       <Box
         sx={{
@@ -197,7 +241,7 @@ export const StaticTopology = () => {
     );
   }
 
-  const graphData = transformTopologyToGraphData(topology);
+  const graphData = transformTopologyToGraphData(topology, agentToolsData);
 
   const getNodeFill = (d: any) => {
     const nodeType = d.data?.data?.nodeType || d.data?.type;

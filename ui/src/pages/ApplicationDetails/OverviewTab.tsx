@@ -8,6 +8,7 @@ import { GeneralSize, Tag, TagBackgroundColorVariants, Spinner } from '@open-ui-
 import { StaticTopology } from '@/components';
 import { LLM } from '@/assets/icons';
 import {
+  useApplicationAgentTools,
   useApplications,
   useLiveSessions,
   useSessionsCount,
@@ -37,6 +38,8 @@ export const OverviewTab = () => {
   const { data: topology, isLoading: topologyLoading } = useStaticTopology(
     applicationId ?? ''
   );
+  const { data: agentToolsData, isLoading: agentToolsLoading } =
+    useApplicationAgentTools(applicationId ?? '');
 
   const { startDate, endDate } = useTimeRangeStore();
 
@@ -57,25 +60,39 @@ export const OverviewTab = () => {
       (application) => application.applicationName === applicationId
     ) ?? {};
 
-  // Extract agents and tools from topology data with their descriptions
+  // Agents come from the topology graph (the agent framework's own
+  // self-reported node list, which reliably includes agent nodes).
   const agents: EntityWithDescription[] = [];
-  const tools: EntityWithDescription[] = [];
 
   if (topology && topology.nodes) {
     Object.values(topology.nodes).forEach((node) => {
-      if (isToolDataArray(node.data)) {
-        node.data.forEach((tool) => {
-          if (!tools.some((t) => t.name === tool.name)) {
-            tools.push({ name: tool.name, description: tool.description });
-          }
-        });
-      } else if (!EXCLUDED_AGENT_NAMES.includes(node.id)) {
+      if (!isToolDataArray(node.data) && !EXCLUDED_AGENT_NAMES.includes(node.id)) {
         agents.push({ name: node.name, description: node.description });
       }
     });
   }
 
-  if (applicationListFetching || topologyLoading || liveSessionsLoading) {
+  // Tools come from the knowledge graph's structural Agent->Tool edges
+  // instead: the topology's self-reported graph is not guaranteed to
+  // include tool nodes at all (e.g. when tools are bound directly to the
+  // LLM rather than represented as separate graph nodes), so it can't be
+  // relied on as the source of truth for which tools an agent uses.
+  const tools: EntityWithDescription[] = [];
+
+  agentToolsData?.agents.forEach((agent) => {
+    agent.tools.forEach((tool) => {
+      if (!tools.some((t) => t.name === tool.name)) {
+        tools.push({ name: tool.name, description: tool.description ?? undefined });
+      }
+    });
+  });
+
+  if (
+    applicationListFetching ||
+    topologyLoading ||
+    liveSessionsLoading ||
+    agentToolsLoading
+  ) {
     return (
       <Stack
         alignItems={'center'}
