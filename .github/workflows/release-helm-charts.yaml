@@ -1,0 +1,109 @@
+# Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release Helm Charts
+
+on:
+  # a tag push publishes the charts; manual runs only lint and package (dry run)
+  push:
+    tags:
+      - 'helm-v*'
+  pull_request:
+    paths:
+      - 'deploy/k8s/charts/**'
+      - '.github/workflows/release-helm-charts.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHARTS_DIR: deploy/k8s/charts
+  OCI_REGISTRY: ghcr.io
+  OCI_REPO: ghcr.io/outshift-open/charts
+
+jobs:
+  release:
+    name: Lint, package and push charts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create the GitHub release
+      packages: write # required to push charts to GHCR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Verify tag matches chart versions
+        if: github.ref_type == 'tag'
+        run: |
+          EXPECTED="${GITHUB_REF_NAME#helm-v}"
+          for chart in oxp-api oxp-ui oxp; do
+            ACTUAL=$(helm show chart "$CHARTS_DIR/$chart" | awk '/^version:/ {gsub(/"/, "", $2); print $2}')
+            if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+              echo "::error::Chart '$chart' is version '$ACTUAL' but tag '$GITHUB_REF_NAME' expects '$EXPECTED'. Bump Chart.yaml before tagging."
+              exit 1
+            fi
+          done
+
+      - name: Lint subcharts
+        run: |
+          helm lint "$CHARTS_DIR/oxp-api"
+          helm lint "$CHARTS_DIR/oxp-ui"
+
+      - name: Package subcharts
+        run: helm package "$CHARTS_DIR/oxp-api" "$CHARTS_DIR/oxp-ui" --destination dist
+
+      - name: Log in to GHCR
+        if: github.ref_type == 'tag'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$OCI_REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      # Subcharts must exist in the registry before the umbrella can resolve them.
+      - name: Push subcharts
+        if: github.ref_type == 'tag'
+        run: |
+          for pkg in dist/oxp-api-*.tgz dist/oxp-ui-*.tgz; do
+            helm push "$pkg" "oci://$OCI_REPO"
+          done
+
+      - name: Build and lint umbrella chart
+        if: github.ref_type == 'tag'
+        run: |
+          helm dependency build "$CHARTS_DIR/oxp"
+          helm lint "$CHARTS_DIR/oxp"
+          helm package "$CHARTS_DIR/oxp" --destination dist
+
+      - name: Push umbrella chart
+        if: github.ref_type == 'tag'
+        run: helm push dist/oxp-*.tgz "oci://$OCI_REPO"
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tgz \
+            --title "Helm charts ${GITHUB_REF_NAME#helm-v}" \
+            --generate-notes
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ⎈ Helm Chart Release"
+            echo ""
+            echo "- **Ref**: \`${GITHUB_REF_NAME}\`"
+            echo "- **Published**: ${{ github.ref_type == 'tag' && 'yes' || 'no (dry run)' }}"
+            echo "- **Registry**: \`oci://${OCI_REPO}\`"
+            echo ""
+            echo "### Packages"
+            ls -lh dist/ 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
