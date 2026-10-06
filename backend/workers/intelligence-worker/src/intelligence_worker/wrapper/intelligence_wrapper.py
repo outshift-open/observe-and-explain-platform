@@ -47,7 +47,6 @@ def _build_insight(template: InsightTemplateModel, variables: Dict[str, Any]) ->
         priority=priority or "",
         targetNodeId=target_node_id or "",
         createdAt=created_at,
-        concerns=target_node_id or "",
     )
 
 
