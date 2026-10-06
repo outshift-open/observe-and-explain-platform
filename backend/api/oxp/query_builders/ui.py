@@ -2186,13 +2186,15 @@ def latent_space_query(
     matching the agent-level portion of the state machine graph.
     """
     query = """
-        MATCH (s:Session {sessionId: $sessionId})-[:hasState]->(state:State)
-            -[:inputTo]->(t:Transition)-[:leadsTo]->(toState:State)
-        OPTIONAL MATCH (t)-[:representsExecution]->(e)
-        WHERE 'AgentCall' IN labels(e)
+        MATCH (state:State)-[:inputTo]->(t:Transition {sessionId: $sessionId})
+            -[:leadsTo]->(toState:State)
+        MATCH (t)-[:representsExecution]->(e)
+        WHERE e:AgentCall
+           OR (e:ProcessingCall AND EXISTS { MATCH (:MASCall)-[:hasProcessingCall]->(e) })
         OPTIONAL MATCH (emb:Embedding)-[:represents]->(state)
         OPTIONAL MATCH (toEmb:Embedding)-[:represents]->(toState)
         OPTIONAL MATCH (e)-[:executesAgent]->(agent:Agent)
+        OPTIONAL MATCH (e)-[:executesProcessing]->(proc:Processing)
         RETURN DISTINCT
             state.id AS stateId,
             state.content AS content,
@@ -2202,8 +2204,8 @@ def latent_space_query(
             toEmb.embeddingVector AS toEmbedding,
             t.id AS transitionId,
             e.duration AS duration,
-            agent.name AS entityName,
-            'agent' AS entityType
+            coalesce(agent.name, proc.name) AS entityName,
+            CASE WHEN e:AgentCall THEN 'agent' ELSE 'processing' END AS entityType
         ORDER BY state.id
     """
     return query, {"sessionId": session_id}
