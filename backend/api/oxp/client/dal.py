@@ -861,7 +861,7 @@ def ingest_semantic_groups(
 
             rel_query, rel_params = dal_queries.build_create_rel_query(
                 "MAS",
-                ["masId"],
+                ["id"],
                 [application_id],
                 "SemanticGroup",
                 ["id"],
@@ -1803,7 +1803,7 @@ def get_analysis_data_for_semantic_group(
 
 _INSIGHT_SCOPE_TARGETS: Dict[str, Tuple[str, str]] = {
     "Session": ("Session", "sessionId"),
-    "MAS": ("MAS", "masId"),
+    "MAS": ("MAS", "id"),
     "Agent": ("Agent", "agentName"),
     "SemanticGroup": ("SemanticGroup", "id"),
 }
