@@ -988,7 +988,7 @@ def semantic_groups_table_query(
     Semantic groups are currently sourced from Neo4j semantic nodes.
     """
     query = """
-    MATCH (:MAS {name: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup {childrenNodes: []})
+    MATCH (:MAS {id: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup {childrenNodes: []})
     // First, gather all consistency reports from the semantic groups
     OPTIONAL MATCH (sg)-[r]-(cr:ConsistencyReport)
     WITH sg, cr.dataType AS rawType, AVG(cr.mean) AS Value
@@ -1025,7 +1025,14 @@ def semantic_groups_table_query(
       avg(CASE WHEN m.metricName = "WorkflowEfficiency" THEN m.metricResult END) AS avgWflwEff, consistency
     // Opening the consistency json
     UNWIND consistency as c
-    WITH sg, overallQuality, (cycles + avgWflwEff + successLLM + successTool) / 4 as overallPerformance, collect(c.col2) as consistencyValues, completionRate
+    WITH sg, overallQuality,
+      [x IN [cycles, avgWflwEff, successLLM, successTool] WHERE x IS NOT NULL] AS perfValues,
+      collect(c.col2) as consistencyValues, completionRate
+    WITH sg, overallQuality,
+      CASE WHEN size(perfValues) = 0 THEN null
+           ELSE reduce(s = 0.0, x IN perfValues | s + x) / size(perfValues)
+      END AS overallPerformance,
+      consistencyValues, completionRate
     WITH sg, overallQuality, overallPerformance, reduce(s = 0.0, x IN consistencyValues | s + x) as consistencySum, reduce(s = 0, x IN consistencyValues | s + 1) as consistencyEntries, completionRate
     WITH sg, overallQuality, overallPerformance, (consistencySum + completionRate) / (consistencyEntries + 1) AS overallReliability
     RETURN sg, overallQuality, overallPerformance, overallReliability
@@ -1043,7 +1050,7 @@ def semantic_groups_query(
     The current Neo4j model stores semantic groups as ``SemanticGroup`` nodes.
     """
     query = """
-    MATCH (:MAS {name: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup)
+    MATCH (:MAS {id: $application_id})-[:containsSemanticGroup]->(sg:SemanticGroup)
     // First, gather all consistency reports from the semantic groups
     OPTIONAL MATCH (sg)-[r]-(cr:ConsistencyReport)
     WITH sg, cr.dataType AS rawType, AVG(cr.mean) AS Value
@@ -1080,7 +1087,14 @@ def semantic_groups_query(
       avg(CASE WHEN m.metricName = "WorkflowEfficiency" THEN m.metricResult END) AS avgWflwEff, consistency
     // Opening the consistency json
     UNWIND consistency as c
-    WITH sg, overallQuality, (cycles + avgWflwEff + successLLM + successTool) / 4 as overallPerformance, collect(c.col2) as consistencyValues, completionRate
+    WITH sg, overallQuality,
+      [x IN [cycles, avgWflwEff, successLLM, successTool] WHERE x IS NOT NULL] AS perfValues,
+      collect(c.col2) as consistencyValues, completionRate
+    WITH sg, overallQuality,
+      CASE WHEN size(perfValues) = 0 THEN null
+           ELSE reduce(s = 0.0, x IN perfValues | s + x) / size(perfValues)
+      END AS overallPerformance,
+      consistencyValues, completionRate
     WITH sg, overallQuality, overallPerformance, reduce(s = 0.0, x IN consistencyValues | s + x) as consistencySum, reduce(s = 0, x IN consistencyValues | s + 1) as consistencyEntries, completionRate
     WITH sg, overallQuality, overallPerformance, (consistencySum + completionRate) / (consistencyEntries + 1) AS overallReliability
     RETURN sg, overallQuality, overallPerformance, overallReliability

@@ -4,7 +4,7 @@
   "kgQuery": [
     "MATCH (sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
     "WHERE ar.dataType = 'text'",
-    "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg)",
+    "MATCH (sg)-[:containsSession]->(s:Session)",
     "WHERE toString(ar.outliersValues) CONTAINS s.sessionId",
     "OPTIONAL MATCH (s)-[:hasFinalState]->(outState:State)",
     "OPTIONAL MATCH (med:Session {sessionId: sg.medioidSessionId})-[:hasFinalState]->(medOut:State)",

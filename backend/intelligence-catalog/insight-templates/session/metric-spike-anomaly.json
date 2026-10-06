@@ -2,7 +2,8 @@
   "nameTemplate": "Unexpected spike in $metricName",
   "descriptionTemplate": "$metricName value for session $sessionId is higher than expected ($metricValue instead of $normal)",
   "kgQuery": [
-        "MATCH (s:Session)-[:belongsToSemanticGroup]->(sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
+        "MATCH (sg:SemanticGroup)-[:hasAnomalyReport]->(ar:AnomalyReport)",
+        "MATCH (sg)-[:containsSession]->(s:Session)",
         "  WHERE ar.dataType = 'metric'",
         "    AND ar.metricName IS NOT NULL",
         "    AND toString(ar.outliersValues) CONTAINS s.sessionId",

@@ -122,7 +122,7 @@ def semantic_groups_insights_query(
     WHERE ($start_time IS NULL OR datetime(i.createdAt) >= datetime({epochSeconds: $start_time}))
       AND ($end_time IS NULL OR datetime(i.createdAt) <= datetime({epochSeconds: $end_time}))
       AND ($application_name IS NULL OR EXISTS {
-        MATCH (:MAS {masName: $application_name})-[:containsSemanticGroup]->(s)
+        MATCH (:MAS {id: $application_name})-[:containsSemanticGroup]->(s)
       })
     RETURN s.groupName AS groupName,
            s.groupSummary AS groupSummary,
