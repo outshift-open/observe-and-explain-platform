@@ -7,7 +7,7 @@ replicaCount: 1
 
 # This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
 image:
-  repository: ghcr.io/outshift-open/container-images/oxp-ui
+  repository: ghcr.io/outshift-open/oxp-ui
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
@@ -39,7 +39,7 @@ featureFlags:
 copilot:
   enabled: false
   image:
-    repository: ghcr.io/outshift-open/container-images/oxp-runtime
+    repository: ghcr.io/outshift-open/oxp-runtime
     pullPolicy: IfNotPresent
     tag: ""
   livenessProbe:

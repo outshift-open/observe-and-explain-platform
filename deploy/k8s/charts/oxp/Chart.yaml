@@ -11,12 +11,12 @@ dependencies:
   - name: oxp-api
     alias: api
     version: 1.0.0
-    repository: https://chartmuseum.prod.eticloud.io/
+    repository: oci://ghcr.io/outshift-open/charts
     condition: api.enabled
   - name: oxp-ui
     alias: ui
     version: 1.0.0
-    repository: https://chartmuseum.prod.eticloud.io/
+    repository: oci://ghcr.io/outshift-open/charts
     condition: ui.enabled
   - name: opentelemetry-collector
     alias: otelCollector

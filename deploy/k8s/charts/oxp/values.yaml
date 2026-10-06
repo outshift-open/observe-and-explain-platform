@@ -501,7 +501,7 @@ workers:
     maxInflightMessages: "128"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-norm
+      repository: ghcr.io/outshift-open/oxp-norm-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -530,7 +530,7 @@ workers:
     maxInflightMessages: "32"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-embedding
+      repository: ghcr.io/outshift-open/oxp-embedding-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -556,7 +556,7 @@ workers:
     maxInflightMessages: "64"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-mce
+      repository: ghcr.io/outshift-open/oxp-mce-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -612,7 +612,7 @@ workers:
     maxInflightMessages: "16"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-grouping
+      repository: ghcr.io/outshift-open/oxp-grouping-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -643,7 +643,7 @@ workers:
     maxInflightMessages: "1"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-hierarchical-grouping
+      repository: ghcr.io/outshift-open/oxp-hierarchical-grouping-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -665,7 +665,7 @@ workers:
     maxInflightMessages: "1"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-intelligence
+      repository: ghcr.io/outshift-open/oxp-intelligence-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -691,7 +691,7 @@ workers:
     batchSize: "20"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-analysis
+      repository: ghcr.io/outshift-open/oxp-analysis-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
@@ -716,7 +716,7 @@ workers:
     maxInflightMessages: "32"
     extraEnv: {}
     image:
-      repository: ghcr.io/outshift-open/container-images/oxp-worker-stateful-eval
+      repository: ghcr.io/outshift-open/oxp-stateful-eval-worker
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
