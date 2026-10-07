@@ -84,7 +84,7 @@ export const HealthScore = ({ score, onLearnMore }: HealthScoreProps) => {
   };
 
   return (
-    <Stack direction="column" gap="16px" sx={{ width: '500px' }}>
+    <Stack direction="column" gap="16px" sx={{ width: '524px' }}>
       <Stack
         direction="row"
         alignItems="center"

@@ -32,7 +32,10 @@ import {
   AppReasoningPathResponse,
   TimelineReasoningPathResponse,
   AgenticProtocolsMetrics,
-  SpanDetails
+  SpanDetails,
+  SessionsWithCognitiveObservability,
+  SessionL9Protocols,
+  SessionsWithL9Protocols
 } from '@/types/oxp.type';
 import {
   ApplicationsResponse,
@@ -42,6 +45,9 @@ import {
   LiveTopologySessionResponse,
   SessionsCountResponse
 } from '@/types/oxpApi.type';
+import { mockSessionsWithCognitiveObservability } from './mock/sessionsWithCognitiveObservability';
+import { mockSessionL9Protocols } from './mock/sessionL9Protocols';
+import { mockSessionsWithL9Protocols } from './mock/sessionsWithL9Protocols';
 
 const OCE_API_BASE_URL = window.restApiUrl ?? import.meta.env.VITE_REST_API_URL;
 // const OCE_API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -56,7 +62,6 @@ const fetchApplications = async (): Promise<ApplicationsResponse> => {
   }
 
   const data = await response.json();
-  console.log('response in applications', data);
 
   return data;
 };
@@ -90,7 +95,6 @@ const fetchApplicationMetrics = async (
   }
 
   const data = await response.json();
-  console.log('response in application metrics', data);
 
   return data;
 };
@@ -128,7 +132,6 @@ const fetchApplicationAgents = async (
   }
 
   const data = await response.json();
-  console.log('response in application agents', data);
 
   return data;
 };
@@ -166,7 +169,6 @@ const fetchApplicationSessions = async (
   }
 
   const data = await response.json();
-  console.log('response in application sessions', data);
 
   return data;
 };
@@ -215,7 +217,6 @@ const fetchApplicationSessionsWithStatefulEval = async (
   }
 
   const data = await response.json();
-  console.log('response in application sessions with stateful eval', data);
 
   return data;
 };
@@ -328,7 +329,6 @@ const fetchSessionTimeline = async (
   }
 
   const data = await response.json();
-  console.log('response in session timeline', data);
 
   return data;
 };
@@ -355,7 +355,6 @@ const fetchSessionLatentSpace = async (
   }
 
   const data = await response.json();
-  console.log('response in session latent space', data);
 
   return data;
 };
@@ -392,7 +391,6 @@ const fetchAgentMetrics = async (
   }
 
   const data = await response.json();
-  console.log('response in agent general metrics', data);
 
   return data;
 };
@@ -430,7 +428,6 @@ export const fetchStaticTopology = async (
   }
 
   const data = await response.json();
-  console.log('response in static topology', data);
 
   return data;
 };
@@ -493,7 +490,6 @@ const fetchSemanticGroups = async (
   }
 
   const data = await response.json();
-  console.log('response in semantic groups table', data);
 
   return data?.nodes;
 };
@@ -517,7 +513,6 @@ const fetchSemanticGroupsTree = async (
   }
 
   const data = await response.json();
-  console.log('response in semantic groups tree', data);
 
   return data?.nodes;
 };
@@ -544,7 +539,6 @@ const fetchNormalBehaviourReport = async (
   }
 
   const data = await response.json();
-  console.log('response in normal behaviour report', data);
 
   return data;
 };
@@ -582,7 +576,6 @@ const fetchConsistencyReport = async (
   }
 
   const data = await response.json();
-  console.log('response in consistency report', data);
 
   return data;
 };
@@ -609,7 +602,6 @@ const fetchSemanticGroupDetails = async (
   }
 
   const data = await response.json();
-  console.log('response in semantic group details', data);
   return data;
 };
 
@@ -645,7 +637,6 @@ const fetchAnomalyReport = async (
   }
 
   const data = await response.json();
-  console.log('response in anomaly report', data);
 
   return data;
 };
@@ -785,7 +776,6 @@ export const fetchImpactAssessmentSession = async (
   }
 
   const data = await response.json();
-  console.log('response in impact assessment session', data);
 
   return data?.impact_report.map((item: ImpactAssessment) => ({
     ...item,
@@ -830,7 +820,6 @@ export const fetImpactAssessmenentSemanticGroup = async (
   }
 
   const data = await response.json();
-  console.log('response in impact assessment semantic group', data);
 
   return data?.impact_report;
 };
@@ -1357,5 +1346,114 @@ export const useApplicationsWithStatefulEval = (
   return useQuery<ApplicationStatefulEvalTotals[]>({
     queryKey: ['applicationsWithStatefulEval', startTime, endTime],
     queryFn: () => fetchApplicationsWithStatefulEval(startTime, endTime)
+  });
+};
+
+const fetchSessionsWithCognitiveObservability = async (
+  startTime?: number,
+  endTime?: number
+): Promise<SessionsWithCognitiveObservability> => {
+  const params = new URLSearchParams();
+  if (startTime != null) params.set('start_time', String(startTime));
+  if (endTime != null) params.set('end_time', String(endTime));
+
+  // TODO: Remove this once the API is implemented
+  // const response = await fetch(
+  //   `${OCE_API_BASE_URL}/sessions-with-cognitive-observability?${params.toString()}`
+  // );
+
+  const response = {
+    ok: true,
+    json: () => mockSessionsWithCognitiveObservability,
+    statusText: 'OK'
+  };
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch sessions with cognitive observability: ${response.statusText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const useSessionsWithCognitiveObservability = (
+  startTime?: number,
+  endTime?: number
+) => {
+  return useQuery<SessionsWithCognitiveObservability>({
+    queryKey: ['sessionsWithCognitiveObservability', startTime, endTime],
+    queryFn: () => fetchSessionsWithCognitiveObservability(startTime, endTime)
+  });
+};
+
+const fetchSessionL9Protocols = async (
+  sessionId: string
+): Promise<SessionL9Protocols> => {
+  // TODO: Remove this once the API is implemented
+  // const response = await fetch(
+  //   `${OCE_API_BASE_URL}/sessions/${sessionId}/l9-protocols`
+  // );
+
+  const response = {
+    ok: true,
+    json: () =>
+      // Sessions without any L9 protocol have an empty list.
+      mockSessionL9Protocols[sessionId] ?? { sessionId, protocols: [] },
+    statusText: 'OK'
+  };
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch session L9 protocols: ${response.statusText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const useSessionL9Protocols = (sessionId?: string) => {
+  return useQuery<SessionL9Protocols>({
+    queryKey: ['sessionL9Protocols', sessionId],
+    queryFn: () => fetchSessionL9Protocols(sessionId ?? ''),
+    enabled: !!sessionId
+  });
+};
+
+const fetchSessionsWithL9Protocols = async (
+  startTime?: number,
+  endTime?: number
+): Promise<SessionsWithL9Protocols> => {
+  const params = new URLSearchParams();
+  if (startTime != null) params.set('start_time', String(startTime));
+  if (endTime != null) params.set('end_time', String(endTime));
+
+  // TODO: Remove this once the API is implemented
+  // const response = await fetch(
+  //   `${OCE_API_BASE_URL}/sessions-with-l9-protocols?${params.toString()}`
+  // );
+
+  const response = {
+    ok: true,
+    json: () => mockSessionsWithL9Protocols,
+    statusText: 'OK'
+  };
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch sessions with L9 protocols: ${response.statusText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const useSessionsWithL9Protocols = (
+  startTime?: number,
+  endTime?: number
+) => {
+  return useQuery<SessionsWithL9Protocols>({
+    queryKey: ['sessionsWithL9Protocols', startTime, endTime],
+    queryFn: () => fetchSessionsWithL9Protocols(startTime, endTime)
   });
 };

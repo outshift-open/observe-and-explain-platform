@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { TimelineData, Unit } from '@/types/oxp.type';
+import { SingleValueData, TimelineData, Unit } from '@/types/oxp.type';
 import {
   formatDurationMs,
   formatTwoDecimals,
@@ -263,6 +263,16 @@ export const formatMetricValue = (value: number, unit: Unit) => {
   }
   return formattedValue;
 };
+
+// Percentages are shown as whole numbers (e.g. 82%); other units keep the
+// default formatting.
+export const formatRoundedMetricValue = ({
+  value,
+  unit
+}: SingleValueData): string =>
+  unit === Unit.Percentage
+    ? `${Math.round(Number(value) * 100)}%`
+    : String(formatMetricValue(value, unit));
 
 export const formatMetricValueLineChartTooltip = (
   value: number,

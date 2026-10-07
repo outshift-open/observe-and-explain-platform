@@ -4,10 +4,9 @@
  */
 
 import { Stack } from '@open-ui-kit/core';
-import { Grid, Typography, useTheme } from '@mui/material';
+import { Grid, Typography } from '@mui/material';
 import { metrics } from '@/api/metrics.ts';
 import { MetricChart, WidgetCard } from '@/components';
-import { useParams } from 'react-router';
 import { SingleValueData, TimelineData, Unit } from '@/types/oxp.type';
 import {
   ApplicationCostCharts,
@@ -37,9 +36,6 @@ interface MetricsGridProps {
 const size = { xxl: 2, xl: 3, lg: 4, md: 4 };
 
 const MetricsGrid = ({ metricsData, category, agentId }: MetricsGridProps) => {
-  const theme = useTheme();
-  const { applicationId } = useParams();
-
   // const generateMetricCardValue = (metricKey: string) => {
 
   //   if (metricKey.toLowerCase().includes('score')) {
@@ -51,8 +47,6 @@ const MetricsGrid = ({ metricsData, category, agentId }: MetricsGridProps) => {
   //   }
   //   return Math.floor(Math.random() * 101) + '%';
   // };
-
-  console.log('metricsData', metricsData);
 
   return (
     <Stack direction={'column'} gap={'16px'}>

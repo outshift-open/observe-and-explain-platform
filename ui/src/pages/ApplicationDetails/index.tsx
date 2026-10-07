@@ -326,6 +326,7 @@ const ApplicationDetails = () => {
             alignItems={'flex-start'}
             justifyContent={'space-between'}
             gap={'32px'}
+            sx={{ width: '100%' }}
           >
             <Stack direction={'column'} alignItems={'flex-start'} gap={'4px'}>
               <Stack direction={'row'} alignItems={'center'} gap={'4px'}>

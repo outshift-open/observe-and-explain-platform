@@ -923,3 +923,213 @@ export interface ImpactDistribution {
   toolUtilizationAccuracy?: SingleValueData | null;
   groundedness?: SingleValueData | null;
 }
+
+export interface SessionsWithCognitiveObservability {
+  sessions: SessionWithCognitiveObservability[];
+}
+
+export interface SessionWithCognitiveObservability extends Session {
+  cognitiveObservabilityMetrics: CognitiveObservabilityMetric[];
+  cognitiveFailures: CognitiveFailure[];
+}
+
+export interface CognitiveObservabilityMetric {
+  name: string;
+  value: SingleValueData;
+}
+
+export interface CognitiveFailure {
+  name: string;
+  confidence: number;
+  remediations?: string[] | null;
+}
+
+// ---------------------------------------------------------------------------
+// L9 protocols (per-session)
+//
+// The API returns the list of L9 protocols that are relevant for a session.
+// Each protocol is `enabled` (applies to the session) and/or `activated`
+// (actually started). Every metric may be missing: `null` / absent always means
+// "no data" and must never be rendered as a zero.
+// ---------------------------------------------------------------------------
+
+// Verdict labels are an extensible enum (not confirmed yet), so they are plain
+// strings.
+export interface L9Verdict {
+  label: string;
+  reason?: string | null;
+  // Optional list backing the verdict, e.g. issues missing a definition.
+  items?: string[] | null;
+}
+
+export interface L9ExpectedActivation {
+  expected: boolean | null;
+  reason?: string | null;
+}
+
+// Pass/fail check with the failed items (steps, fields...) when it failed.
+export interface L9Check {
+  passed: boolean | null;
+  failures?: string[] | null;
+}
+
+export interface L9UsageSummary {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
+  totalTokens?: number | null;
+  // Cost in dollars of each token bucket, and the total.
+  inputCost?: number | null;
+  outputCost?: number | null;
+  cacheReadCost?: number | null;
+  cacheCreationCost?: number | null;
+  totalCost?: number | null;
+}
+
+export interface L9PhaseUsage {
+  phase: string;
+  llmCalls?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
+  cost?: number | null;
+}
+
+// "achieved / bound": the protocol reports its bounds when the run opens.
+export interface L9Bound {
+  name: string;
+  achieved?: number | null;
+  bound?: number | null;
+}
+
+export interface L9ProtocolBase {
+  // Protocol identifier, e.g. 'L9-CONCORD'.
+  protocol: string;
+  displayName?: string | null;
+  description?: string | null;
+  // The protocol applies to this session.
+  enabled: boolean;
+  // The protocol was actually started in this session.
+  activated: boolean;
+  // Round/step or timestamp, shown as is.
+  activatedAt?: string | null;
+  // Absent: not tracked for this protocol. null: tracked but no data.
+  expected?: L9ExpectedActivation | null;
+}
+
+// Extensible: the reference doc names the success state both `COMMIT` and
+// `SUCCESS`, next to `BEST_EFFORT`.
+export type L9ConcordTerminalState = string;
+
+export interface L9ConcordProtocol extends L9ProtocolBase {
+  protocol: 'L9-CONCORD';
+  compliance?: {
+    candidateCompleteness?: L9Check | null;
+    completion?: {
+      passed: boolean | null;
+      terminalState: L9ConcordTerminalState | null;
+    } | null;
+    protocolCompliance?: L9Check | null;
+  } | null;
+  correctness?: {
+    outcomeSatisfaction?: L9Verdict | null;
+    scoreFairness?: L9Verdict | null;
+  } | null;
+  cost?: {
+    usage?: L9UsageSummary | null;
+    phases?: L9PhaseUsage[] | null;
+    bounds?: L9Bound[] | null;
+  } | null;
+  outcome?: {
+    // Satisfaction floor threshold.
+    tau?: number | null;
+    // Worst-off agent score per round, round 0 being the seed.
+    trajectory?: { round: number; worstAgentScore: number | null }[] | null;
+    agentScores?: { agent: string; score: number | null }[] | null;
+    // BEST_EFFORT only.
+    shortfall?: { agent: string; shortBy: number } | null;
+  } | null;
+}
+
+export interface L9AccordProtocol extends L9ProtocolBase {
+  protocol: 'L9-ACCORD';
+  convergence?: {
+    lockedFrame?: {
+      wellFormed: boolean | null;
+      missingFields?: string[] | null;
+    } | null;
+    roundsPerPhase?: { phase: string; rounds: number | null }[] | null;
+  } | null;
+  correctness?: {
+    // null when there is no ground truth.
+    issueCoverage?: {
+      covered: number;
+      total: number;
+      missedIssues?: string[] | null;
+    } | null;
+    // Does each issue carry a definition from every agent? `complete` is null
+    // when this could not be determined.
+    definitionsFromAllAgents?: {
+      complete: boolean | null;
+      reason?: string | null;
+      issuesMissingDefinition?: string[] | null;
+    } | null;
+  } | null;
+  cost?: {
+    usage?: L9UsageSummary | null;
+  } | null;
+  benefits?: {
+    goalSuccess?: { achieved: boolean | null; reason?: string | null } | null;
+    mutualUnderstanding?: L9Verdict | null;
+    intentContractConsumedByConcord?: boolean | null;
+  } | null;
+}
+
+// Protocol without a dedicated renderer: only its activation is shown.
+export interface L9GenericProtocol extends L9ProtocolBase {
+  protocol: string;
+}
+
+export type L9Protocol =
+  | L9ConcordProtocol
+  | L9AccordProtocol
+  | L9GenericProtocol;
+
+export interface SessionL9Protocols {
+  sessionId: string;
+  protocols: L9Protocol[];
+}
+
+// ---------------------------------------------------------------------------
+// L9 protocols comparison (sessions of a time interval)
+//
+// Each session carries its L9 protocol status, so that sessions can be grouped
+// by which protocols were activated and compared with each other. Every field
+// besides the session itself may be missing, and a missing value is never
+// counted as a zero.
+// ---------------------------------------------------------------------------
+
+export interface SessionL9ProtocolStatus {
+  protocol: string;
+  enabled: boolean;
+  activated: boolean;
+}
+
+export interface SessionWithL9Protocols extends Session {
+  // Absent or empty: no L9 protocol was enabled in the session.
+  l9Protocols?: SessionL9ProtocolStatus[] | null;
+  cognitiveObservabilityMetrics?: CognitiveObservabilityMetric[] | null;
+  cognitiveFailures?: CognitiveFailure[] | null;
+  // Only for sessions where CONCORD was activated.
+  concord?: {
+    terminalState?: L9ConcordTerminalState | null;
+    // Final satisfaction of the worst-off agent.
+    worstOffSatisfaction?: number | null;
+  } | null;
+}
+
+export interface SessionsWithL9Protocols {
+  sessions: SessionWithL9Protocols[];
+}

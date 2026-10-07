@@ -33,7 +33,7 @@ RUN chown -R nginx:nginx /app && chmod -R 755 /app && \
 RUN cat /etc/nginx/conf.d/cloud9_default_servers.conf
 RUN touch /var/run/nginx.pid && \
         chown -R nginx:nginx /var/run/nginx.pid
-RUN sed -i 's/<head>/<head>\<script nonce="111dd4a0-4c4e-43a9-8eb4-6446ad2e10c7" language="javascript"\>window.restApiUrl=`\<!--#echo var="restApiUrl"--\>`;window.ffSemanticGroups=`\<!--#echo var="ffSemanticGroups"--\>`;window.ffInsights=`\<!--#echo var="ffInsights"--\>`;window.ffLiveTopology=`\<!--#echo var="ffLiveTopology"--\>`;window.ffStatefulEval=`\<!--#echo var="ffStatefulEval"--\>`;window.ffImpactAssessment=`\<!--#echo var="ffImpactAssessment"--\>`;window.ffWasteEstimation=`\<!--#echo var="ffWasteEstimation"--\>`;window.ffNeurosymbolicEval=`\<!--#echo var="ffNeurosymbolicEval"--\>`;<\/script>/g' /usr/share/nginx/html/index.html
+RUN sed -i 's/<head>/<head>\<script nonce="111dd4a0-4c4e-43a9-8eb4-6446ad2e10c7" language="javascript"\>window.restApiUrl=`\<!--#echo var="restApiUrl"--\>`;window.ffSemanticGroups=`\<!--#echo var="ffSemanticGroups"--\>`;window.ffInsights=`\<!--#echo var="ffInsights"--\>`;window.ffLiveTopology=`\<!--#echo var="ffLiveTopology"--\>`;window.ffStatefulEval=`\<!--#echo var="ffStatefulEval"--\>`;window.ffImpactAssessment=`\<!--#echo var="ffImpactAssessment"--\>`;window.ffWasteEstimation=`\<!--#echo var="ffWasteEstimation"--\>`;window.ffNeurosymbolicEval=`\<!--#echo var="ffNeurosymbolicEval"--\>`;window.ffCognitiveObservability=`\<!--#echo var="ffCognitiveObservability"--\>`;window.ffL9Protocols=`\<!--#echo var="ffL9Protocols"--\>`;<\/script>/g' /usr/share/nginx/html/index.html
 
 USER nginx
 # Add SSI vars

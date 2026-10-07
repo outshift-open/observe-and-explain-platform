@@ -3,7 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GeneralSize, Tag, TagBackgroundColorVariants } from '@open-ui-kit/core';
+import {
+  GeneralSize,
+  Tag,
+  TagBackgroundColorVariants
+} from '@open-ui-kit/core';
 import { Box, Stack, Typography, Tooltip, useTheme } from '@mui/material';
 import { useMemo, isValidElement } from 'react';
 
@@ -38,10 +42,16 @@ const Tags = ({ tags, minDisplayed = 1 }: TagsProps) => {
     </Stack>
   );
 
-  const defaultColor = tags?.[0]?.color ?? TagBackgroundColorVariants.AccentGWeak;
+  const defaultColor =
+    tags?.[0]?.color ?? TagBackgroundColorVariants.AccentGWeak;
 
   return (
-    <Stack gap="10px" flexDirection="row" alignItems={'center'} sx={{ cursor: 'pointer' }}>
+    <Stack
+      gap="10px"
+      flexDirection="row"
+      alignItems={'center'}
+      sx={{ cursor: 'pointer' }}
+    >
       {displayedTags.map((tag) => (
         <Tag
           key={tag.name}
@@ -53,9 +63,19 @@ const Tags = ({ tags, minDisplayed = 1 }: TagsProps) => {
         </Tag>
       ))}
       {overflowTags.length > 0 && (
-        <Tooltip title={OverflowTooltipContent} placement={'top'}>
+        <Tooltip
+          title={OverflowTooltipContent}
+          placement={'top'}
+          slotProps={{ tooltip: { sx: { maxWidth: 500 } } }}
+        >
           <Box>
-            <Tag color={defaultColor} size={GeneralSize.Medium} sx={{ backgroundColor: theme.palette.vars.controlBackgroundMedium }}>
+            <Tag
+              color={defaultColor}
+              size={GeneralSize.Medium}
+              sx={{
+                backgroundColor: theme.palette.vars.controlBackgroundMedium
+              }}
+            >
               +{overflowTags.length}
             </Tag>
           </Box>

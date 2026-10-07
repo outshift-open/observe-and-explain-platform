@@ -26,16 +26,22 @@ export const AgentAnalyze = () => {
   const { applicationId, agentId } = useParams();
   const theme = useTheme();
 
-  const { data: semanticGroupsData, error: semanticGroupsError, isLoading: semanticGroupsLoading } = useSemanticGroups(applicationId ?? '');
+  const {
+    data: semanticGroupsData,
+    error: semanticGroupsError,
+    isLoading: semanticGroupsLoading
+  } = useSemanticGroups(applicationId ?? '');
 
-  const applicationSessions = useApplicationSessions(applicationId ?? '', DEFAULT_START_DATE, DEFAULT_END_DATE);
-  console.log(
-    'applicationSessions',
-    applicationSessions.data?.sessionList.map((session) => session.sessionId)
+  const applicationSessions = useApplicationSessions(
+    applicationId ?? '',
+    DEFAULT_START_DATE,
+    DEFAULT_END_DATE
   );
 
   const currentAgentSessions = useMemo(() => {
-    const agentSessions = applicationSessions.data?.sessionList.filter((session) => session.agents?.some((agent) => agent === agentId));
+    const agentSessions = applicationSessions.data?.sessionList.filter(
+      (session) => session.agents?.some((agent) => agent === agentId)
+    );
     if (!agentSessions) return [];
 
     const sessionToGroup = new Map<string, string>();
@@ -48,19 +54,23 @@ export const AgentAnalyze = () => {
     return agentSessions?.map((session) => session.sessionId) ?? [];
   }, [applicationSessions.data?.sessionList, agentId, semanticGroupsData]);
 
-  console.log('currentAgentSessions', currentAgentSessions);
-
   const {
     data: agentsData,
     error: agentsError,
     isLoading: agentsLoading
-  } = useApplicationAgents(applicationId ?? '', DEFAULT_START_DATE, DEFAULT_END_DATE);
+  } = useApplicationAgents(
+    applicationId ?? '',
+    DEFAULT_START_DATE,
+    DEFAULT_END_DATE
+  );
 
   const agent = useMemo(() => {
     return agentsData?.agents?.find((agent) => agent.id === agentId);
   }, [agentsData?.agents, agentId]);
 
-  const anomalyReportList = useAnomalyReportList(semanticGroupsData?.map((group) => group.id) ?? []);
+  const anomalyReportList = useAnomalyReportList(
+    semanticGroupsData?.map((group) => group.id) ?? []
+  );
 
   const sessionOutlierMetrics = useMemo(() => {
     const result = new Map<string, Set<string>>();
@@ -83,12 +93,19 @@ export const AgentAnalyze = () => {
     return result;
   }, [anomalyReportList]);
 
-  const impactAssessmentSessionList = useImpactAssessmentSessionList(currentAgentSessions ?? []);
+  const impactAssessmentSessionList = useImpactAssessmentSessionList(
+    currentAgentSessions ?? []
+  );
 
-  const impactAssessmentSessionListData = useMemo<AgentAnalyzeImpactAssessment[]>(() => {
+  const impactAssessmentSessionListData = useMemo<
+    AgentAnalyzeImpactAssessment[]
+  >(() => {
     if (!agentId) return [];
 
-    const metricToField: Record<string, keyof Omit<AgentAnalyzeImpactAssessment, 'sessionId' | 'outlierMetrics'>> = {
+    const metricToField: Record<
+      string,
+      keyof Omit<AgentAnalyzeImpactAssessment, 'sessionId' | 'outlierMetrics'>
+    > = {
       Cost: 'cost',
       ToolUtilizationAccuracy: 'toolUtilizationAccuracy',
       ResponseCompleteness: 'responseCompleteness',
@@ -130,15 +147,17 @@ export const AgentAnalyze = () => {
     return [...sessionMap.values()];
   }, [impactAssessmentSessionList, agentId, sessionOutlierMetrics]);
 
-  console.log('impactAssessmentSessionListData', impactAssessmentSessionListData);
-
   if (agentsError) {
     return <>An error occurred!</>;
   }
 
   if (agentsLoading) {
     return (
-      <Stack alignItems={'center'} justifyContent={'center'} sx={{ width: '100%', height: '100%' }}>
+      <Stack
+        alignItems={'center'}
+        justifyContent={'center'}
+        sx={{ width: '100%', height: '100%' }}
+      >
         <Spinner />
       </Stack>
     );
@@ -154,13 +173,24 @@ export const AgentAnalyze = () => {
         },
         {
           text: 'Agents',
-          link: `${PATHS.applicationMonitorSubTab}`.replace(':applicationId', applicationId ?? '').replace(':monitorTab', TAB_NAMES[1])
+          link: `${PATHS.applicationMonitorSubTab}`
+            .replace(':applicationId', applicationId ?? '')
+            .replace(':monitorTab', TAB_NAMES[1])
         },
-        { text: agent?.name ?? '', link: `${PATHS.applications}/${applicationId}/agents/${agentId}` },
-        { text: 'Monitor', link: `${PATHS.applications}/${applicationId}/agents/${agentId}/monitor` }
+        {
+          text: agent?.name ?? '',
+          link: `${PATHS.applications}/${applicationId}/agents/${agentId}`
+        },
+        {
+          text: 'Monitor',
+          link: `${PATHS.applications}/${applicationId}/agents/${agentId}/monitor`
+        }
       ]}
       title={
-        <Typography variant={'h5'} sx={{ color: theme.palette.vars.interactivePrimaryDefaultDefault }}>
+        <Typography
+          variant={'h5'}
+          sx={{ color: theme.palette.vars.interactivePrimaryDefaultDefault }}
+        >
           {applicationId}
         </Typography>
       }

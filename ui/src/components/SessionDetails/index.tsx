@@ -11,6 +11,8 @@ import { OverviewTab } from './OverviewTab';
 import { ExecutionTreeTab } from './ExecutionTreeTab';
 import { ConversationTab } from './ConversationTab';
 import { SessionAnalysisTab } from './SessionAnalysisTab';
+import { CognitiveObservabilityTab } from './CognitiveObservabilityTab';
+import { L9ProtocolsTab } from './L9ProtocolsTab';
 import { useApplicationSessionsWithStatefulEval } from '@/api/oxpApi';
 import { DEFAULT_START_DATE, DEFAULT_END_DATE } from '@/common';
 import { SessionWithStatefulEval } from '@/types/oxp.type';
@@ -20,6 +22,8 @@ import { Tabs, Tab } from '@open-ui-kit/core';
 export const SESSION_TAB_KEYS = [
   'overview',
   'analysis',
+  'cognitive-observability',
+  'l9-protocols',
   'reasoning-path',
   'execution-graph',
   'conversation'
@@ -60,6 +64,10 @@ const SessionDetails = ({
   const location = useLocation();
 
   const neurosymbolicEnabled = useFeatureFlag('neurosymbolic_eval');
+  const cognitiveObservabilityEnabled = useFeatureFlag(
+    'cognitive_observability'
+  );
+  const l9ProtocolsEnabled = useFeatureFlag('l9_protocols');
   const [isReasoningPathTabVisible, setIsReasoningPathTabVisible] =
     useState<boolean>(false);
 
@@ -105,6 +113,18 @@ const SessionDetails = ({
         render: () => <SessionAnalysisTab />
       },
       {
+        key: 'cognitive-observability',
+        label: 'Cognitive Observability',
+        visible: cognitiveObservabilityEnabled,
+        render: () => <CognitiveObservabilityTab />
+      },
+      {
+        key: 'l9-protocols',
+        label: 'L9 Protocols',
+        visible: l9ProtocolsEnabled,
+        render: () => <L9ProtocolsTab />
+      },
+      {
         key: 'reasoning-path',
         label: 'Reasoning Path',
         visible: isReasoningPathTabVisible,
@@ -123,7 +143,15 @@ const SessionDetails = ({
         render: () => <ConversationTab />
       }
     ],
-    [costDollars, totalTokens, duration, isReasoningPathTabVisible, sessionId]
+    [
+      costDollars,
+      totalTokens,
+      duration,
+      isReasoningPathTabVisible,
+      sessionId,
+      cognitiveObservabilityEnabled,
+      l9ProtocolsEnabled
+    ]
   );
 
   const visibleTabs = useMemo(

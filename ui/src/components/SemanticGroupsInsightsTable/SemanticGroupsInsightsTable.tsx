@@ -245,9 +245,6 @@ export const SemanticGroupsInsightsTable = ({
       }
     },
     renderDetailPanel: ({ row }) => {
-      const detailMaxWidth = `${window.innerWidth - 664}px`;
-      const vw = `${window.innerWidth}px`;
-      console.log(detailMaxWidth);
       return (
         <Box
           sx={{

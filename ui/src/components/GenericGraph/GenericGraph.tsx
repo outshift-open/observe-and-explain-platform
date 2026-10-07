@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Graph, NodeData, EdgeData } from '@antv/g6';
 import { Box, useTheme, Stack } from '@mui/material';
 import { GenericGraphDrawer } from './GenericGraphDrawer';
 import { GenericGraphProps } from './types';
 import { transformDataToG6Graph, getStatusColor } from '@/utils';
-import { Spinner } from '@open-ui-kit/core';
+import { EmptyState, Spinner } from '@open-ui-kit/core';
 import { GLOBAL_BORDER_COLOR } from '@/common/styles';
 
 // Default layout config
@@ -59,6 +59,11 @@ export const GenericGraph = ({
 
   const isDark = theme.palette.mode === 'dark';
 
+  const isEmpty = useMemo(
+    () => (transformDataToG6Graph(data).nodes?.length ?? 0) === 0,
+    [data]
+  );
+
   // Toolbar theme colors
   const toolbarBgColor =
     theme.palette.vars?.baseBackgroundMedium || theme.palette.background.paper;
@@ -71,7 +76,7 @@ export const GenericGraph = ({
 
   // Create graph instance
   const initGraph = useCallback(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || isEmpty) return;
 
     const {
       data,
@@ -339,7 +344,7 @@ export const GenericGraph = ({
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [waitForLayout]);
+  }, [waitForLayout, isEmpty]);
 
   // Initialize graph when data changes
   useEffect(() => {
@@ -391,6 +396,10 @@ export const GenericGraph = ({
       });
     }
   }, []);
+
+  if (isEmpty) {
+    return <EmptyState title="No data found" description="" />;
+  }
 
   return (
     <>

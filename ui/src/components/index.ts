@@ -53,6 +53,10 @@ export * from './StaticTopology';
 export * from './GenericGraph';
 export * from './LiveTopology';
 export * from './LiveSessionDetails';
+export * from './CognitiveObservability';
+export * from './CognitiveFailureDescription';
+export * from './ScoreSeverityBadgeLabel';
+export * from './RemediationTags';
 
 export { ApplicationCard, Tags };
 export { PageWithTitle, SpanDrawer };
