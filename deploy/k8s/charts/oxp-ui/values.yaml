@@ -38,26 +38,6 @@ featureFlags:
   neurosymbolicEval: "false"
   cognitiveObservability: "false"
   l9Protocols: "false"
-copilot:
-  enabled: false
-  image:
-    repository: ghcr.io/outshift-open/oxp-runtime
-    pullPolicy: IfNotPresent
-    tag: ""
-  livenessProbe:
-    httpGet:
-      path: /health
-      port: http-copilot
-  readinessProbe:
-    httpGet:
-      path: /health
-      port: http-copilot
-  service:
-    port: 4000
-  azureOpenaiEndpoint: ""
-  azureOpenaiApiVersion: "2024-08-01-preview"
-  azureOpenaiApiKey: ""
-  allowedOrigin: ""
 
 # This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
 serviceAccount:

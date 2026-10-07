@@ -88,57 +88,6 @@ spec:
           volumeMounts:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-        {{- if .Values.copilot.enabled }}
-        - name: {{ .Chart.Name }}-copilot
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.copilot.image.repository }}:{{ .Values.copilot.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.copilot.image.pullPolicy }}
-          ports:
-            - name: http-copilot
-              containerPort: {{ .Values.copilot.service.port }}
-              protocol: TCP
-          livenessProbe:
-            {{- toYaml .Values.copilot.livenessProbe | nindent 12 }}
-          readinessProbe:
-            {{- toYaml .Values.copilot.readinessProbe | nindent 12 }}
-          {{- if eq .Values.syncSecretsFromVault.enabled false }}
-          envFrom:
-            - configMapRef:
-                name: {{ .Chart.Name }}-copilot-configmap
-          {{- end }}
-          {{- if or .Values.syncSecretsFromVault.enabled .Values.environment }}
-          env:
-            {{- if .Values.syncSecretsFromVault.enabled }}
-            - name: AZURE_OPENAI_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "config.secretName" . }}
-                  key: azureOpenaiEndpoint
-            - name: AZURE_OPENAI_API_VERSION
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "config.secretName" . }}
-                  key: azureOpenaiApiVersion
-            - name: AZURE_OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "config.secretName" . }}
-                  key: azureOpenaiApiKey
-            - name: ALLOWED_ORIGIN
-              value: {{ .Values.copilot.allowedOrigin | quote }}
-            {{- end }}
-            {{- with .Values.environment }}
-            {{- toYaml . | nindent 12 }}
-            {{- end  }}
-          {{- end }}
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-          {{- with .Values.volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        {{- end }}
       {{- with .Values.volumes }}
       volumes:
         {{- toYaml . | nindent 8 }}

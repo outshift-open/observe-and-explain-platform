@@ -40,20 +40,4 @@ spec:
                   number: {{ $.Values.service.port }}
           {{- end }}
     {{- end }}
-    {{- range .Values.copilot.ingress.hosts }}
-    - host: {{ .host | quote }}
-      http:
-        paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            {{- with .pathType }}
-            pathType: {{ . }}
-            {{- end }}
-            backend:
-              service:
-                name: {{ include "oxp-ui.fullname" $ }}
-                port:
-                  number: {{ $.Values.copilot.service.port }}
-          {{- end }}
-    {{- end }}
 {{- end }}

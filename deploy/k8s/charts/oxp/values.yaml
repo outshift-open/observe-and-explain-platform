@@ -410,13 +410,6 @@ ui:
     neurosymbolicEval: "false"
     cognitiveObservability: "false"
     l9Protocols: "false"
-  copilot:
-    enabled: false
-    azureOpenaiEndpoint: ""
-    azureOpenaiDeploymentName: ""
-    azureOpenaiApiVersion: 2024-08-01-preview
-    azureOpenaiApiKey: ""
-    allowedOrigin: ""
   livenessProbe:
     httpGet:
       path: /
@@ -460,10 +453,6 @@ gateway:
     uiPort: 8080
     apiHost: oxp-api
     apiPort: 8000
-    copilotEnabled: false
-    copilotPathPrefix: /api/copilotkit
-    copilotHost: oxp-ui
-    copilotPort: 4000
   resources: {}
 
 workers:

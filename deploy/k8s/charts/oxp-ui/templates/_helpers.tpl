@@ -86,13 +86,6 @@ Return the secret containing the tls certificate secrets
 {{- end -}}
 
 {{/*
-Resolve the internal base URL of the UI service itself.
-*/}}
-{{- define "oxp-ui.baseUrl" -}}
-{{- printf "http://%s:%v" (include "oxp-ui.fullname" .) .Values.service.port -}}
-{{- end -}}
-
-{{/*
 Resolve the internal base URL of the API service consumed by the UI.
 */}}
 {{- define "oxp-ui.apiBaseUrl" -}}
@@ -120,27 +113,4 @@ Resolve the REST API URL.
 {{- $defaultUrl := printf "%s/api/v1" (include "oxp-ui.apiBaseUrl" .) -}}
 {{- $url := .Values.ui.restApiUrl | default $defaultUrl -}}
 {{- $url -}}
-{{- end -}}
-
-{{/*
-Resolve the default allowed origin for copilot callbacks.
-*/}}
-{{- define "oxp-ui.allowedOrigin" -}}
-{{- $defaultUrl := include "oxp-ui.baseUrl" . -}}
-{{- $url := .Values.copilot.allowedOrigin | default $defaultUrl -}}
-{{- $url -}}
-{{- end -}}
-
-{{/*
-Validate standalone UI defaults that must be set when copilot is enabled without vault-backed secrets.
-*/}}
-{{- define "oxp-ui.validate" -}}
-{{- if and (not .Values.syncSecretsFromVault.enabled) .Values.copilot.enabled -}}
-    {{- if not .Values.copilot.azureOpenaiEndpoint -}}
-        {{- fail "oxp-ui: copilot.azureOpenaiEndpoint must be set when copilot.enabled=true and syncSecretsFromVault.enabled=false" -}}
-    {{- end -}}
-    {{- if not .Values.copilot.azureOpenaiApiKey -}}
-        {{- fail "oxp-ui: copilot.azureOpenaiApiKey must be set when copilot.enabled=true and syncSecretsFromVault.enabled=false" -}}
-    {{- end -}}
-{{- end -}}
 {{- end -}}
