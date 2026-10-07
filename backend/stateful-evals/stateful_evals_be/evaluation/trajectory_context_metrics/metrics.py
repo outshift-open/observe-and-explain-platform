@@ -834,11 +834,12 @@ mid-trajectory but later completed.
         *,
         stateful_result: Mapping[str, Any] | Any | None = None,
     ) -> HighLevelMetricResult | None:
+        # Only an explicit dropped status is decisive here; every other intent
+        # status is left to the LLM rubric.
         unresolved = [
             intent
             for intent in context.intents
-            if intent.status in {"pending", "in_progress", "dropped"}
-            and intent.source in {"user", "policy"}
+            if intent.status == "dropped" and intent.source in {"user", "policy"}
         ]
         if not unresolved:
             return None
@@ -848,8 +849,8 @@ mid-trajectory but later completed.
                 span_index=intent.last_seen,
                 entity_name=intent.name,
                 reasoning=(
-                    f"Intent '{intent.name}' remained {intent.status} at the end "
-                    "of the trajectory."
+                    f"Intent '{intent.name}' was dropped before the end of the "
+                    "trajectory."
                 ),
                 explanation=intent.description,
                 observed_impact="incomplete_resolution",
@@ -867,7 +868,7 @@ mid-trajectory but later completed.
         ]
         return _deterministic_result(
             self,
-            reasoning="Material intents remain unresolved in trajectory state.",
+            reasoning="Material intents were dropped from trajectory state.",
             failures=failures,
             judge_type="deterministic_unresolved_intent_precheck",
         )

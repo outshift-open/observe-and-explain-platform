@@ -1002,30 +1002,6 @@ def test_adapter_verification_survives_a_span_verification():
     assert ("approved", 2) in verifications
 
 
-def test_owner_observed_keeps_one_event_per_agent_with_all_bases():
-    context = TrajectoryContext("")
-    request = "Plan a weekend trip to Lisbon with a budget of $500."
-    context.ingest_span(
-        _llm(
-            "p0",
-            "planner",
-            user=request,
-            output="Your Lisbon weekend trip plan stays within the $500 budget.",
-        ),
-        0,
-    )
-
-    for intent in context.intents:
-        owners = [e for e in intent.events if e["type"] == "owner_observed"]
-        assert len(owners) == 1
-    assert any(
-        event.get("bases") == ["received_request", "produced_output"]
-        for intent in context.intents
-        for event in intent.events
-        if event["type"] == "owner_observed"
-    )
-
-
 def test_flags_skip_courtesy_and_descriptions():
     for text in (
         "CV103 departs 08:30. Let me know if you need more information.",

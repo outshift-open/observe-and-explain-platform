@@ -8,9 +8,9 @@ Tracks four categories of information as spans are processed sequentially:
    Tool outputs are authoritative — they are ground truth.  Agent outputs are
    deliberately excluded as evidence (they are what we evaluate).
 
-2. **Intents** (for Intent Recognition): user requests, planned actions,
-   fulfilled/pending/dropped status.  Built incrementally from user messages
-   and tool actions.
+2. **Intents** (for Intent Recognition): work items that agents assign to
+   one another, linked to spans by explicit references and recorded ids.
+   Completion is left to the judges.
 
 3. **Claims** (for Relevancy): agent assertions, decisions, state
    transitions.  Provides the "reasoning history" that relevancy is checked
@@ -37,73 +37,6 @@ from typing import Any, Dict, List, Optional
 from stateful_evals_be.evaluation.coordination import CoordinationContext
 
 logger = logging.getLogger("stateful_evals_be.trajectory_context")
-
-_SEMANTIC_STOP_WORDS = {
-    "about",
-    "after",
-    "also",
-    "and",
-    "are",
-    "because",
-    "been",
-    "before",
-    "being",
-    "both",
-    "but",
-    "care",
-    "content",
-    "could",
-    "does",
-    "each",
-    "from",
-    "have",
-    "include",
-    "into",
-    "keep",
-    "least",
-    "message",
-    "next",
-    "only",
-    "please",
-    "prompt",
-    "provide",
-    "request",
-    "role",
-    "should",
-    "that",
-    "the",
-    "their",
-    "them",
-    "then",
-    "this",
-    "under",
-    "user",
-    "want",
-    "with",
-    "would",
-}
-
-_TYPE_AFFINITY = {
-    "accessibility": {"accessibility", "accessible", "wheelchair", "ramp", "step-free"},
-    "budget": {"affordable", "budget", "cost", "fare", "price", "pricing"},
-    "indoor_attraction": {"attraction", "indoor", "museum"},
-    "itinerary": {
-        "airplane",
-        "destination",
-        "flight",
-        "itinerary",
-        "route",
-        "schedule",
-        "train",
-        "transport",
-        "travel",
-        "trip",
-    },
-    "outdoor_attraction": {"attraction", "outdoor", "park"},
-    "preference": {"avoid", "dining", "exclude", "optional", "preference"},
-    "request": set(),
-}
-
 
 @dataclass
 class EvidenceFact:
@@ -140,7 +73,9 @@ class IntentEntry:
     source: str  # "user" | "policy" | "agent_plan"
     first_seen: int  # span index
     last_seen: int
-    status: str  # "pending" | "in_progress" | "fulfilled" | "dropped"
+    # "in_progress" for an assigned work item; other values are read back from
+    # persisted artifacts ("pending" | "fulfilled" | "dropped").
+    status: str
     description: str = ""
     requirement_type: str = "request"
     events: List[Dict[str, Any]] = field(default_factory=list)
@@ -322,7 +257,6 @@ class TrajectoryContext:
         ctx = TrajectoryContext(policy_text, tool_definitions)
 
         for n, span_dict in enumerate(evaluable_spans):
-            evidence_ctx = ctx.retrieve_for_groundedness(span_dict)
             intent_ctx = ctx.retrieve_for_intent_recognition(span_dict)
             relevancy_ctx = ctx.retrieve_for_relevancy(span_dict)
 
@@ -538,7 +472,7 @@ class TrajectoryContext:
                 span_dict,
                 span_index,
                 event_type=event_types[0],
-                parent_intent_ids=self._matching_intent_ids(edge.request),
+                parent_intent_ids=[],
                 recipient_agent_ids=recipient_agent_ids,
             )
         unit = self._open_work_unit(
@@ -717,7 +651,6 @@ class TrajectoryContext:
         self.latest_root_answer_span_index = span_index
         if record_synthesis:
             self._record_final_synthesis(normalized, span_index)
-        self._resolve_intents_from_final_answer(normalized, span_index)
 
     # ------------------------------------------------------------------
     # Agents, work units and flags
@@ -1630,7 +1563,7 @@ class TrajectoryContext:
     def _ingest_tool_span(
         self, span_dict: Dict[str, Any], span_index: int, tool_name: str
     ) -> None:
-        """Index tool input+output as authoritative evidence and track as intent progress."""
+        """Index tool input+output as authoritative evidence."""
         input_payload = span_dict.get("input_payload")
         output_payload = span_dict.get("output_payload")
         explicit_agent = self._explicit_agent_id(span_dict)
@@ -1651,12 +1584,11 @@ class TrajectoryContext:
             self._record_receipt(work_unit, span_index)
         tool_outcome = _tool_outcome(span_dict, output_payload)
         provenance = self._operation_provenance(span_dict)
-        related_intent_ids = self._update_intent_from_tool(
-            tool_name,
-            span_index,
-            input_payload,
-            output_payload,
-            contains_error=tool_outcome == "error",
+        # Only the work item this span executes under is a known link.
+        related_intent_ids = (
+            [work_unit.intent_id]
+            if work_unit is not None and work_unit.intent_id
+            else []
         )
 
         parts: List[str] = [f"[Tool: {tool_name}]"]
@@ -1805,7 +1737,10 @@ class TrajectoryContext:
         return any(
             fact.fact_type == "tool_output"
             and fact.source_name == tool_name
-            and (result in fact.content or _content_matches(result, fact.content))
+            and (
+                result in fact.content
+                or _safe_json(_json_value(result), max_len=None) in fact.content
+            )
             for fact in self.evidence
         )
 
@@ -1860,7 +1795,12 @@ class TrajectoryContext:
         if not peer_assertion and agent_id and not self.root_agent_id:
             self.root_agent_id = agent_id
         input_artifact_ids = self._input_artifact_ids(input_payload)
-        related_intent_ids: List[str] = []
+        # Only the work item this span executes under is a known link.
+        related_intent_ids = (
+            [work_unit.intent_id]
+            if work_unit is not None and work_unit.intent_id
+            else []
+        )
         user_messages = _extract_user_messages(input_payload)
         embedded_user_requests = _ordered_union(
             [],
@@ -1903,27 +1843,8 @@ class TrajectoryContext:
             text = text.strip()
             if text and text not in existing_user_texts:
                 existing_user_texts.add(text)
-                if fact_type in {"user_statement", "agent_handoff"}:
-                    message_intent_ids = self._update_intent_from_user(
-                        text,
-                        span_index,
-                        delegated_task=fact_type == "agent_handoff",
-                        span_dict=span_dict,
-                    )
-                else:
-                    message_intent_ids = self._matching_intent_ids(text)
-                if fact_type == "user_statement":
-                    self._observe_intent_ownership(
-                        message_intent_ids,
-                        provenance["agent_id"],
-                        provenance["actor_scope"],
-                        span_dict,
-                        span_index,
-                        basis="received_request",
-                    )
-                related_intent_ids = _ordered_union(
-                    related_intent_ids,
-                    message_intent_ids,
+                message_intent_ids = (
+                    list(related_intent_ids) if fact_type == "agent_handoff" else []
                 )
                 fact_id = self._append_evidence(
                     EvidenceFact(
@@ -1975,13 +1896,6 @@ class TrajectoryContext:
             ):
                 self.latest_root_answer = agent_text
                 self.latest_root_answer_span_index = span_index
-                if _looks_like_final_answer(agent_text):
-                    self._resolve_intents_from_final_answer(agent_text, span_index)
-            claim_intent_ids = self._matching_intent_ids(agent_text)
-            related_intent_ids = _ordered_union(
-                related_intent_ids,
-                claim_intent_ids,
-            )
             linked_artifact_ids = self._linked_span_artifact_ids(span_dict)
             evidence_refs = _ordered_union(input_artifact_ids, linked_artifact_ids)
             round_index = _span_round_index(span_dict)
@@ -2142,19 +2056,6 @@ class TrajectoryContext:
         self.claims.append(claim)
         return artifact_id
 
-    def _intent_artifact_id(self, intent: IntentEntry) -> str:
-        return f"intent:{self.intents.index(intent)}"
-
-    def _matching_intent_ids(self, text: str, *, max_matches: int = 4) -> List[str]:
-        return [
-            self._intent_artifact_id(intent)
-            for intent, _ in _matching_intents(
-                self.intents,
-                text,
-                max_matches=max_matches,
-            )
-        ]
-
     def _remember_span(self, span_dict: Dict[str, Any], *artifact_ids: str) -> None:
         span_id = str(span_dict.get("span_id") or "")
         if not span_id:
@@ -2177,10 +2078,13 @@ class TrajectoryContext:
         return artifact_ids
 
     def _input_artifact_ids(self, input_payload: Dict[str, Any]) -> List[str]:
-        """Resolve recorded prompt messages to artifacts already in context."""
+        """Resolve recorded prompt messages to artifacts already in context.
+
+        A message links to an artifact only when the whole text is equal.
+        """
         artifact_ids: List[str] = []
         for message in _extract_prompt_messages(input_payload):
-            content = message["content"]
+            content = _exact_text_key(message["content"])
             role = message["role"]
             if role == "system":
                 candidates = [
@@ -2190,12 +2094,17 @@ class TrajectoryContext:
                 ]
             elif role in {"assistant", "ai"}:
                 candidates = [
-                    (f"claim:{index}", claim.content)
+                    (f"claim:{index}", _reply_without_tool_calls(claim.content))
                     for index, claim in enumerate(self.claims)
                 ]
             elif role in {"tool", "function"}:
+                # A tool fact is stored as its call followed by the returned
+                # payload; a later prompt replays only that payload.
                 candidates = [
-                    (self._evidence_artifact_id(index, fact), fact.content)
+                    (
+                        self._evidence_artifact_id(index, fact),
+                        fact.content.partition("\n  Returned: ")[2],
+                    )
                     for index, fact in enumerate(self.evidence)
                     if fact.fact_type == "tool_output"
                 ]
@@ -2212,7 +2121,7 @@ class TrajectoryContext:
                     }
                 ]
             for artifact_id, candidate_content in candidates:
-                if _content_matches(content, candidate_content):
+                if content and content == _exact_text_key(candidate_content):
                     artifact_ids.append(artifact_id)
         return _ordered_union([], artifact_ids)
 
@@ -2498,10 +2407,6 @@ class TrajectoryContext:
         input_ids = _ordered_union(input_ids, referenced_claim_ids)
         output_ids = list(output_artifact_ids or [])
         intent_ids = list(related_intent_ids or [])
-        if not intent_ids:
-            intent_ids = self._matching_intent_ids(
-                _safe_json(span_dict.get("input_payload"), max_len=None)
-            )
 
         duplicate_types = [
             event_type for event_type in event_types if event_type in parent_types
@@ -2976,8 +2881,6 @@ class TrajectoryContext:
             )
             if exact:
                 resolved.append(exact)
-                continue
-            resolved.extend(self._matching_intent_ids(reference, max_matches=2))
         return _ordered_union([], resolved)
 
     def _merge_parent_coordination_event(
@@ -3325,226 +3228,6 @@ class TrajectoryContext:
                 event.event_type
             )
 
-    def _update_intent_from_user(
-        self,
-        user_text: str,
-        span_index: int,
-        *,
-        delegated_task: bool = False,
-        span_dict: Optional[Dict[str, Any]] = None,
-    ) -> List[str]:
-        """Register semantic requirements or link a delegated task to them."""
-        if delegated_task and self.intents:
-            agent_id = _span_agent_id(span_dict or {})
-            assigned_matches = [
-                self._intent_artifact_id(intent)
-                for intent, _ in _matching_intents(
-                    [
-                        candidate
-                        for candidate in self.intents
-                        if candidate.source == "agent_plan"
-                        and agent_id in candidate.owner_agent_ids
-                    ],
-                    user_text,
-                    max_matches=4,
-                )
-            ]
-            intent_ids = assigned_matches or self._link_text_to_intents(
-                user_text,
-                span_index,
-                event_type="delegated_task",
-            )
-            for intent_id in assigned_matches:
-                intent = self._intent_by_artifact_id(intent_id)
-                if intent is None:
-                    continue
-                intent.last_seen = max(intent.last_seen, span_index)
-                intent.events.append(
-                    {
-                        "span_index": span_index,
-                        "type": "delegated_task",
-                        "content": user_text,
-                    }
-                )
-            if span_dict is not None:
-                provenance = self._operation_provenance(
-                    span_dict,
-                    delegated_task=True,
-                )
-                self._observe_intent_ownership(
-                    intent_ids,
-                    provenance["agent_id"],
-                    provenance["actor_scope"],
-                    span_dict,
-                    span_index,
-                    basis="delegated_execution",
-                )
-            return intent_ids
-
-        requirements = _extract_semantic_requirements(user_text)
-        intent_ids: List[str] = []
-        for requirement in requirements:
-            existing = _best_matching_intent(
-                self.intents,
-                requirement["description"],
-                requirement["requirement_type"],
-            )
-            if existing is not None:
-                existing.last_seen = span_index
-                existing.events.append(
-                    {
-                        "span_index": span_index,
-                        "type": "user_restatement",
-                        "content": user_text,
-                    }
-                )
-                intent_ids.append(self._intent_artifact_id(existing))
-                continue
-
-            self.intents.append(
-                IntentEntry(
-                    name=_unique_intent_name(
-                        requirement["name"],
-                        {intent.name for intent in self.intents},
-                    ),
-                    description=requirement["description"],
-                    requirement_type=requirement["requirement_type"],
-                    source="user",
-                    first_seen=span_index,
-                    last_seen=span_index,
-                    status="pending",
-                    events=[
-                        {
-                            "span_index": span_index,
-                            "type": "requirement_observed",
-                            "content": requirement["source_text"],
-                        }
-                    ],
-                )
-            )
-            intent_ids.append(f"intent:{len(self.intents) - 1}")
-        return _ordered_union([], intent_ids)
-
-    def _update_intent_from_tool(
-        self,
-        tool_name: str,
-        span_index: int,
-        input_payload: Any,
-        output_payload: Any,
-        *,
-        contains_error: bool = False,
-    ) -> List[str]:
-        """Link a tool attempt to the semantic requirements it advances."""
-        if isinstance(output_payload, dict):
-            status = str(output_payload.get("status", "")).lower()
-            contains_error = contains_error or status in ("error", "failed")
-
-        activity = " ".join(
-            (
-                tool_name,
-                _safe_json(input_payload, max_len=1200),
-                _safe_json(output_payload, max_len=800),
-            )
-        )
-        matches = _matching_intents(self.intents, activity, max_matches=3)
-        intent_ids: List[str] = []
-        for intent, matched_terms in matches:
-            intent_ids.append(self._intent_artifact_id(intent))
-            intent.last_seen = span_index
-            if not contains_error and intent.status == "pending":
-                intent.status = "in_progress"
-            intent.events.append(
-                {
-                    "span_index": span_index,
-                    "type": "tool_attempt",
-                    "tool": tool_name,
-                    "input": _safe_json(input_payload, max_len=None),
-                    "output": _safe_json(output_payload, max_len=None),
-                    "matched_terms": sorted(matched_terms)[:8],
-                    "error": contains_error,
-                }
-            )
-        return intent_ids
-
-    def _link_text_to_intents(
-        self,
-        text: str,
-        span_index: int,
-        *,
-        event_type: str,
-    ) -> List[str]:
-        """Attach a handoff or restatement to the requirements it references."""
-        intent_ids: List[str] = []
-        for intent, matched_terms in _matching_intents(
-            self.intents,
-            text,
-            max_matches=4,
-        ):
-            intent_ids.append(self._intent_artifact_id(intent))
-            intent.last_seen = span_index
-            intent.events.append(
-                {
-                    "span_index": span_index,
-                    "type": event_type,
-                    "content": text,
-                    "matched_terms": sorted(matched_terms)[:8],
-                }
-            )
-        return intent_ids
-
-    def _resolve_intents_from_final_answer(
-        self,
-        text: str,
-        span_index: int,
-    ) -> None:
-        """Mark semantic requirements addressed by the final root response."""
-        matched = _matching_intents(
-            self.intents,
-            text,
-            max_matches=len(self.intents),
-        )
-        matched_names = {intent.name for intent, _ in matched}
-        lower = text.lower()
-        for intent, matched_terms in matched:
-            intent.status = "fulfilled"
-            intent.last_seen = span_index
-            if not any(
-                event.get("type") == "final_answer_alignment"
-                and event.get("span_index") == span_index
-                and event.get("content") == text
-                for event in intent.events
-            ):
-                intent.events.append(
-                    {
-                        "span_index": span_index,
-                        "type": "final_answer_alignment",
-                        "content": text,
-                        "matched_terms": sorted(matched_terms)[:8],
-                    }
-                )
-
-        for intent in self.intents:
-            if intent.name in matched_names or intent.requirement_type != "preference":
-                continue
-            if "not required" in intent.description.lower() and "dining" not in lower:
-                intent.status = "fulfilled"
-                intent.last_seen = span_index
-                content = "Optional item correctly omitted from final answer."
-                if not any(
-                    event.get("type") == "final_answer_alignment"
-                    and event.get("span_index") == span_index
-                    and event.get("content") == content
-                    for event in intent.events
-                ):
-                    intent.events.append(
-                        {
-                            "span_index": span_index,
-                            "type": "final_answer_alignment",
-                            "content": content,
-                            "matched_terms": ["omitted"],
-                        }
-                    )
-
     # ------------------------------------------------------------------
     # Retrieval: tailored context for each metric
     # ------------------------------------------------------------------
@@ -3563,7 +3246,8 @@ class TrajectoryContext:
         evidence, and reasoning history for Groundedness, Intent Recognition,
         and Relevancy.  This representation is deliberately policy-free (the
         caller sends policy once) and contains only the state needed to judge
-        the current transition.
+        the current transition.  ``current_span`` is kept for API
+        compatibility; selection is by recency, not by the span's text.
         """
         current_index = self._current_span_index()
         recent_evidence = self._get_recent_evidence(current_index)
@@ -3573,22 +3257,19 @@ class TrajectoryContext:
             for item in selected
         }
 
-        query_terms = _extract_query_terms(current_span)
-        ranked = _rank_by_keywords(
-            [
-                fact
-                for fact in self.evidence
-                if (
-                    fact.span_index,
-                    fact.fact_type,
-                    fact.source_name,
-                    fact.content,
-                )
-                not in selected_keys
-            ],
-            query_terms,
-        )
-        for fact, _ in ranked:
+        # Fill the remaining slots with the most recent other facts.
+        older = [
+            fact
+            for fact in self.evidence
+            if (
+                fact.span_index,
+                fact.fact_type,
+                fact.source_name,
+                fact.content,
+            )
+            not in selected_keys
+        ]
+        for fact in sorted(older, key=lambda item: item.span_index, reverse=True):
             if len(selected) >= max_facts:
                 break
             selected.append(fact)
@@ -3661,60 +3342,6 @@ class TrajectoryContext:
                 for event in self.coordination_events[-10:]
             ],
         }
-
-    def retrieve_for_groundedness(
-        self, current_span: Dict[str, Any], *, budget: Optional[int] = None
-    ) -> str:
-        """Build evidence-focused context for Groundedness evaluation."""
-        budget = budget or self.max_context_chars
-        sections: List[str] = []
-        used = 0
-
-        if self.policy_text:
-            sec = f"POLICY:\n{self.policy_text}"
-            sections.append(sec)
-            used += len(sec)
-
-        if self.tool_definitions:
-            sec = f"AVAILABLE TOOLS:\n{_safe_json(self.tool_definitions, max_len=1000)}"
-            sections.append(sec)
-            used += len(sec)
-
-        recency = self._get_recent_evidence(self._current_span_index())
-        if recency:
-            lines = ["RECENT EVIDENCE:"]
-            for fact in recency:
-                line = (
-                    f"  [Step {fact.span_index + 1}, {fact.fact_type}] {fact.content}"
-                )
-                if used + len(line) + 2 > budget:
-                    break
-                lines.append(line)
-                used += len(line) + 1
-            if len(lines) > 1:
-                sections.append("\n".join(lines))
-
-        query_terms = _extract_query_terms(current_span)
-        tool_facts = [f for f in self.evidence if f.fact_type == "tool_output"]
-        recency_indices = {f.span_index for f in recency}
-        ranked = _rank_by_keywords(
-            [f for f in tool_facts if f.span_index not in recency_indices],
-            query_terms,
-        )
-
-        remaining = budget - used
-        if ranked:
-            lines = ["TOOL OUTPUTS (authoritative evidence):"]
-            for fact, _ in ranked[:8]:
-                line = f"  [Step {fact.span_index + 1}] {fact.content}"
-                if len(line) > remaining:
-                    break
-                lines.append(line)
-                remaining -= len(line) + 1
-            if len(lines) > 1:
-                sections.append("\n".join(lines))
-
-        return "\n\n".join(sections)
 
     def retrieve_for_intent_recognition(
         self, current_span: Dict[str, Any], *, budget: Optional[int] = None
@@ -4137,29 +3764,22 @@ def _extract_prompt_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return unique
 
 
-def _content_matches(observed: str, recorded: str) -> bool:
-    """Match an input message to a prior artifact despite JSON formatting."""
+def _exact_text_key(value: Any) -> str:
+    """Identity key of a message or recorded payload; equal keys mean equal text.
 
-    def normalized(value: str) -> str:
-        # Tool results are stored inside JSON envelopes, where line breaks and
-        # quotes are escaped. Remove those serialization artifacts before
-        # comparing them with the decoded messages in a later LLM prompt.
-        text = str(value or "").casefold()
-        text = re.sub(r"\\[nrt]", " ", text)
-        text = text.replace(r"\"", '"').replace(r"\\/", "/")
-        text = re.sub(r"\\u[0-9a-f]{4}", " ", text)
-        return re.sub(r"[^a-z0-9]+", " ", text).strip()
-
-    observed_text = normalized(observed)
-    recorded_text = normalized(recorded)
-    if not observed_text or not recorded_text:
-        return False
-    if observed_text == recorded_text:
-        return True
-    minimum_substring = 8 if any(char.isdigit() for char in observed_text) else 20
-    if len(observed_text) < minimum_substring:
-        return False
-    return observed_text in recorded_text or recorded_text in observed_text
+    JSON text compares as its decoded value, without a ``{"value": ...}``
+    wrapper; other text compares whole after ``_normalise_semantic_text``.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return _normalise_semantic_text(value)
+    if isinstance(value, dict) and set(value) == {"value"}:
+        return _exact_text_key(value["value"])
+    if isinstance(value, str):
+        return _normalise_semantic_text(value)
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _first_text_value(payload: Any, keys: tuple[str, ...]) -> str:
@@ -4939,214 +4559,6 @@ def _is_delegated_agent_input(
     return not any(marker in normalized_system for marker in moderator_markers)
 
 
-def _extract_semantic_requirements(user_text: str) -> List[Dict[str, str]]:
-    """Extract concise, human-readable requirements from an external user turn.
-
-    This deliberately stays deterministic. The original statement remains evidence;
-    these entries provide a semantic index that tools and handoffs can link back to.
-    """
-    normalized = " ".join(user_text.split()).strip()
-    if not normalized:
-        return []
-
-    sentences = [
-        sentence.strip(" ,")
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", normalized)
-        if sentence.strip(" ,")
-    ]
-    requirements: List[Dict[str, str]] = []
-
-    def add(name: str, description: str, requirement_type: str, source: str) -> None:
-        key = (requirement_type, description.lower())
-        if any(
-            (item["requirement_type"], item["description"].lower()) == key
-            for item in requirements
-        ):
-            return
-        requirements.append(
-            {
-                "name": name,
-                "description": description.rstrip(". ") + ".",
-                "requirement_type": requirement_type,
-                "source_text": source,
-            }
-        )
-
-    main_sentence = next(
-        (
-            sentence
-            for sentence in sentences
-            if re.search(
-                r"\b(plan|book|build|create|find|prepare|schedule|summarize|write)\b",
-                sentence,
-                re.IGNORECASE,
-            )
-            and not re.match(r"^(hello|hi|hey)\b", sentence, re.IGNORECASE)
-        ),
-        None,
-    )
-    if main_sentence:
-        requirement_type = (
-            "itinerary"
-            if re.search(
-                r"\b(trip|travel|visit|route|itinerary|weekend|depart|leaving)\b",
-                main_sentence,
-                re.I,
-            )
-            else "request"
-        )
-        add(
-            "Trip itinerary" if requirement_type == "itinerary" else "Primary request",
-            main_sentence,
-            requirement_type,
-            main_sentence,
-        )
-
-    budget_source = next(
-        (
-            sentence
-            for sentence in sentences
-            if re.search(r"\b(affordable|budget|cost|spend|price)\b", sentence, re.I)
-            or re.search(
-                r"\b(under|below|less than|up to)\s*[$€£]?\s*\d",
-                sentence,
-                re.I,
-            )
-        ),
-        "",
-    )
-    if budget_source:
-        limit_match = re.search(
-            r"(?:\b(?:under|below|less than|up to|maximum(?: of)?|max(?:imum)?(?: of)?)"
-            r"|\bbudget(?:\s+(?:of|is))?)\s*"
-            r"([$€£]?\s*\d[\d,.]*\s*(?:eur|usd|gbp)?)",
-            budget_source,
-            re.IGNORECASE,
-        )
-        if limit_match:
-            limit = " ".join(limit_match.group(1).upper().split())
-            description = f"Keep total cost under {limit}"
-        else:
-            description = "Keep total cost affordable within the stated budget"
-        add("Budget ceiling", description, "budget", budget_source)
-
-    lower = normalized.lower()
-    if re.search(
-        r"\bindoor(?:\s+(?:and|or)\s+outdoor)?\s+attractions?",
-        lower,
-    ):
-        qualifier = "at least one" if "at least one indoor" in lower else "one"
-        add(
-            "Indoor attraction",
-            f"Include {qualifier} indoor attraction",
-            "indoor_attraction",
-            normalized,
-        )
-    if re.search(r"\boutdoor\s+attraction", lower):
-        qualifier = "at least one" if "at least one outdoor" in lower else "one"
-        add(
-            "Outdoor attraction",
-            f"Include {qualifier} outdoor attraction",
-            "outdoor_attraction",
-            normalized,
-        )
-    if re.search(r"\b(accessible|accessibility|wheelchair|step-free)\b", lower):
-        source = next(
-            (
-                sentence
-                for sentence in sentences
-                if re.search(
-                    r"\b(accessible|accessibility|wheelchair|step-free)\b",
-                    sentence,
-                    re.I,
-                )
-            ),
-            normalized,
-        )
-        add("Accessibility", source, "accessibility", source)
-    if re.search(r"\b(don't care|do not care|no need)\b[^.]*\bdining\b", lower):
-        add(
-            "Dining preference",
-            "Dining options are not required",
-            "preference",
-            normalized,
-        )
-
-    if not requirements:
-        add("Primary request", normalized, "request", normalized)
-    return requirements
-
-
-def _semantic_tokens(text: str) -> set[str]:
-    tokens: set[str] = set()
-    for raw in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)?", text.lower()):
-        token = raw
-        if token.endswith("ies") and len(token) > 4:
-            token = token[:-3] + "y"
-        elif token.endswith("s") and len(token) > 4 and not token.endswith("ss"):
-            token = token[:-1]
-        if token in _SEMANTIC_STOP_WORDS or len(token) < 3:
-            continue
-        tokens.add(token)
-        if "-" in token:
-            tokens.update(
-                part
-                for part in token.split("-")
-                if len(part) >= 3 and part not in _SEMANTIC_STOP_WORDS
-            )
-
-    if "affordable" in tokens:
-        tokens.update({"budget", "cost"})
-    if "fare" in tokens or "pricing" in tokens:
-        tokens.update({"cost", "price"})
-    if tokens & {"airplane", "flight", "train"}:
-        tokens.update({"route", "transport"})
-    return tokens
-
-
-def _best_matching_intent(
-    intents: List[IntentEntry],
-    description: str,
-    requirement_type: str,
-) -> Optional[IntentEntry]:
-    target_tokens = _semantic_tokens(description)
-    best: Optional[IntentEntry] = None
-    best_score = 0.0
-    for intent in intents:
-        if intent.requirement_type != requirement_type:
-            continue
-        intent_tokens = _semantic_tokens(f"{intent.name} {intent.description}")
-        overlap = target_tokens & intent_tokens
-        score = len(overlap) / max(1, min(len(target_tokens), len(intent_tokens)))
-        if score > best_score:
-            best = intent
-            best_score = score
-    return best if best_score >= 0.45 else None
-
-
-def _matching_intents(
-    intents: List[IntentEntry],
-    activity: str,
-    *,
-    max_matches: int,
-) -> List[tuple[IntentEntry, set[str]]]:
-    activity_tokens = _semantic_tokens(activity)
-    ranked: List[tuple[IntentEntry, set[str], float]] = []
-    for intent in intents:
-        intent_tokens = _semantic_tokens(f"{intent.name} {intent.description}")
-        matched = intent_tokens & activity_tokens
-        affinity = _TYPE_AFFINITY.get(intent.requirement_type, set())
-        affinity_match = affinity & activity_tokens
-        score = len(matched) / max(3, min(len(intent_tokens), 8))
-        if affinity_match:
-            score += 0.2
-            matched |= affinity_match
-        if score >= 0.2:
-            ranked.append((intent, matched, score))
-    ranked.sort(key=lambda item: (-item[2], item[0].first_seen, item[0].name))
-    return [(intent, terms) for intent, terms, _ in ranked[:max_matches]]
-
-
 def _unique_intent_name(name: str, existing_names: set[str]) -> str:
     if name not in existing_names:
         return name
@@ -5187,22 +4599,6 @@ def _has_visible_content(text: str) -> bool:
         flags=re.IGNORECASE,
     ).strip()
     return bool(visible)
-
-
-def _looks_like_final_answer(text: str) -> bool:
-    visible = re.sub(
-        r"<\|?channel\|?>\s*(?:thought|analysis)?",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
-    if len(visible) < 120:
-        return False
-    opening = visible[:350].lower()
-    return not re.search(
-        r"\b(?:i need to|i will (?:start|ask|call|use|first)|let me|next,? i will)\b",
-        opening,
-    )
 
 
 def _span_agent_id(span_dict: Dict[str, Any]) -> str:
@@ -5636,69 +5032,3 @@ def _epoch_to_ns(number: int | float) -> int:
     if number > 1e11:
         return int(number * 1_000_000)
     return int(number * 1_000_000_000)
-
-
-def _extract_query_terms(span_dict: Dict[str, Any]) -> set:
-    parts: List[str] = []
-    for payload_key in ("input_payload", "output_payload"):
-        payload = span_dict.get(payload_key)
-        if payload:
-            text = (
-                json.dumps(payload, default=str)
-                if isinstance(payload, dict)
-                else str(payload)
-            )
-            parts.append(text)
-    name = span_dict.get("entity_name", "")
-    if name:
-        parts.append(name)
-
-    combined = " ".join(parts).lower()
-    tokens = set(re.findall(r"[a-z0-9_]{3,}", combined))
-    tokens -= {
-        "the",
-        "and",
-        "for",
-        "that",
-        "this",
-        "with",
-        "from",
-        "are",
-        "was",
-        "not",
-        "but",
-        "has",
-        "have",
-        "will",
-        "can",
-        "content",
-        "role",
-        "gen_ai",
-        "prompt",
-        "completion",
-        "true",
-        "false",
-        "none",
-        "null",
-        "message",
-        "string",
-        "type",
-        "value",
-        "status",
-    }
-    return tokens
-
-
-def _rank_by_keywords(facts: List[EvidenceFact], query_terms: set) -> List[tuple]:
-    if not facts or not query_terms:
-        return [(f, 0.0) for f in facts]
-
-    scored = []
-    for fact in facts:
-        fact_tokens = set(re.findall(r"[a-z0-9_]{3,}", fact.content.lower()))
-        overlap = len(query_terms & fact_tokens)
-        score = overlap / len(query_terms) if query_terms else 0.0
-        scored.append((fact, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored
