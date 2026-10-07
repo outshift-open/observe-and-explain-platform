@@ -12,6 +12,7 @@ import { ExecutionTreeTab } from './ExecutionTreeTab';
 import { ConversationTab } from './ConversationTab';
 import { SessionAnalysisTab } from './SessionAnalysisTab';
 import { CognitiveObservabilityTab } from './CognitiveObservabilityTab';
+import { L9ProtocolsTab } from './L9ProtocolsTab';
 import { useApplicationSessionsWithStatefulEval } from '@/api/oxpApi';
 import { DEFAULT_START_DATE, DEFAULT_END_DATE } from '@/common';
 import { SessionWithStatefulEval } from '@/types/oxp.type';
@@ -22,6 +23,7 @@ export const SESSION_TAB_KEYS = [
   'overview',
   'analysis',
   'cognitive-observability',
+  'l9-protocols',
   'reasoning-path',
   'execution-graph',
   'conversation'
@@ -111,6 +113,12 @@ const SessionDetails = ({
         label: 'Cognitive Observability',
         visible: true,
         render: () => <CognitiveObservabilityTab />
+      },
+      {
+        key: 'l9-protocols',
+        label: 'L9 Protocols',
+        visible: true,
+        render: () => <L9ProtocolsTab />
       },
       {
         key: 'reasoning-path',

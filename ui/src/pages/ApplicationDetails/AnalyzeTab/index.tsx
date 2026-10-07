@@ -11,6 +11,7 @@ import PsychologyOutlinedIcon from '@mui/icons-material/PsychologyOutlined';
 import PowerOutlinedIcon from '@mui/icons-material/PowerOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import CompareArrowsOutlinedIcon from '@mui/icons-material/CompareArrowsOutlined';
 
 import SemanticGrouping from './SemanticGrouping';
 import { useParams } from 'react-router-dom';
@@ -22,6 +23,7 @@ import {
   SemanticGroupsInsightsTable
 } from '@/components';
 import CognitiveObservability from '@/components/CognitiveObservability';
+import L9ProtocolsComparison from '@/components/L9ProtocolsComparison';
 import { FeatureFlagKey, getFeatureFlags } from '@/config/featureFlags';
 
 const ANALYZE_TABS = [
@@ -29,7 +31,8 @@ const ANALYZE_TABS = [
   'How they are failing',
   'What resources they are using',
   'How they are reasoning',
-  'Cognitive observability'
+  'Cognitive observability',
+  'L9 protocols'
 ] as const;
 
 type AnalyzeTabName = (typeof ANALYZE_TABS)[number];
@@ -66,6 +69,10 @@ const ANALYZE_TAB_META: Record<
   'Cognitive observability': {
     label: 'Cognitive observability',
     icon: VisibilityOutlinedIcon
+  },
+  'L9 protocols': {
+    label: 'L9 protocols',
+    icon: CompareArrowsOutlinedIcon
   }
 };
 
@@ -81,7 +88,7 @@ const ANALYZE_TAB_SECTIONS: { title: string; tabs: AnalyzeTabName[] }[] = [
   },
   {
     title: 'Performance',
-    tabs: ['How they are failing', 'Cognitive observability']
+    tabs: ['How they are failing', 'Cognitive observability', 'L9 protocols']
   }
 ];
 
@@ -234,6 +241,8 @@ const AnalyzeTabContent = memo(({ tab }: { tab: AnalyzeTabName }) => {
       return <ApplicationReasoningPathGraph masName={applicationId ?? ''} />;
     case 'Cognitive observability':
       return <CognitiveObservability />;
+    case 'L9 protocols':
+      return <L9ProtocolsComparison />;
   }
 });
 

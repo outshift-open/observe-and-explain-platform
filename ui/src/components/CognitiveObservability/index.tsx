@@ -87,9 +87,9 @@ const CognitiveObservability = () => {
             <CustomTooltip
               title={
                 <Typography variant={'caption'}>
-                  A cognitive failure only counts when its confidence is above
-                  this value. It drives the summary and the sessions listed in
-                  the table.
+                  A cognitive failure only counts when its detection confidence
+                  is above this value. It drives the summary and the sessions
+                  listed in the table.
                 </Typography>
               }
               placement={'top'}
