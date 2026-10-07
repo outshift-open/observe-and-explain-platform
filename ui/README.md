@@ -50,15 +50,17 @@ Feature flags gate optional pages/sub-views on top of the always-on core feature
 
 Resolution precedence (lowest to highest): built-in default → `VITE_FF_*` env var (build/dev-time) → `window.ff*` (runtime, injected per-deployment — see the Docker section).
 
-| Flag key             | Env var                      | `window` property     | Default |
-| -------------------- | ---------------------------- | --------------------- | ------- |
-| `semantic_groups`    | `VITE_FF_SEMANTIC_GROUPS`    | `ffSemanticGroups`    | `true`  |
-| `insights`           | `VITE_FF_INSIGHTS`           | `ffInsights`          | `true`  |
-| `live_topology`      | `VITE_FF_LIVE_TOPOLOGY`      | `ffLiveTopology`      | `true`  |
-| `stateful_eval`      | `VITE_FF_STATEFUL_EVAL`      | `ffStatefulEval`      | `true`  |
-| `impact_assessment`  | `VITE_FF_IMPACT_ASSESSMENT`  | `ffImpactAssessment`  | `false` |
-| `waste_estimation`   | `VITE_FF_WASTE_ESTIMATION`   | `ffWasteEstimation`   | `false` |
-| `neurosymbolic_eval` | `VITE_FF_NEUROSYMBOLIC_EVAL` | `ffNeurosymbolicEval` | `false` |
+| Flag key                  | Env var                           | `window` property          | Default |
+| ------------------------- | --------------------------------- | -------------------------- | ------- |
+| `semantic_groups`         | `VITE_FF_SEMANTIC_GROUPS`         | `ffSemanticGroups`         | `true`  |
+| `insights`                | `VITE_FF_INSIGHTS`                | `ffInsights`               | `true`  |
+| `live_topology`           | `VITE_FF_LIVE_TOPOLOGY`           | `ffLiveTopology`           | `true`  |
+| `stateful_eval`           | `VITE_FF_STATEFUL_EVAL`           | `ffStatefulEval`           | `true`  |
+| `impact_assessment`       | `VITE_FF_IMPACT_ASSESSMENT`       | `ffImpactAssessment`       | `false` |
+| `waste_estimation`        | `VITE_FF_WASTE_ESTIMATION`        | `ffWasteEstimation`        | `false` |
+| `neurosymbolic_eval`      | `VITE_FF_NEUROSYMBOLIC_EVAL`      | `ffNeurosymbolicEval`      | `false` |
+| `cognitive_observability` | `VITE_FF_COGNITIVE_OBSERVABILITY` | `ffCognitiveObservability` | `false` |
+| `l9_protocols`            | `VITE_FF_L9_PROTOCOLS`            | `ffL9Protocols`            | `false` |
 
 `.env.sample` ships with explicit `true`/`false` values for every flag as a starting point — edit it to match what your local API instance actually supports.
 

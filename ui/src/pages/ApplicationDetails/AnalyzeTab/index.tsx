@@ -43,7 +43,9 @@ const ANALYZE_TAB_FLAGS: Partial<Record<AnalyzeTabName, FeatureFlagKey>> = {
   'What agents are working on': 'semantic_groups',
   'How they are failing': 'insights',
   'What resources they are using': 'waste_estimation',
-  'How they are reasoning': 'neurosymbolic_eval'
+  'How they are reasoning': 'neurosymbolic_eval',
+  'Cognitive observability': 'cognitive_observability',
+  'L9 protocols': 'l9_protocols'
 };
 
 const ANALYZE_TAB_META: Record<

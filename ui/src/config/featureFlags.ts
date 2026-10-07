@@ -6,7 +6,7 @@
 /**
  * OXP UI feature flags.
  *
- * Seven flags gate optional pages/sub-views on top of the always-on core
+ * Nine flags gate optional pages/sub-views on top of the always-on core
  * features (Applications, Sessions, Metrics, Execution Graph, Latent Space).
  * Defaults below match the OSS defaults from the spec:
  *   - Enabled in OSS:  semantic_groups, insights
@@ -25,7 +25,9 @@ export const FEATURE_FLAG_KEYS = [
   'stateful_eval',
   'impact_assessment',
   'waste_estimation',
-  'neurosymbolic_eval'
+  'neurosymbolic_eval',
+  'cognitive_observability',
+  'l9_protocols'
 ] as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number];
@@ -39,7 +41,9 @@ export const DEFAULT_FLAGS: FeatureFlags = {
   stateful_eval: true,
   impact_assessment: false,
   waste_estimation: false,
-  neurosymbolic_eval: false
+  neurosymbolic_eval: false,
+  cognitive_observability: false,
+  l9_protocols: false
 };
 
 /**
@@ -109,6 +113,14 @@ const FLAG_SOURCES: Record<
   neurosymbolic_eval: {
     env: import.meta.env.VITE_FF_NEUROSYMBOLIC_EVAL,
     windowProp: 'ffNeurosymbolicEval'
+  },
+  cognitive_observability: {
+    env: import.meta.env.VITE_FF_COGNITIVE_OBSERVABILITY,
+    windowProp: 'ffCognitiveObservability'
+  },
+  l9_protocols: {
+    env: import.meta.env.VITE_FF_L9_PROTOCOLS,
+    windowProp: 'ffL9Protocols'
   }
 };
 

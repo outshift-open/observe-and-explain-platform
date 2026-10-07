@@ -64,6 +64,10 @@ const SessionDetails = ({
   const location = useLocation();
 
   const neurosymbolicEnabled = useFeatureFlag('neurosymbolic_eval');
+  const cognitiveObservabilityEnabled = useFeatureFlag(
+    'cognitive_observability'
+  );
+  const l9ProtocolsEnabled = useFeatureFlag('l9_protocols');
   const [isReasoningPathTabVisible, setIsReasoningPathTabVisible] =
     useState<boolean>(false);
 
@@ -111,13 +115,13 @@ const SessionDetails = ({
       {
         key: 'cognitive-observability',
         label: 'Cognitive Observability',
-        visible: true,
+        visible: cognitiveObservabilityEnabled,
         render: () => <CognitiveObservabilityTab />
       },
       {
         key: 'l9-protocols',
         label: 'L9 Protocols',
-        visible: true,
+        visible: l9ProtocolsEnabled,
         render: () => <L9ProtocolsTab />
       },
       {
@@ -139,7 +143,15 @@ const SessionDetails = ({
         render: () => <ConversationTab />
       }
     ],
-    [costDollars, totalTokens, duration, isReasoningPathTabVisible, sessionId]
+    [
+      costDollars,
+      totalTokens,
+      duration,
+      isReasoningPathTabVisible,
+      sessionId,
+      cognitiveObservabilityEnabled,
+      l9ProtocolsEnabled
+    ]
   );
 
   const visibleTabs = useMemo(
