@@ -43,12 +43,6 @@ const totalCostCharDef = {
   description: 'Average total cost of LLM and Tools operations.'
 };
 
-const aggregatedApplicationLevelMetricValuesMock = {
-  overallReliability: 67,
-  overallQuality: 96,
-  overallPerformance: 82
-};
-
 export const ApplicationTab = () => {
   const [showMoreMetrics, setShowMoreMetrics] = useState(false);
 

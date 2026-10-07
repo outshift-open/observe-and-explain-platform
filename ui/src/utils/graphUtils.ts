@@ -90,18 +90,7 @@ export const transformDataToG6Graph = (
     }
   }
 
-  // If still no nodes, create a single node with the data
-  if (nodes.length === 0) {
-    nodes.push({
-      id: 'root',
-      data: {
-        label: 'Root Node',
-        type: 'root',
-        ...data
-      }
-    });
-  }
-
+  // No nodes found: return an empty graph so callers can render an empty state
   return { nodes, edges };
 };
 

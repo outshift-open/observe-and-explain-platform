@@ -123,24 +123,12 @@ export const SessionsTableWrapper = ({
           )
         : sessions;
 
-    console.log(
-      'sessionsWithStatefulEvalFiltered',
-      sessionsWithStatefulEvalFiltered
-    );
-
-    console.log('agentId', agentId);
-
     const sessionsWithStatefulEvalFilteredByAgent: SessionWithStatefulEval[] =
       agentId
         ? (sessionsWithStatefulEvalFiltered.filter((session) =>
             session.agents?.some((agent) => agent === agentId)
           ) ?? [])
         : sessionsWithStatefulEvalFiltered;
-
-    console.log(
-      'sessionsWithStatefulEvalFilteredByAgent',
-      sessionsWithStatefulEvalFilteredByAgent
-    );
 
     return sessionsWithStatefulEvalFilteredByAgent;
   }, [sessionsData?.sessionList, filteredSessionIds, agentId]);

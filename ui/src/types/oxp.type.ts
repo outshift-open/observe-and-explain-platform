@@ -923,3 +923,23 @@ export interface ImpactDistribution {
   toolUtilizationAccuracy?: SingleValueData | null;
   groundedness?: SingleValueData | null;
 }
+
+export interface SessionsWithCognitiveObservability {
+  sessions: SessionWithCognitiveObservability[];
+}
+
+export interface SessionWithCognitiveObservability extends Session {
+  cognitiveObservabilityMetrics: CognitiveObservabilityMetric[];
+  cognitiveFailures: CognitiveFailure[];
+}
+
+export interface CognitiveObservabilityMetric {
+  name: string;
+  value: SingleValueData;
+}
+
+export interface CognitiveFailure {
+  name: string;
+  confidence: number;
+  remediations?: string[] | null;
+}

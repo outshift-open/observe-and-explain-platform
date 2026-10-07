@@ -56,13 +56,7 @@ export const SessionAnalysisTab = () => {
   const { data: semanticGroupsData } = useSemanticGroups(applicationId ?? '');
 
   const sessionSemanticGroupId = useMemo(() => {
-    console.log('semanticGroupsData', semanticGroupsData);
-    console.log('sessionId', sessionId);
     if (!semanticGroupsData || !sessionId) return '';
-    console.log(
-      'semanticGroupsData.find((group) => group.session_ids.includes(sessionId))',
-      semanticGroupsData.find((group) => group.session_ids.includes(sessionId))
-    );
     return (
       semanticGroupsData.find((group) => group.session_ids.includes(sessionId))
         ?.id ?? ''
@@ -149,10 +143,6 @@ export const SessionAnalysisTab = () => {
 
     return result;
   }, [sessionMetricsQuery.data]);
-
-  const handleNodeClick = (nodeId: string) => {
-    console.log('Node clicked:', nodeId);
-  };
 
   const handleMetricCardClick = useCallback(() => {
     if (!applicationId || !sessionSemanticGroupId) return;
@@ -255,7 +245,6 @@ export const SessionAnalysisTab = () => {
             title="Session Trajectory in Latent Space"
             width={900}
             height={500}
-            onNodeClick={handleNodeClick}
           />
         ) : (
           <Box sx={{ pt: 2, width: '100%', height: '100%' }}>

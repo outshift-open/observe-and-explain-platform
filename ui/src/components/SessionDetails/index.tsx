@@ -11,6 +11,7 @@ import { OverviewTab } from './OverviewTab';
 import { ExecutionTreeTab } from './ExecutionTreeTab';
 import { ConversationTab } from './ConversationTab';
 import { SessionAnalysisTab } from './SessionAnalysisTab';
+import { CognitiveObservabilityTab } from './CognitiveObservabilityTab';
 import { useApplicationSessionsWithStatefulEval } from '@/api/oxpApi';
 import { DEFAULT_START_DATE, DEFAULT_END_DATE } from '@/common';
 import { SessionWithStatefulEval } from '@/types/oxp.type';
@@ -20,6 +21,7 @@ import { Tabs, Tab } from '@open-ui-kit/core';
 export const SESSION_TAB_KEYS = [
   'overview',
   'analysis',
+  'cognitive-observability',
   'reasoning-path',
   'execution-graph',
   'conversation'
@@ -103,6 +105,12 @@ const SessionDetails = ({
         label: 'Analysis',
         visible: true,
         render: () => <SessionAnalysisTab />
+      },
+      {
+        key: 'cognitive-observability',
+        label: 'Cognitive Observability',
+        visible: true,
+        render: () => <CognitiveObservabilityTab />
       },
       {
         key: 'reasoning-path',

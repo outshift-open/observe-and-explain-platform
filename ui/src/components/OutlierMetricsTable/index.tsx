@@ -18,7 +18,10 @@ interface OutlierMetricsTableWrapperProps {
   outlierMetrics: OutlierMetric[];
 }
 
-export const OutlierMetricsTableWrapper = ({ sessionId, outlierMetrics }: OutlierMetricsTableWrapperProps) => {
+export const OutlierMetricsTableWrapper = ({
+  sessionId,
+  outlierMetrics
+}: OutlierMetricsTableWrapperProps) => {
   const { semanticGroup } = useParams();
 
   const {
@@ -33,9 +36,6 @@ export const OutlierMetricsTableWrapper = ({ sessionId, outlierMetrics }: Outlie
     isError: isErrorNormalBehaviourReport
   } = useNormalBehaviourReport(semanticGroup ?? '');
 
-  console.log('impactAssessmentData', impactAssessmentData);
-  console.log('outlierMetrics', outlierMetrics);
-
   const normalBehaviourByMetric = useMemo(() => {
     const map = new Map<string, string>();
     normalBehaviourReportData?.reports.forEach((report) => {
@@ -46,23 +46,34 @@ export const OutlierMetricsTableWrapper = ({ sessionId, outlierMetrics }: Outlie
   }, [normalBehaviourReportData]);
 
   const outlierMetricsData = useMemo(() => {
-    const outlierMetricsWithImpactAssessment = impactAssessmentData?.filter((item) =>
-      outlierMetrics.some((metric) => metric.metricKey === item.metric_name)
+    const outlierMetricsWithImpactAssessment = impactAssessmentData?.filter(
+      (item) =>
+        outlierMetrics.some((metric) => metric.metricKey === item.metric_name)
     );
     return outlierMetricsWithImpactAssessment?.map((item) => {
-      const metricValue = outlierMetrics.find((metric) => metric.metricKey === item.metric_name)?.value?.value ?? 0;
-      const metricUnit = outlierMetrics.find((metric) => metric.metricKey === item.metric_name)?.value?.unit ?? Unit.Scalar;
+      const metricValue =
+        outlierMetrics.find((metric) => metric.metricKey === item.metric_name)
+          ?.value?.value ?? 0;
+      const metricUnit =
+        outlierMetrics.find((metric) => metric.metricKey === item.metric_name)
+          ?.value?.unit ?? Unit.Scalar;
       const formattedValue = formatMetricValue(metricValue, metricUnit);
 
       const centroid = normalBehaviourByMetric.get(item.metric_name);
-      const formattedExpectedValue = centroid != null ? formatMetricValue(Number(centroid), metricUnit) : '';
+      const formattedExpectedValue =
+        centroid != null ? formatMetricValue(Number(centroid), metricUnit) : '';
 
       const rootContributorAgent =
-        item.agents.find((agent) => agent.value.value === Math.max(...item.agents.map((agent) => agent.value.value)))?.agent_name ?? '';
+        item.agents.find(
+          (agent) =>
+            agent.value.value ===
+            Math.max(...item.agents.map((agent) => agent.value.value))
+        )?.agent_name ?? '';
 
       return {
         metricKey: item.metric_name,
-        metricName: metricCatalog[item.metric_name as keyof typeof metricCatalog].name,
+        metricName:
+          metricCatalog[item.metric_name as keyof typeof metricCatalog].name,
         metricValue: formattedValue,
         expectedValue: formattedExpectedValue,
         rootContributorAgent: rootContributorAgent
@@ -70,5 +81,11 @@ export const OutlierMetricsTableWrapper = ({ sessionId, outlierMetrics }: Outlie
     });
   }, [impactAssessmentData, outlierMetrics, normalBehaviourByMetric]);
 
-  return <OutlierMetricsTable data={outlierMetricsData ?? []} isLoading={isLoadingImpactAssessment} isError={isErrorImpactAssessment} />;
+  return (
+    <OutlierMetricsTable
+      data={outlierMetricsData ?? []}
+      isLoading={isLoadingImpactAssessment}
+      isError={isErrorImpactAssessment}
+    />
+  );
 };

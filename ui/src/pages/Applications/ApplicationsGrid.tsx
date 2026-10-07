@@ -148,8 +148,6 @@ export const ApplicationsGrid = () => {
     );
   }
 
-  console.log(applications);
-
   if (
     applicationsError ||
     statefulEvalError ||

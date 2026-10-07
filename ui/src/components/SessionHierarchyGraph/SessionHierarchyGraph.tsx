@@ -89,9 +89,6 @@ export const SessionHierarchyGraph = ({
     const nodeType = d.data?.type;
     const level = d.data?.data?.level;
 
-    console.log('level', level);
-    console.log('node type', nodeType);
-
     if (level) {
       return getHierarchyColor(level, theme);
     }
