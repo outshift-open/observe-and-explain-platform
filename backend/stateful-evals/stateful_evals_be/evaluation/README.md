@@ -57,8 +57,7 @@ Shared state: `policy_text`, `tool_definitions`, `latest_root_answer` and
 **`IntentEntry`**: `name`, `description`, `source` (`user`, `policy`,
 `agent_plan`), `requirement_type`, `status`, `first_seen`, `last_seen`,
 `owner_agent_ids`, `assigned_by_agent_id`, `parent_intent_ids`,
-`dependency_intent_ids`, and an append-only `events` list (`tool_attempt`,
-`assignment`, `final_answer_alignment`, ...).
+`dependency_intent_ids`, and an append-only `events` list (`assignment`, ...).
 
 **`ClaimEntry`**: `claim_type` (`assertion`, `peer_agent_assertion`,
 `completion_claim`, `tool_result`), `content`, `entity_name`, `agent_id`,
@@ -75,19 +74,11 @@ Shared state: `policy_text`, `tool_definitions`, `latest_root_answer` and
 
 ## Intent lifecycle
 
-An intent starts `pending`, or `in_progress` for delegated work. It becomes
-`in_progress` when a tool call that did not error matches it, and `fulfilled`
-when the final answer covers it. Status never moves backwards. `dropped` is
-declared but no code sets it.
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending: requirement in user text
-    [*] --> in_progress: delegated work
-    pending --> in_progress: matching tool call without error
-    pending --> fulfilled: final answer covers it
-    in_progress --> fulfilled: final answer covers it
-```
+Intents are created for delegated work (`agent_plan`), with status
+`in_progress`, and when a saved context that already holds user or policy
+intents is loaded. User requests are recorded as `user_statement` evidence; they
+do not create intents. Whether a request was satisfied is judged from the
+evidence and claims, not from intent status.
 
 ## Example
 
@@ -131,9 +122,9 @@ print("final answer:", context.get_final_answer_context()["final_answer"][:60], 
 ```
 
 ```text
-span 0: facts=1 claims=1 intent changes={'Trip itinerary': 'pending', 'Budget ceiling': 'pending'}
-span 1: facts=2 claims=2 intent changes={'Trip itinerary': 'in_progress', 'Budget ceiling': 'in_progress'}
-span 2: facts=2 claims=3 intent changes={'Trip itinerary': 'fulfilled', 'Budget ceiling': 'fulfilled'}
+span 0: facts=1 claims=1 intent changes={}
+span 1: facts=2 claims=2 intent changes={}
+span 2: facts=2 claims=3 intent changes={}
 evidence: [(0, 'user_statement', 'user'), (1, 'tool_output', 'search_trains')]
 claims:   [(0, 'assertion'), (1, 'tool_result'), (2, 'assertion')]
 final answer: Here is your Lisbon weekend plan: take train CV103 on Saturd ...
@@ -143,9 +134,9 @@ What each span changed:
 
 | Span | What happened | State change |
 | --- | --- | --- |
-| 0 | User request; the model plans and calls a tool | evidence 0 (`user_statement`) recorded; requirements `Trip itinerary` and `Budget ceiling` extracted as `pending`; claim 0 (assertion) |
-| 1 | `search_trains` returns | evidence 1 (`tool_output`) and claim 1 (`tool_result`); both intents match the tool activity and move to `in_progress` |
-| 2 | The model gives the plan | Claim 2; it is the root answer and covers both requirements, so both intents become `fulfilled` |
+| 0 | User request; the model plans and calls a tool | evidence 0 (`user_statement`) recorded; claim 0 (assertion); no intent is created |
+| 1 | `search_trains` returns | evidence 1 (`tool_output`) and claim 1 (`tool_result`) |
+| 2 | The model gives the plan | Claim 2; it is the root answer |
 
 To build a context from a real trajectory file, run the
 [quick start](../../quickstart/README.md). Its `inspect_trajectory.py` prints the
@@ -173,6 +164,6 @@ The payload has `schema_version`, `session_id`, `policy_text`, one key per store
 ## Reading state
 
 - The per-span judge reads `retrieve_for_state_delta(span)`, a bounded view of
-  the facts, intents, and claims relevant to the current span.
+  the recent facts, the intents, and the claims.
 - Trajectory metrics read `build_context_payload(...)`. See
   [Defining Evaluation Metrics](trajectory_context_metrics/README.md#metric-inputs).

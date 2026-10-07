@@ -72,96 +72,6 @@ def test_ingestion_retains_recorded_agent_and_span_provenance() -> None:
     assert context.claims[1].trace_id == "trace-1"
 
 
-def test_external_request_creates_semantic_requirement_intents() -> None:
-    context = TrajectoryContext(policy_text="")
-    context.ingest_span(
-        _llm_span(
-            "You are a moderator coordinating a team of specialized agents.",
-            (
-                "Hello, I'm Alex. Plan me a 1-day trip in Celestia for July 4, "
-                "2026, leaving from Luminos. Keep it affordable, include one "
-                "indoor attraction and at least one outdoor attraction, and keep "
-                "the total budget under 500 EUR. Don't care about dining options."
-            ),
-        ),
-        span_index=0,
-    )
-
-    assert [intent.name for intent in context.intents] == [
-        "Trip itinerary",
-        "Budget ceiling",
-        "Indoor attraction",
-        "Outdoor attraction",
-        "Dining preference",
-    ]
-    assert context.intents[0].description.startswith("Plan me a 1-day trip")
-    assert context.intents[1].description == "Keep total cost under 500 EUR."
-    assert all(
-        intent.events[0]["type"] == "requirement_observed" for intent in context.intents
-    )
-
-
-def test_delegations_and_tools_link_to_requirements_without_becoming_intents() -> None:
-    context = TrajectoryContext(policy_text="")
-    context.ingest_span(
-        _llm_span(
-            "You are a moderator coordinating a team of specialized agents.",
-            (
-                "Plan a trip from Luminos to Celestia. Include one indoor "
-                "attraction and at least one outdoor attraction under 500 EUR."
-            ),
-        ),
-        span_index=0,
-    )
-    initial_count = len(context.intents)
-
-    context.ingest_span(
-        _llm_span(
-            "You have tools to look up schedules and attractions inside cities.",
-            (
-                "Find an indoor attraction and an outdoor attraction in Celestia "
-                "for the proposed trip."
-            ),
-            "I found a museum and a park for the delegated task.",
-        ),
-        span_index=1,
-    )
-    context.ingest_span(
-        {
-            "entity_type": "tool",
-            "entity_name": "get_attractions",
-            "input_payload": {"city": "Celestia"},
-            "output_payload": {
-                "status": "ok",
-                "attractions": ["Museum of Celestial Arts", "Nova Park"],
-            },
-        },
-        span_index=2,
-    )
-
-    assert len(context.intents) == initial_count
-    assert "get_attractions" not in {intent.name for intent in context.intents}
-    assert any(claim.claim_type == "peer_agent_assertion" for claim in context.claims)
-    assert [fact.fact_type for fact in context.evidence] == [
-        "user_statement",
-        "agent_handoff",
-        "tool_output",
-    ]
-    indoor = next(
-        intent for intent in context.intents if intent.name == "Indoor attraction"
-    )
-    outdoor = next(
-        intent for intent in context.intents if intent.name == "Outdoor attraction"
-    )
-    assert [event["type"] for event in indoor.events] == [
-        "requirement_observed",
-        "delegated_task",
-        "tool_attempt",
-    ]
-    assert outdoor.status == "in_progress"
-    assert outdoor.events[-1]["tool"] == "get_attractions"
-
-
 def test_tool_outputs_are_persisted_without_truncation() -> None:
     context = TrajectoryContext(policy_text="")
     full_output = {
@@ -191,25 +101,6 @@ def test_tool_outputs_are_persisted_without_truncation() -> None:
     assert "Wheelchair accessible." in fact.content
     assert "Azure Lake Promenade" in claim.content
     assert not fact.content.endswith("...")
-
-
-def test_intent_retrieval_includes_semantic_description() -> None:
-    context = TrajectoryContext(policy_text="")
-    context.ingest_span(
-        _llm_span(
-            "You are a moderator coordinating a team.",
-            "Plan a trip from Luminos to Celestia under 500 EUR.",
-        ),
-        span_index=0,
-    )
-
-    intent_context = context.retrieve_for_intent_recognition({})
-
-    assert (
-        "Trip itinerary: Plan a trip from Luminos to Celestia under 500 EUR."
-        in intent_context
-    )
-    assert "Budget ceiling: Keep total cost under 500 EUR." in intent_context
 
 
 def test_final_root_answer_resolves_semantic_requirements() -> None:

@@ -842,12 +842,6 @@ def _evaluate_cases_via_replay(
         replay_result["replay_original_predicted_label"] = (
             artifact.original_predicted_label
         )
-        replay_result["replay_downgraded_fatal_failures"] = (
-            outcome.downgraded_fatal_failures
-        )
-        replay_result["replay_downgraded_fatal_count"] = len(
-            outcome.downgraded_fatal_failures
-        )
 
         results_by_session[case.session_id] = replay_result
         if artifact.eval_duration_seconds is not None:
@@ -877,8 +871,7 @@ def _evaluate_cases_via_replay(
             f"[{idx}/{total}] {symbol} {case.session_id} expected={case.expected_label} "
             f"got={outcome.predicted_label} running_acc={running_accuracy:.4f} "
             f"(match={matches} mismatch={mismatches} errors={errors}) "
-            f"elapsed={elapsed:.1f}s qg={quality_gate_text} "
-            f"downgraded={len(outcome.downgraded_fatal_failures)}"
+            f"elapsed={elapsed:.1f}s qg={quality_gate_text}"
         )
 
     return {
@@ -946,9 +939,6 @@ def _summarize(
                 or [],
                 "quality_gate_reasoning": (result or {}).get("quality_gate_reasoning")
                 or {},
-                "replay_downgraded_fatal_count": (result or {}).get(
-                    "replay_downgraded_fatal_count"
-                ),
                 "total_failures": (result or {}).get("total_failures"),
                 "token_usage": token_usage,
                 "eval_duration_seconds": timing_by_session.get(case.session_id),
@@ -1073,9 +1063,6 @@ def _write_per_trajectory_results(
                 "minor_failures": row.get("minor_failures"),
                 "quality_gate_failures": row.get("quality_gate_failures") or [],
                 "quality_gate_reasoning": row.get("quality_gate_reasoning") or {},
-                "replay_downgraded_fatal_count": row.get(
-                    "replay_downgraded_fatal_count"
-                ),
                 "total_failures": row.get("total_failures"),
                 "token_usage": row.get("token_usage"),
             },
@@ -1210,16 +1197,12 @@ def _print_summary(
         duration_str = f" time={duration:.1f}s" if duration is not None else ""
         quality_gate = row.get("quality_gate_failures") or []
         quality_gate_text = f" qg={','.join(quality_gate)}" if quality_gate else ""
-        replay_downgraded = row.get("replay_downgraded_fatal_count")
-        replay_text = (
-            f" downgraded={replay_downgraded}" if replay_downgraded is not None else ""
-        )
         print(
             f"  [{status}] {row['session_id']} "
             f"expected={row['expected_label']} predicted={row['predicted_label']} "
             f"unsatisfied={row['unsatisfied_intents']} "
             f"fatal={row['fatal_failures']} minor={row['minor_failures']}"
-            f"{quality_gate_text}{replay_text}{duration_str}"
+            f"{quality_gate_text}{duration_str}"
         )
         if row["error"]:
             print(f"    error: {row['error']}")

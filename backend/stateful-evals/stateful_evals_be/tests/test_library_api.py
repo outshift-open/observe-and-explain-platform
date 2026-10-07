@@ -250,7 +250,6 @@ def test_public_api_preserves_native_peer_context_and_final_answer(
         f.fact_type == "user_statement" and f.content == question
         for f in context.evidence
     )
-    assert context.intents
     assert any(c.content == "Latency is 40 ms." for c in context.claims)
     assert context.get_final_answer_context()["final_answer"] == final_answer
     peer_event = next(

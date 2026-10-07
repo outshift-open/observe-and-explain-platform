@@ -544,71 +544,42 @@ def assemble_saved_refresh(
         print(f"[{index}/{len(records)}] {relative_run.name} assembled", flush=True)
 
 
-def apply_deterministic_postchecks(
+def restore_communication_results(
     *,
     output_dir: Path,
-    communication_results: Path | None = None,
+    communication_results: Path,
 ) -> None:
-    """Apply revised zero-token prechecks to an existing saved-context run."""
+    """Copy saved Communication Efficiency results into an existing run."""
     output_dir = output_dir.expanduser().resolve()
-    if communication_results is not None:
-        communication_results = communication_results.expanduser().resolve()
+    communication_results = communication_results.expanduser().resolve()
     records = _source_records(output_dir)
-    updated = 0
-    prechecked_count = 0
+    metric_name = CommunicationEfficiencyMetric.name
     for record_path in records:
         run_dir = record_path.parent
         relative_run = run_dir.relative_to(output_dir / "runs")
-        context, _ = load_trajectory_context_artifact(
-            run_dir / "trajectory_context.json"
-        )
-        metric = CommunicationEfficiencyMetric()
         record = _read_json(record_path)
-        metrics = list(record.get("metrics") or [])
-        old_result = next(
-            (item for item in metrics if item.get("high_level_metric") == metric.name),
+        communication_record = _read_json(
+            communication_results / "runs" / relative_run / "evaluation_record.json"
+        )
+        result = next(
+            (
+                dict(item)
+                for item in communication_record.get("metrics") or []
+                if item.get("high_level_metric") == metric_name
+            ),
             None,
         )
-        result = None
-        if communication_results is not None:
-            communication_record = _read_json(
-                communication_results / "runs" / relative_run / "evaluation_record.json"
-            )
-            result = next(
-                (
-                    dict(item)
-                    for item in communication_record.get("metrics") or []
-                    if item.get("high_level_metric") == metric.name
-                ),
-                None,
-            )
-            if result is None:
-                raise ValueError(
-                    f"{relative_run}: missing saved Communication Efficiency result"
-                )
-            result["metadata"] = dict(result.get("metadata") or {})
-            result["metadata"]["result_reused_from"] = "paper_v2_initial_refresh"
-
-        prechecked = metric.deterministic_precheck(context)
-        if prechecked is not None:
-            result = metric.decorate_result(prechecked, context).to_payload()
-            prechecked_count += 1
         if result is None:
-            continue
-
-        if prechecked is not None and old_result is not None:
-            prior_usage = dict((old_result.get("metadata") or {}).get("usage") or {})
-            result["metadata"]["usage"] = prior_usage
-            result["metadata"]["prior_judge_usage"] = prior_usage
-            result["metadata"]["judge_type"] = "deterministic_postcheck"
+            raise ValueError(
+                f"{relative_run}: missing saved Communication Efficiency result"
+            )
+        result["metadata"] = dict(result.get("metadata") or {})
+        result["metadata"]["result_reused_from"] = "paper_v2_initial_refresh"
         metrics = [
-            result if item.get("high_level_metric") == metric.name else item
-            for item in metrics
+            result if item.get("high_level_metric") == metric_name else item
+            for item in record.get("metrics") or []
         ]
         record["metrics"] = metrics
-        record["deterministic_postchecks_applied"] = sorted(
-            set(record.get("deterministic_postchecks_applied") or []) | {metric.name}
-        )
         _write_json(record_path, record)
         _write_json(
             run_dir / "trajectory_context_metrics.paper_v2_refresh.json",
@@ -618,15 +589,11 @@ def apply_deterministic_postchecks(
         if raw_path.is_file():
             raw_results = _read_json(raw_path)
             raw_results = [
-                result if item.get("high_level_metric") == metric.name else item
+                result if item.get("high_level_metric") == metric_name else item
                 for item in raw_results
             ]
             _write_json(raw_path, raw_results)
-        updated += 1
-    print(
-        f"Updated Communication Efficiency in {updated}/{len(records)} records; "
-        f"deterministic precheck matched {prechecked_count}"
-    )
+    print(f"Restored Communication Efficiency in {len(records)} records")
 
 
 def _wilson(failures: int, n: int, z: float = 1.959963984540054) -> tuple[float, float]:
@@ -1014,12 +981,13 @@ def parse_args() -> argparse.Namespace:
     assemble_parser.add_argument("--baseline-results", type=Path, required=True)
     assemble_parser.add_argument("--output-dir", type=Path, required=True)
 
-    postcheck_parser = subparsers.add_parser("postcheck")
-    postcheck_parser.add_argument("--output-dir", type=Path, required=True)
-    postcheck_parser.add_argument(
+    restore_parser = subparsers.add_parser("restore-communication")
+    restore_parser.add_argument("--output-dir", type=Path, required=True)
+    restore_parser.add_argument(
         "--communication-results",
         type=Path,
-        help="Reuse valid Communication Efficiency results before postchecks.",
+        required=True,
+        help="Run directory with valid Communication Efficiency results to reuse.",
     )
     return parser.parse_args()
 
@@ -1051,8 +1019,8 @@ def main() -> int:
         )
         return 0
 
-    if args.command == "postcheck":
-        apply_deterministic_postchecks(
+    if args.command == "restore-communication":
+        restore_communication_results(
             output_dir=args.output_dir,
             communication_results=args.communication_results,
         )

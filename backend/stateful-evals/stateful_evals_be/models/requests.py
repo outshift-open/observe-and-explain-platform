@@ -296,7 +296,9 @@ class IntentState(BaseModel):
     """Resolved status of a single tracked intent across the trajectory."""
 
     name: str
-    state: str  # fulfilled | rejected_per_policy | failed | drifting | dormant
+    # fulfilled | failed | drifting | dormant. Older saved results may hold a
+    # policy-rejection state that is no longer produced.
+    state: str
     first_span: int = 0
     last_span: int = 0
     occurrences: int = 0
