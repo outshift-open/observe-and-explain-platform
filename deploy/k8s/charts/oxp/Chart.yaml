@@ -5,7 +5,7 @@ maintainers:
   - name: tfeltin
     email: tfeltin@cisco.com
 type: application
-version: 1.0.0
+version: 1.1.0
 appVersion: "1.0.0"
 dependencies:
   - name: oxp-api
@@ -15,7 +15,7 @@ dependencies:
     condition: api.enabled
   - name: oxp-ui
     alias: ui
-    version: 1.0.0
+    version: 1.1.0
     repository: oci://ghcr.io/outshift-open/charts
     condition: ui.enabled
   - name: opentelemetry-collector

@@ -1,4 +1,3 @@
-{{- include "oxp-ui.validate" . }}
 {{- if eq .Values.syncSecretsFromVault.enabled false }}
 apiVersion: v1
 kind: ConfigMap
@@ -15,19 +14,6 @@ data:
   VITE_FF_IMPACT_ASSESSMENT: {{ .Values.featureFlags.impactAssessment | quote }}
   VITE_FF_WASTE_ESTIMATION: {{ .Values.featureFlags.wasteEstimation | quote }}
   VITE_FF_NEUROSYMBOLIC_EVAL: {{ .Values.featureFlags.neurosymbolicEval | quote }}
----
-
-{{- if .Values.copilot.enabled }}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ .Chart.Name }}-copilot-configmap
-  namespace: '{{ .Release.Namespace }}'
-data:
-  AZURE_OPENAI_ENDPOINT: {{ .Values.copilot.azureOpenaiEndpoint }}
-  AZURE_OPENAI_DEPLOYMENT_NAME: {{ .Values.copilot.azureOpenaiDeploymentName }}
-  AZURE_OPENAI_API_VERSION: {{ .Values.copilot.azureOpenaiApiVersion }}
-  AZURE_OPENAI_API_KEY: {{ .Values.copilot.azureOpenaiApiKey }}
-  ALLOWED_ORIGIN: {{ include "oxp-ui.allowedOrigin" . | quote }}
-{{- end }}
+  VITE_FF_COGNITIVE_OBSERVABILITY: {{ .Values.featureFlags.cognitiveObservability | quote }}
+  VITE_FF_L9_PROTOCOLS: {{ .Values.featureFlags.l9Protocols | quote }}
 {{- end }}
