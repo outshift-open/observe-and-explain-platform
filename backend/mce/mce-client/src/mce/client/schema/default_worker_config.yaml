@@ -41,6 +41,15 @@ metrics:
     - IntentRecognitionAccuracy
     - Cost
     - LLMErrorRate
+    - PolicySafety
+    - GoalAlignment
+    - InstructionFollowing
+    - HandoffQuality
+    - ConfidenceCalibration
+    - VerificationQuality
+    - CommunicationEfficiency
+    - ConstraintSatisfaction
+    - SemanticConsistency
 
   # LLMCall-level metrics — computed for each LLMCall execution element.
   LLMCall:

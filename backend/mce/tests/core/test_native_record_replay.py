@@ -16,7 +16,7 @@ from mce.providers.native.metrics import (
     GoalSuccessRate,
     IntentRecognitionAccuracy,
     ComponentConflictRate,
-    Consistency,
+    SemanticConsistency,
     ContextPreservation,
     Groundedness,
     InformationRetention,
@@ -161,12 +161,12 @@ def test_component_conflict_rate_no_conflict():
 
 
 # ---------------------------------------------------------------------------
-# Consistency
+# SemanticConsistency
 # ---------------------------------------------------------------------------
 
 
 def test_consistency_mocked():
-    m = _mock_score(Consistency, "1.0")
+    m = _mock_score(SemanticConsistency, "1.0")
     result = m.compute("r1", _ctx_with_llm_judge_data())
     assert result is not None
 
