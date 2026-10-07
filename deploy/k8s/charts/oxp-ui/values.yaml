@@ -36,6 +36,8 @@ featureFlags:
   impactAssessment: "false"
   wasteEstimation: "false"
   neurosymbolicEval: "false"
+  cognitiveObservability: "false"
+  l9Protocols: "false"
 copilot:
   enabled: false
   image:

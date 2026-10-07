@@ -73,6 +73,10 @@ spec:
               value: "{{ .Values.featureFlags.wasteEstimation }}"
             - name: VITE_FF_NEUROSYMBOLIC_EVAL
               value: "{{ .Values.featureFlags.neurosymbolicEval }}"
+            - name: VITE_FF_COGNITIVE_OBSERVABILITY
+              value: "{{ .Values.featureFlags.cognitiveObservability }}"
+            - name: VITE_FF_L9_PROTOCOLS
+              value: "{{ .Values.featureFlags.l9Protocols }}"
             {{- end }}
             {{- with .Values.environment }}
             {{- toYaml . | nindent 12 }}
