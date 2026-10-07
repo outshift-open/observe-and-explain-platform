@@ -164,19 +164,25 @@ class TestComponentConflictRate:
 
 class TestConsistency:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.semantic_consistency import SemanticConsistency
+        from mce.providers.native.metrics.quality.semantic_consistency import (
+            SemanticConsistency,
+        )
 
         assert SemanticConsistency().metadata.name is not None
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.semantic_consistency import SemanticConsistency
+        from mce.providers.native.metrics.quality.semantic_consistency import (
+            SemanticConsistency,
+        )
 
         with _patch_g_eval(5.0):
             result = SemanticConsistency().compute("s1", _CONV_CTX)
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.semantic_consistency import SemanticConsistency
+        from mce.providers.native.metrics.quality.semantic_consistency import (
+            SemanticConsistency,
+        )
 
         result = SemanticConsistency().compute("s1", {})
         assert result.value == 0.0
@@ -755,6 +761,7 @@ class TestCostAtSessionLevel:
         result = Cost().compute("s1", ctx)
         assert result.value == pytest.approx(0.025, abs=1e-4)
 
+
 # ---- LLM-judge conversation metrics added from the trajectory rubrics ----
 
 
@@ -812,12 +819,16 @@ class TestGoalAlignment:
 
 class TestInstructionFollowing:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.instruction_following import InstructionFollowing
+        from mce.providers.native.metrics.quality.instruction_following import (
+            InstructionFollowing,
+        )
 
         assert InstructionFollowing().metadata.name == "InstructionFollowing"
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.instruction_following import InstructionFollowing
+        from mce.providers.native.metrics.quality.instruction_following import (
+            InstructionFollowing,
+        )
 
         with _patch_g_eval(5.0):
             result = InstructionFollowing().compute("s1", _CONV_CTX)
@@ -825,12 +836,18 @@ class TestInstructionFollowing:
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_prompt_formats(self):
-        from mce.providers.native.metrics.quality.instruction_following import InstructionFollowing
+        from mce.providers.native.metrics.quality.instruction_following import (
+            InstructionFollowing,
+        )
 
-        assert "x-conv" in InstructionFollowing.PROMPT_TEMPLATE.format(conversation="x-conv")
+        assert "x-conv" in InstructionFollowing.PROMPT_TEMPLATE.format(
+            conversation="x-conv"
+        )
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.instruction_following import InstructionFollowing
+        from mce.providers.native.metrics.quality.instruction_following import (
+            InstructionFollowing,
+        )
 
         result = InstructionFollowing().compute("s1", {})
         assert result.value == 0.0
@@ -864,12 +881,16 @@ class TestHandoffQuality:
 
 class TestConfidenceCalibration:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.confidence_calibration import ConfidenceCalibration
+        from mce.providers.native.metrics.quality.confidence_calibration import (
+            ConfidenceCalibration,
+        )
 
         assert ConfidenceCalibration().metadata.name == "ConfidenceCalibration"
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.confidence_calibration import ConfidenceCalibration
+        from mce.providers.native.metrics.quality.confidence_calibration import (
+            ConfidenceCalibration,
+        )
 
         with _patch_g_eval(5.0):
             result = ConfidenceCalibration().compute("s1", _CONV_CTX)
@@ -877,12 +898,18 @@ class TestConfidenceCalibration:
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_prompt_formats(self):
-        from mce.providers.native.metrics.quality.confidence_calibration import ConfidenceCalibration
+        from mce.providers.native.metrics.quality.confidence_calibration import (
+            ConfidenceCalibration,
+        )
 
-        assert "x-conv" in ConfidenceCalibration.PROMPT_TEMPLATE.format(conversation="x-conv")
+        assert "x-conv" in ConfidenceCalibration.PROMPT_TEMPLATE.format(
+            conversation="x-conv"
+        )
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.confidence_calibration import ConfidenceCalibration
+        from mce.providers.native.metrics.quality.confidence_calibration import (
+            ConfidenceCalibration,
+        )
 
         result = ConfidenceCalibration().compute("s1", {})
         assert result.value == 0.0
@@ -890,12 +917,16 @@ class TestConfidenceCalibration:
 
 class TestVerificationQuality:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.verification_quality import VerificationQuality
+        from mce.providers.native.metrics.quality.verification_quality import (
+            VerificationQuality,
+        )
 
         assert VerificationQuality().metadata.name == "VerificationQuality"
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.verification_quality import VerificationQuality
+        from mce.providers.native.metrics.quality.verification_quality import (
+            VerificationQuality,
+        )
 
         with _patch_g_eval(5.0):
             result = VerificationQuality().compute("s1", _CONV_CTX)
@@ -903,12 +934,18 @@ class TestVerificationQuality:
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_prompt_formats(self):
-        from mce.providers.native.metrics.quality.verification_quality import VerificationQuality
+        from mce.providers.native.metrics.quality.verification_quality import (
+            VerificationQuality,
+        )
 
-        assert "x-conv" in VerificationQuality.PROMPT_TEMPLATE.format(conversation="x-conv")
+        assert "x-conv" in VerificationQuality.PROMPT_TEMPLATE.format(
+            conversation="x-conv"
+        )
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.verification_quality import VerificationQuality
+        from mce.providers.native.metrics.quality.verification_quality import (
+            VerificationQuality,
+        )
 
         result = VerificationQuality().compute("s1", {})
         assert result.value == 0.0
@@ -916,12 +953,16 @@ class TestVerificationQuality:
 
 class TestCommunicationEfficiency:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.communication_efficiency import CommunicationEfficiency
+        from mce.providers.native.metrics.quality.communication_efficiency import (
+            CommunicationEfficiency,
+        )
 
         assert CommunicationEfficiency().metadata.name == "CommunicationEfficiency"
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.communication_efficiency import CommunicationEfficiency
+        from mce.providers.native.metrics.quality.communication_efficiency import (
+            CommunicationEfficiency,
+        )
 
         with _patch_g_eval(5.0):
             result = CommunicationEfficiency().compute("s1", _CONV_CTX)
@@ -929,12 +970,18 @@ class TestCommunicationEfficiency:
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_prompt_formats(self):
-        from mce.providers.native.metrics.quality.communication_efficiency import CommunicationEfficiency
+        from mce.providers.native.metrics.quality.communication_efficiency import (
+            CommunicationEfficiency,
+        )
 
-        assert "x-conv" in CommunicationEfficiency.PROMPT_TEMPLATE.format(conversation="x-conv")
+        assert "x-conv" in CommunicationEfficiency.PROMPT_TEMPLATE.format(
+            conversation="x-conv"
+        )
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.communication_efficiency import CommunicationEfficiency
+        from mce.providers.native.metrics.quality.communication_efficiency import (
+            CommunicationEfficiency,
+        )
 
         result = CommunicationEfficiency().compute("s1", {})
         assert result.value == 0.0
@@ -942,12 +989,16 @@ class TestCommunicationEfficiency:
 
 class TestConstraintSatisfaction:
     def test_metadata(self):
-        from mce.providers.native.metrics.quality.constraint_satisfaction import ConstraintSatisfaction
+        from mce.providers.native.metrics.quality.constraint_satisfaction import (
+            ConstraintSatisfaction,
+        )
 
         assert ConstraintSatisfaction().metadata.name == "ConstraintSatisfaction"
 
     def test_compute_with_conversation(self):
-        from mce.providers.native.metrics.quality.constraint_satisfaction import ConstraintSatisfaction
+        from mce.providers.native.metrics.quality.constraint_satisfaction import (
+            ConstraintSatisfaction,
+        )
 
         with _patch_g_eval(5.0):
             result = ConstraintSatisfaction().compute("s1", _CONV_CTX)
@@ -955,12 +1006,18 @@ class TestConstraintSatisfaction:
         assert result.value == pytest.approx(5.0, abs=0.01)
 
     def test_prompt_formats(self):
-        from mce.providers.native.metrics.quality.constraint_satisfaction import ConstraintSatisfaction
+        from mce.providers.native.metrics.quality.constraint_satisfaction import (
+            ConstraintSatisfaction,
+        )
 
-        assert "x-conv" in ConstraintSatisfaction.PROMPT_TEMPLATE.format(conversation="x-conv")
+        assert "x-conv" in ConstraintSatisfaction.PROMPT_TEMPLATE.format(
+            conversation="x-conv"
+        )
 
     def test_empty_context_returns_zero(self):
-        from mce.providers.native.metrics.quality.constraint_satisfaction import ConstraintSatisfaction
+        from mce.providers.native.metrics.quality.constraint_satisfaction import (
+            ConstraintSatisfaction,
+        )
 
         result = ConstraintSatisfaction().compute("s1", {})
         assert result.value == 0.0
