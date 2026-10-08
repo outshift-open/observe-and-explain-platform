@@ -103,7 +103,7 @@ def test_tool_outputs_are_persisted_without_truncation() -> None:
     assert not fact.content.endswith("...")
 
 
-def test_final_root_answer_resolves_semantic_requirements() -> None:
+def test_final_root_answer_does_not_resolve_semantic_requirements() -> None:
     context = TrajectoryContext(policy_text="")
     request = (
         "Plan a trip from Luminos to Celestia under 500 EUR. Include one "
@@ -118,26 +118,27 @@ def test_final_root_answer_resolves_semantic_requirements() -> None:
         ),
         span_index=0,
     )
-    assert all(intent.status == "pending" for intent in context.intents)
+    assert all(intent.status == "unassessed" for intent in context.intents)
 
+    final_answer = (
+        "Here is your complete Celestia trip from Luminos. The route and "
+        "schedule cost 820 EUR, which is above your 500 EUR budget, with an "
+        "indoor museum and an outdoor park included."
+    )
     context.ingest_span(
-        _llm_span(
-            "You are a moderator coordinating a team.",
-            request,
-            (
-                "Here is your complete Celestia trip from Luminos. The route "
-                "and schedule cost 120 EUR, with an indoor museum and an "
-                "outdoor park included. This complete itinerary remains under "
-                "your 500 EUR budget and includes the requested activities."
-            ),
-        ),
+        _llm_span("You are a moderator coordinating a team.", request, final_answer),
         span_index=9,
     )
+    context.set_final_answer(final_answer, 9)
 
-    assert all(intent.status == "fulfilled" for intent in context.intents)
-    assert all(
-        intent.events[-1]["type"] == "final_answer_alignment"
+    (user_request,) = [i for i in context.intents if i.source == "user"]
+    assert user_request.description == request
+    assert user_request.status == "unassessed"
+    assert all(intent.status == "unassessed" for intent in context.intents)
+    assert not any(
+        event["type"] == "final_answer_alignment"
         for intent in context.intents
+        for event in intent.events
     )
 
 

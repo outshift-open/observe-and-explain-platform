@@ -8,9 +8,11 @@ Tracks four categories of information as spans are processed sequentially:
    Tool outputs are authoritative — they are ground truth.  Agent outputs are
    deliberately excluded as evidence (they are what we evaluate).
 
-2. **Intents** (for Intent Recognition): work items that agents assign to
-   one another, linked to spans by explicit references and recorded ids.
-   Completion is left to the judges.
+2. **Intents** (for Intent Recognition): user requests and delegated work
+   items, linked to spans by exact structural scope (ids, call chains,
+   explicit references).  Status is structural bookkeeping, not a completion
+   verdict: user/policy intents stay "unassessed" and completion is left to
+   the judges.
 
 3. **Claims** (for Relevancy): agent assertions, decisions, state
    transitions.  Provides the "reasoning history" that relevancy is checked
@@ -34,9 +36,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from stateful_evals_be.evaluation.coordination import CoordinationContext
+from stateful_evals_be.evaluation.coordination import CoordinationContext, RootTurn
 
 logger = logging.getLogger("stateful_evals_be.trajectory_context")
+
+_INTENT_STATUS_LEGEND = (
+    "  (Status is structural bookkeeping, not a completion verdict; judge "
+    "completion from the final answer and evidence.)"
+)
+_ROOT_INTENT_SOURCES = frozenset({"user", "policy", "root", "root_user"})
+
 
 @dataclass
 class EvidenceFact:
@@ -73,10 +82,12 @@ class IntentEntry:
     source: str  # "user" | "policy" | "agent_plan"
     first_seen: int  # span index
     last_seen: int
-    # "in_progress" for an assigned work item; other values are read back from
-    # persisted artifacts ("pending" | "fulfilled" | "dropped").
+    # Structural bookkeeping, not a completion verdict: "unassessed" for
+    # user/policy intents, "in_progress" for assigned agent_plan work items.
+    # "fulfilled" | "dropped" only arrive from persisted artifacts.
     status: str
     description: str = ""
+    # "request" for a user turn (its full message), "subtask" for a work item.
     requirement_type: str = "request"
     events: List[Dict[str, Any]] = field(default_factory=list)
     owner_agent_ids: List[str] = field(default_factory=list)
@@ -325,6 +336,18 @@ class TrajectoryContext:
         self._span_coordination_event_types: Dict[str, set[str]] = {}
         self._latest_claim_by_agent: Dict[str, str] = {}
         self._processed_spans: Dict[str, Dict[str, Any]] = {}
+        # Spans that ran inside a delegation, so their OTel descendants resolve
+        # to the same work item through the parent span chain. Delegations
+        # themselves are the work units; this only extends them to descendants.
+        self._work_item_by_inner_span_id: Dict[str, str] = {}
+        # Adapter root turns after the first, keyed by their execution id; each
+        # is recorded when the first span of that turn is ingested. Adapter
+        # work items map to the root turn whose events contain them.
+        self._pending_root_turns: Dict[str, RootTurn] = {}
+        self._work_item_root_turn: Dict[str, str] = {}
+        # Adapter work items carry an events.jsonl index as first_seen. They
+        # take the evaluation span index when their delegate span is ingested.
+        self._unobserved_work_items: set[str] = set()
 
         self.policy_text = policy_text.strip() if policy_text else ""
         self.tool_definitions = tool_definitions
@@ -334,7 +357,13 @@ class TrajectoryContext:
         if self.policy_text:
             self.add_policy_rule(self.policy_text, source_name="policy")
 
+        self._ingest_adapter_root_turns()
         self._ingest_adapter_coordination_context()
+        self._unobserved_work_items = {
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source == "agent_plan"
+        }
 
     def add_policy_rule(
         self,
@@ -367,6 +396,87 @@ class TrajectoryContext:
         )
         artifact_id = self._append_evidence(fact)
         self._register_contract(fact, artifact_id)
+
+    def _ingest_adapter_root_turns(self) -> None:
+        """Record the first adapter-declared external user turn before any span.
+
+        The first request precedes every span, so it is recorded at span index
+        -1 like other initial facts. This gives the root user request to traces
+        whose root agent makes no LLM call; a later root LLM span in the same
+        turn joins the same intent by its execution id. Later turns are not yet
+        known to earlier spans: each is recorded when the first span running in
+        it is ingested.
+        """
+        turns = self.coordination_context.root_turns
+        self.root_agent_id = self.root_agent_id or next(
+            (turn.agent_id for turn in turns if turn.agent_id), ""
+        )
+        if turns:
+            self._ingest_root_turn(turns[0], -1)
+        self._pending_root_turns = {
+            turn.call_id: turn for turn in turns[1:] if turn.call_id
+        }
+
+    def _ingest_root_turn(self, turn: RootTurn, span_index: int) -> None:
+        """Record one adapter root turn as a user request and a user statement."""
+        text = turn.input.strip()
+        if not text:
+            return
+        intent_ids = self._observe_user_turn(
+            text,
+            span_index,
+            turn_key=f"mas:{turn.call_id}" if turn.call_id else "",
+        )
+        span_dict = {"agent_id": turn.agent_id}
+        self._observe_intent_ownership(
+            intent_ids,
+            turn.agent_id,
+            "root",
+            span_dict,
+            span_index,
+            basis="received_request",
+        )
+        if any(
+            fact.fact_type == "user_statement" and fact.content == text
+            for fact in self.evidence
+        ):
+            return
+        fact_id = self._append_evidence(
+            EvidenceFact(
+                span_index=span_index,
+                fact_type="user_statement",
+                content=text,
+                source_name="user",
+                agent_id=turn.agent_id,
+                actor_scope="root",
+                related_intent_ids=list(intent_ids),
+            )
+        )
+        self._link_artifacts_to_intents(
+            [fact_id], intent_ids, span_dict=span_dict, span_index=span_index
+        )
+
+    def _edge_root_turn_call_id(self, start_event_index: int) -> Optional[str]:
+        """The adapter root turn whose events contain an edge (by event order)."""
+        if start_event_index < 0:
+            return None
+        call_id = None
+        for turn in self.coordination_context.root_turns:
+            if turn.event_index <= start_event_index:
+                call_id = turn.call_id
+        return call_id
+
+    def _turn_root_intent_ids(self, turn_call_id: Optional[str]) -> List[str]:
+        """Root intents a work item decomposes: its own turn's request if known."""
+        if turn_call_id is None:
+            return self._root_intent_ids()
+        return [
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source == "user"
+            and intent.events
+            and intent.events[0].get("turn_key") == f"mas:{turn_call_id}"
+        ]
 
     def _split_contract_prefix(self, text: str) -> tuple[str, str]:
         """Split a known contract off the start of a prompt message.
@@ -469,13 +579,17 @@ class TrajectoryContext:
         }
         assignment_intent_ids: List[str] = []
         if any(event_type in {"assignment", "handoff"} for event_type in event_types):
+            turn_call_id = self._edge_root_turn_call_id(edge.start_event_index)
             assignment_intent_ids = self._ensure_assignment_intent(
                 span_dict,
                 span_index,
                 event_type=event_types[0],
-                parent_intent_ids=[],
                 recipient_agent_ids=recipient_agent_ids,
+                root_turn_call_id=turn_call_id,
             )
+            if turn_call_id is not None:
+                for intent_id in assignment_intent_ids:
+                    self._work_item_root_turn.setdefault(intent_id, turn_call_id)
         unit = self._open_work_unit(
             allocator_agent_id=actor_agent_id,
             recipient_agent_ids=recipient_agent_ids,
@@ -909,8 +1023,13 @@ class TrajectoryContext:
         source_event_index: Optional[int] = None,
         source_span_ids: Optional[List[str]] = None,
         intent_ids: Optional[List[str]] = None,
+        join_existing: bool = True,
     ) -> Optional[WorkUnit]:
-        """Open (or join) the unit for one allocation decision."""
+        """Open (or join) the unit for one allocation decision.
+
+        With ``join_existing`` false the allocation always gets its own unit,
+        even when a unit with the same call id or source span already exists.
+        """
         recipients = [str(agent) for agent in recipient_agent_ids if agent]
         allocator = str(allocator_agent_id or "")
         if not recipients:
@@ -934,28 +1053,29 @@ class TrajectoryContext:
                 unit.source_event_index = source_event_index
             return unit
 
-        if call_id:
-            for unit in self.work_units:
-                if unit.call_id == call_id:
+        if join_existing:
+            if call_id:
+                for unit in self.work_units:
+                    if unit.call_id == call_id:
+                        return join(unit)
+            carried = set(source_span_ids or [])
+            if carried:
+                for unit in self.work_units:
+                    if carried & set(unit.source_span_ids) and set(
+                        unit.recipient_agent_ids
+                    ) == set(recipients):
+                        # The same delegation seen from its edge and its span.
+                        return join(unit)
+            for unit in reversed(self.work_units):
+                if (
+                    unit.outcome == "pending"
+                    and not unit.receipt_span_indices
+                    and unit.allocator_agent_id == allocator
+                    and set(unit.recipient_agent_ids) == set(recipients)
+                    and (not call_id or not unit.call_id)
+                ):
+                    # The same allocation decision recorded by another span.
                     return join(unit)
-        carried = set(source_span_ids or [])
-        if carried:
-            for unit in self.work_units:
-                if carried & set(unit.source_span_ids) and set(
-                    unit.recipient_agent_ids
-                ) == set(recipients):
-                    # The same delegation seen from its edge and its span.
-                    return join(unit)
-        for unit in reversed(self.work_units):
-            if (
-                unit.outcome == "pending"
-                and not unit.receipt_span_indices
-                and unit.allocator_agent_id == allocator
-                and set(unit.recipient_agent_ids) == set(recipients)
-                and (not call_id or not unit.call_id)
-            ):
-                # The same allocation decision recorded by another span.
-                return join(unit)
 
         unit = WorkUnit(
             work_id=f"work:{len(self.work_units)}",
@@ -1063,19 +1183,29 @@ class TrajectoryContext:
             unit = self._open_state_route(agent_id)
             if unit is not None:
                 return unit
+        return self._unit_for_span_refs(span_dict, span_index, agent_id)
+
+    def _unit_for_span_refs(
+        self,
+        span_dict: Dict[str, Any],
+        span_index: int,
+        agent_id: str,
+    ) -> Optional[WorkUnit]:
+        """Find the unit a recipient span runs under, without changing state.
+
+        A unit whose call id is a whole id in the span's parent linkage wins;
+        otherwise the latest pending unit addressed to the agent applies.
+        """
         attrs = _span_attributes(span_dict)
-        parent_refs = " ".join(
-            str(value or "")
-            for value in (
-                attrs.get("mas.parent.call.id"),
-                span_dict.get("parent_span_id"),
-            )
-        )
+        parent_refs = [
+            str(attrs.get("mas.parent.call.id") or ""),
+            str(span_dict.get("parent_span_id") or ""),
+        ]
         for unit in reversed(self.work_units):
             if (
                 unit.call_id
                 and agent_id in unit.recipient_agent_ids
-                and re.search(rf"(?<!\w){re.escape(unit.call_id)}(?!\w)", parent_refs)
+                and any(_contains_id(ref, unit.call_id) for ref in parent_refs)
             ):
                 return unit
         for unit in reversed(self.work_units):
@@ -1448,9 +1578,20 @@ class TrajectoryContext:
 
     def ingest_span(self, span_dict: Dict[str, Any], span_index: int) -> None:
         """Extract and store information from a processed span."""
+        attrs = _span_attributes(span_dict)
+        for turn_call_id in (
+            attrs.get("mas.parent.call.id"),
+            attrs.get("mas.call.id"),
+        ):
+            turn = self._pending_root_turns.pop(str(turn_call_id or ""), None)
+            if turn is not None:
+                self._ingest_root_turn(turn, span_index)
         entity_type = span_dict.get("entity_type", "")
         entity_name = span_dict.get("entity_name", "unknown")
         span_id = str(span_dict.get("span_id") or "")
+        work_item_id = self._span_work_item_id(span_dict, span_index=span_index)
+        if work_item_id and span_id:
+            self._work_item_by_inner_span_id[span_id] = work_item_id
         if span_id:
             self._span_index_by_id.setdefault(span_id, span_index)
             is_tool = entity_type == "tool"
@@ -1573,7 +1714,7 @@ class TrajectoryContext:
     def _ingest_tool_span(
         self, span_dict: Dict[str, Any], span_index: int, tool_name: str
     ) -> None:
-        """Index tool input+output as authoritative evidence."""
+        """Index tool input+output as authoritative evidence for its scoped intents."""
         input_payload = span_dict.get("input_payload")
         output_payload = span_dict.get("output_payload")
         explicit_agent = self._explicit_agent_id(span_dict)
@@ -1594,11 +1735,18 @@ class TrajectoryContext:
             self._record_receipt(work_unit, span_index)
         tool_outcome = _tool_outcome(span_dict, output_payload)
         provenance = self._operation_provenance(span_dict)
-        # Only the work item this span executes under is a known link.
-        related_intent_ids = (
-            [work_unit.intent_id]
-            if work_unit is not None and work_unit.intent_id
-            else []
+        related_intent_ids = self._scope_intent_ids(
+            span_dict,
+            actor_scope=provenance["actor_scope"],
+            span_index=span_index,
+        )
+        self._record_tool_attempt_on_intents(
+            related_intent_ids,
+            tool_name,
+            span_index,
+            input_payload,
+            output_payload,
+            contains_error=tool_outcome == "error",
         )
 
         parts: List[str] = [f"[Tool: {tool_name}]"]
@@ -1805,12 +1953,7 @@ class TrajectoryContext:
         if not peer_assertion and agent_id and not self.root_agent_id:
             self.root_agent_id = agent_id
         input_artifact_ids = self._input_artifact_ids(input_payload)
-        # Only the work item this span executes under is a known link.
-        related_intent_ids = (
-            [work_unit.intent_id]
-            if work_unit is not None and work_unit.intent_id
-            else []
-        )
+        related_intent_ids: List[str] = []
         user_messages = _extract_user_messages(input_payload)
         embedded_user_requests = _ordered_union(
             [],
@@ -1853,8 +1996,31 @@ class TrajectoryContext:
             text = text.strip()
             if text and text not in existing_user_texts:
                 existing_user_texts.add(text)
-                message_intent_ids = (
-                    list(related_intent_ids) if fact_type == "agent_handoff" else []
+                if fact_type in {"user_statement", "agent_handoff"}:
+                    message_intent_ids = self._update_intent_from_user(
+                        text,
+                        span_index,
+                        delegated_task=fact_type == "agent_handoff",
+                        span_dict=span_dict,
+                    )
+                else:
+                    message_intent_ids = self._scope_intent_ids(
+                        span_dict,
+                        actor_scope=provenance["actor_scope"],
+                        span_index=span_index,
+                    )
+                if fact_type == "user_statement":
+                    self._observe_intent_ownership(
+                        message_intent_ids,
+                        provenance["agent_id"],
+                        provenance["actor_scope"],
+                        span_dict,
+                        span_index,
+                        basis="received_request",
+                    )
+                related_intent_ids = _ordered_union(
+                    related_intent_ids,
+                    message_intent_ids,
                 )
                 fact_id = self._append_evidence(
                     EvidenceFact(
@@ -1906,6 +2072,15 @@ class TrajectoryContext:
             ):
                 self.latest_root_answer = agent_text
                 self.latest_root_answer_span_index = span_index
+            claim_intent_ids = self._scope_intent_ids(
+                span_dict,
+                actor_scope=provenance["actor_scope"],
+                span_index=span_index,
+            )
+            related_intent_ids = _ordered_union(
+                related_intent_ids,
+                claim_intent_ids,
+            )
             linked_artifact_ids = self._linked_span_artifact_ids(span_dict)
             evidence_refs = _ordered_union(input_artifact_ids, linked_artifact_ids)
             round_index = _span_round_index(span_dict)
@@ -2066,6 +2241,157 @@ class TrajectoryContext:
         self.claims.append(claim)
         return artifact_id
 
+    def _scope_intent_ids(
+        self,
+        span_dict: Dict[str, Any],
+        *,
+        actor_scope: Optional[str] = None,
+        span_index: Optional[int] = None,
+    ) -> List[str]:
+        """Return the intents a span works on, by exact structural rules only.
+
+        Explicit references come first. A delegate span, or a span running
+        inside a known delegation (execution id, parent span chain, or the
+        unit addressed to its agent), maps to that delegation's work item. A
+        root-scope span maps to the root user/policy intents. Anything else
+        is left unlinked rather than guessed. The lookup never changes state.
+        """
+        intent_ids = self._resolve_intent_references(
+            _span_intent_references(span_dict, dependency=False)
+        )
+        work_item_id = self._span_work_item_id(span_dict, span_index=span_index)
+        if work_item_id:
+            return _ordered_union(intent_ids, [work_item_id])
+        if intent_ids:
+            return intent_ids
+        if actor_scope is None:
+            actor_scope = self._operation_provenance(span_dict)["actor_scope"]
+        if actor_scope != "root":
+            return []
+        return self._root_intent_ids()
+
+    def _span_work_item_id(
+        self,
+        span_dict: Dict[str, Any],
+        *,
+        span_index: Optional[int] = None,
+    ) -> str:
+        """Return the intent of the delegation a span belongs to, or ``""``.
+
+        The delegations are the work units. A span belongs to one when it
+        carries the unit's call id or is one of its delegate spans, runs under
+        the receiver's execution id (``<recipient>-<call id>-exec``), is a
+        child of a delegate span or of a span already resolved to the unit, or
+        is the work of an agent the unit was addressed to.
+        """
+        attrs = _span_attributes(span_dict)
+        call_id = str(attrs.get("mas.call.id") or "")
+        parent_call_id = str(attrs.get("mas.parent.call.id") or "")
+        span_id = str(span_dict.get("span_id") or "")
+        parent_span_id = str(span_dict.get("parent_span_id") or "")
+        units = [unit for unit in reversed(self.work_units) if unit.intent_id]
+
+        if call_id:
+            for unit in units:
+                if unit.call_id == call_id:
+                    return unit.intent_id
+        if span_id:
+            for unit in units:
+                if span_id in unit.source_span_ids:
+                    return unit.intent_id
+        if parent_call_id:
+            for unit in units:
+                if unit.call_id and parent_call_id in {
+                    f"{recipient}-{unit.call_id}-exec"
+                    for recipient in unit.recipient_agent_ids
+                }:
+                    return unit.intent_id
+        if parent_span_id:
+            for unit in units:
+                if parent_span_id in unit.source_span_ids:
+                    return unit.intent_id
+            inner = self._work_item_by_inner_span_id.get(parent_span_id)
+            if inner:
+                return inner
+
+        agent_id = self._explicit_agent_id(span_dict)
+        if not agent_id:
+            return ""
+        linked = {link["span_id"] for link in _span_links(span_dict)} - {""}
+        for unit in units:
+            if agent_id in unit.recipient_agent_ids and linked & set(
+                unit.source_span_ids
+            ):
+                return unit.intent_id
+        addressed = self._unit_for_span_refs(
+            span_dict,
+            self._last_span_index() + 1 if span_index is None else span_index,
+            agent_id,
+        )
+        return addressed.intent_id if addressed is not None else ""
+
+    def _root_intent_ids(self) -> List[str]:
+        return [
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source in _ROOT_INTENT_SOURCES
+        ]
+
+    def _register_work_item(
+        self,
+        intent_id: str,
+        span_dict: Dict[str, Any],
+        recipient_agent_ids: List[str],
+    ) -> None:
+        """Bind an intent to the delegation a span identifies.
+
+        The delegation is a work unit. One that carries the span's call id or
+        span id and has no intent yet takes this intent; when there is no such
+        unit, or it already carries another intent, a unit of its own is opened
+        for the recipients.
+        """
+        recipients = [str(agent) for agent in recipient_agent_ids if agent]
+        span_id = str(span_dict.get("span_id") or "")
+        call_id = str(_span_attributes(span_dict).get("mas.call.id") or "")
+        known = next(
+            (unit for unit in self.work_units if unit.intent_id == intent_id), None
+        )
+        if known is None:
+            known = next(
+                (
+                    unit
+                    for unit in reversed(self.work_units)
+                    if not unit.intent_id
+                    and (
+                        (call_id and unit.call_id == call_id)
+                        or (span_id and span_id in unit.source_span_ids)
+                    )
+                ),
+                None,
+            )
+        if known is not None:
+            known.intent_id = intent_id
+            known.call_id = known.call_id or call_id
+            known.source_span_ids = _ordered_union(
+                known.source_span_ids, [span_id] if span_id else []
+            )
+            known.recipient_agent_ids = _ordered_union(
+                known.recipient_agent_ids, recipients
+            )
+            return
+        intent = self._intent_by_artifact_id(intent_id)
+        self._open_work_unit(
+            allocator_agent_id=_span_agent_id(span_dict),
+            recipient_agent_ids=recipients,
+            request=intent.description if intent is not None else "",
+            span_index=intent.first_seen if intent is not None else -1,
+            source="span",
+            call_id=call_id,
+            source_span_ids=[span_id] if span_id else [],
+            intent_ids=[intent_id],
+            join_existing=False,
+        )
+
     def _remember_span(self, span_dict: Dict[str, Any], *artifact_ids: str) -> None:
         span_id = str(span_dict.get("span_id") or "")
         if not span_id:
@@ -2219,7 +2545,7 @@ class TrajectoryContext:
             ):
                 continue
             if (
-                intent.source in {"user", "policy", "root", "root_user"}
+                intent.source in _ROOT_INTENT_SOURCES
                 and actor_scope == "peer"
                 and any(
                     candidate.source == "agent_plan"
@@ -2417,6 +2743,8 @@ class TrajectoryContext:
         input_ids = _ordered_union(input_ids, referenced_claim_ids)
         output_ids = list(output_artifact_ids or [])
         intent_ids = list(related_intent_ids or [])
+        if not intent_ids:
+            intent_ids = self._scope_intent_ids(span_dict, span_index=span_index)
 
         duplicate_types = [
             event_type for event_type in event_types if event_type in parent_types
@@ -2478,7 +2806,6 @@ class TrajectoryContext:
                     span_dict,
                     span_index,
                     event_type=event_type,
-                    parent_intent_ids=intent_ids,
                     recipient_agent_ids=type_recipient_ids,
                     description_override=request_text if actor_override else "",
                     actor_override=actor_override,
@@ -2755,12 +3082,18 @@ class TrajectoryContext:
         span_index: int,
         *,
         event_type: str,
-        parent_intent_ids: List[str],
         recipient_agent_ids: List[str],
         description_override: str = "",
         actor_override: str = "",
+        root_turn_call_id: Optional[str] = None,
     ) -> List[str]:
-        """Create one child work item for an explicit assignment or handoff."""
+        """Create one child work item for an explicit assignment or handoff.
+
+        Parents are the explicit references in the payload, else the root
+        user/policy intents known at that point (only the request of its own
+        adapter root turn, when the adapter places it in one); a work item is
+        never its own parent.
+        """
         description = description_override or _span_work_description(span_dict)
         if not description and event_type == "handoff":
             return []
@@ -2770,6 +3103,9 @@ class TrajectoryContext:
             return []
 
         span_id = str(span_dict.get("span_id") or "")
+        explicit_parent_ids = self._resolve_intent_references(
+            _span_intent_references(span_dict, dependency=False)
+        )
         for index, intent in enumerate(self.intents):
             if intent.source != "agent_plan":
                 continue
@@ -2782,9 +3118,20 @@ class TrajectoryContext:
                 _normalise_semantic_text(description)
             ) and bool(set(intent.owner_agent_ids) & set(recipient_agent_ids))
             if same_span or same_work:
-                intent.parent_intent_ids = _ordered_union(
-                    intent.parent_intent_ids,
-                    parent_intent_ids,
+                intent_id = f"intent:{index}"
+                if intent_id in self._unobserved_work_items:
+                    self._unobserved_work_items.discard(intent_id)
+                    intent.first_seen = span_index
+                    intent.last_seen = span_index
+                intent.parent_intent_ids = [
+                    parent_id
+                    for parent_id in _ordered_union(
+                        intent.parent_intent_ids,
+                        explicit_parent_ids,
+                    )
+                    if parent_id != intent_id
+                ] or self._turn_root_intent_ids(
+                    self._work_item_root_turn.get(intent_id)
                 )
                 intent.dependency_intent_ids = _ordered_union(
                     intent.dependency_intent_ids,
@@ -2792,29 +3139,16 @@ class TrajectoryContext:
                         _span_intent_references(span_dict, dependency=True)
                     ),
                 )
-                return [f"intent:{index}"]
+                return [intent_id]
 
         actor_agent_id = actor_override or _span_agent_id(span_dict)
         expected_output = _span_expected_output_from_payload(span_dict)
         dependency_intent_ids = self._resolve_intent_references(
             _span_intent_references(span_dict, dependency=True)
         )
-        explicit_parent_ids = self._resolve_intent_references(
-            _span_intent_references(span_dict, dependency=False)
+        resolved_parent_ids = explicit_parent_ids or self._turn_root_intent_ids(
+            root_turn_call_id
         )
-        inferred_root_ids = [
-            intent_id
-            for intent_id in parent_intent_ids
-            if (intent := self._intent_by_artifact_id(intent_id)) is not None
-            and intent.source != "agent_plan"
-        ]
-        if not inferred_root_ids:
-            inferred_root_ids = [
-                f"intent:{index}"
-                for index, intent in enumerate(self.intents)
-                if intent.source in {"user", "policy", "root", "root_user"}
-            ][:4]
-        resolved_parent_ids = _ordered_union(explicit_parent_ids, inferred_root_ids)
         recipient_name = "_and_".join(
             _normalise_actor_id(agent_id) for agent_id in recipient_agent_ids
         ).strip("_")
@@ -3200,11 +3534,37 @@ class TrajectoryContext:
 
     def rebuild_runtime_indexes(self) -> None:
         """Rebuild private lookup indexes after loading a persisted context."""
-        self.root_agent_id = ""
         self._span_artifact_ids = {}
         self._span_agent_ids = {}
         self._span_coordination_event_types = {}
         self._latest_claim_by_agent = {}
+        self._work_item_by_inner_span_id = {}
+        # The adapter's root turn names the root agent; else the first root claim.
+        self.root_agent_id = next(
+            (
+                turn.agent_id
+                for turn in self.coordination_context.root_turns
+                if turn.agent_id
+            ),
+            "",
+        )
+        recorded_turn_keys = {
+            intent.events[0].get("turn_key")
+            for intent in self.intents
+            if intent.source == "user" and intent.events
+        }
+        self._pending_root_turns = {
+            call_id: turn
+            for call_id, turn in self._pending_root_turns.items()
+            if f"mas:{call_id}" not in recorded_turn_keys
+        }
+        recorded: List[tuple[str, str]] = [
+            (fact.work_id, fact.span_id) for fact in self.evidence
+        ] + [(claim.work_id, claim.span_id) for claim in self.claims]
+        for work_id, span_id in recorded:
+            unit = self._work_unit_by_id(work_id)
+            if unit is not None and unit.intent_id and span_id:
+                self._work_item_by_inner_span_id.setdefault(span_id, unit.intent_id)
         for index, fact in enumerate(self.evidence):
             if fact.span_id:
                 self._span_artifact_ids.setdefault(fact.span_id, []).append(
@@ -3236,6 +3596,175 @@ class TrajectoryContext:
                 self._span_agent_ids[event.span_id] = event.actor_agent_id
             self._span_coordination_event_types.setdefault(event.span_id, set()).add(
                 event.event_type
+            )
+
+    def _update_intent_from_user(
+        self,
+        user_text: str,
+        span_index: int,
+        *,
+        delegated_task: bool = False,
+        span_dict: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        """Record one external user turn, or link a delegated task to its scope.
+
+        A delegated task never creates user intents.
+        """
+        if delegated_task:
+            provenance = self._operation_provenance(
+                span_dict or {},
+                delegated_task=True,
+            )
+            intent_ids = self._scope_intent_ids(
+                span_dict or {},
+                actor_scope=provenance["actor_scope"],
+                span_index=span_index,
+            )
+            for intent_id in intent_ids:
+                intent = self._intent_by_artifact_id(intent_id)
+                if intent is None:
+                    continue
+                intent.last_seen = max(intent.last_seen, span_index)
+                intent.events.append(
+                    {
+                        "span_index": span_index,
+                        "type": "delegated_task",
+                        "content": user_text,
+                    }
+                )
+            if span_dict is not None:
+                self._observe_intent_ownership(
+                    intent_ids,
+                    provenance["agent_id"],
+                    provenance["actor_scope"],
+                    span_dict,
+                    span_index,
+                    basis="received_request",
+                )
+            return intent_ids
+
+        return self._observe_user_turn(user_text, span_index, span_dict=span_dict)
+
+    def _observe_user_turn(
+        self,
+        user_text: str,
+        span_index: int,
+        *,
+        span_dict: Optional[Dict[str, Any]] = None,
+        turn_key: str = "",
+    ) -> List[str]:
+        """One "User request" intent per external user turn, verbatim.
+
+        Identity is exact: the turn key (the MAS-Lab root execution id) when
+        known, else the whole message after normalization. Splitting the
+        request into constraints is left to the judges.
+        """
+        turn_key = turn_key or _external_turn_key(span_dict or {})
+        text_key = _exact_text_key(user_text)
+        for index, intent in enumerate(self.intents):
+            if intent.source != "user":
+                continue
+            intent_turn_key = (intent.events[0] if intent.events else {}).get(
+                "turn_key", ""
+            )
+            if turn_key and intent_turn_key:
+                same_turn = intent_turn_key == turn_key
+            else:
+                same_turn = bool(text_key) and (
+                    _exact_text_key(intent.description) == text_key
+                )
+            if not same_turn:
+                continue
+            intent.last_seen = max(intent.last_seen, span_index)
+            intent.events.append(
+                {
+                    "span_index": span_index,
+                    "type": "user_restatement",
+                    "content": user_text,
+                }
+            )
+            return [f"intent:{index}"]
+
+        event: Dict[str, Any] = {
+            "span_index": span_index,
+            "type": "requirement_observed",
+            "content": user_text,
+        }
+        if turn_key:
+            event["turn_key"] = turn_key
+        self.intents.append(
+            IntentEntry(
+                name=_unique_intent_name(
+                    "User request",
+                    {intent.name for intent in self.intents},
+                ),
+                description=user_text,
+                requirement_type="request",
+                source="user",
+                first_seen=span_index,
+                last_seen=span_index,
+                status="unassessed",
+                events=[event],
+            )
+        )
+        intent_ids = [f"intent:{len(self.intents) - 1}"]
+        # Adapter work items ingested before this turn get it as their parent;
+        # one placed in an adapter root turn gets only that turn's request.
+        root_ids = self._root_intent_ids()
+        for index, intent in enumerate(self.intents):
+            if intent.source != "agent_plan" or intent.parent_intent_ids:
+                continue
+            item_turn = self._work_item_root_turn.get(f"intent:{index}")
+            if item_turn is not None and f"mas:{item_turn}" != turn_key:
+                continue
+            intent.parent_intent_ids = list(
+                root_ids if item_turn is None else intent_ids
+            )
+            for parent_id in intent.parent_intent_ids:
+                self._add_provenance_link(
+                    parent_id,
+                    f"intent:{index}",
+                    "decomposes_to",
+                    span_dict=span_dict or {},
+                    span_index=span_index,
+                )
+        return intent_ids
+
+    def _record_tool_attempt_on_intents(
+        self,
+        intent_ids: List[str],
+        tool_name: str,
+        span_index: int,
+        input_payload: Any,
+        output_payload: Any,
+        *,
+        contains_error: Optional[bool] = None,
+    ) -> None:
+        """Log a tool call on the intents in its structural scope.
+
+        This is activity bookkeeping only; it never changes intent status.
+        ``contains_error`` is read from the output's ``status`` when not given.
+        """
+        if contains_error is None:
+            contains_error = False
+            if isinstance(output_payload, dict):
+                status = str(output_payload.get("status", "")).lower()
+                contains_error = status in ("error", "failed")
+
+        for intent_id in intent_ids:
+            intent = self._intent_by_artifact_id(intent_id)
+            if intent is None:
+                continue
+            intent.last_seen = max(intent.last_seen, span_index)
+            intent.events.append(
+                {
+                    "span_index": span_index,
+                    "type": "tool_attempt",
+                    "tool": tool_name,
+                    "input": _safe_json(input_payload, max_len=None),
+                    "output": _safe_json(output_payload, max_len=None),
+                    "error": contains_error,
+                }
             )
 
     # ------------------------------------------------------------------
@@ -3379,7 +3908,7 @@ class TrajectoryContext:
         budget = budget or self.max_context_chars
         sections: List[str] = []
 
-        intent_lines = ["INTENT REGISTER:"]
+        intent_lines = ["INTENT REGISTER:", _INTENT_STATUS_LEGEND]
         for intent in self.intents:
             if intent.source == "agent_plan":
                 continue
@@ -3390,7 +3919,7 @@ class TrajectoryContext:
                 f"last=step {intent.last_seen + 1})"
             )
             intent_lines.append(line)
-        if len(intent_lines) > 1:
+        if len(intent_lines) > 2:
             sections.append("\n".join(intent_lines))
 
         recency = self._get_recent_evidence(self._current_span_index())
@@ -3460,7 +3989,7 @@ class TrajectoryContext:
         if self.policy_text:
             sections.append(f"POLICY:\n{self.policy_text[:2000]}")
 
-        intent_lines = ["INTENT REGISTER:"]
+        intent_lines = ["INTENT REGISTER:", _INTENT_STATUS_LEGEND]
         for intent in self.intents:
             event_summary = ", ".join(
                 f"step {e['span_index'] + 1}:{e['type']}" for e in intent.events[-5:]
@@ -4588,6 +5117,27 @@ def _is_delegated_agent_input(
     return not any(marker in normalized_system for marker in moderator_markers)
 
 
+def _external_turn_key(span_dict: Dict[str, Any]) -> str:
+    """Exact identity of the external turn a root span runs in (MAS-Lab exec id)."""
+    exec_id = str(_span_attributes(span_dict).get("mas.parent.call.id") or "")
+    return f"mas:{exec_id}" if exec_id else ""
+
+
+def _contains_id(text: str, token: str) -> bool:
+    """Whether ``token`` occurs in ``text`` as a whole id, not inside a longer one."""
+    start = text.find(token) if token else -1
+    while start >= 0:
+        end = start + len(token)
+        before = text[start - 1] if start else ""
+        after = text[end] if end < len(text) else ""
+        if not (before.isalnum() or before == "_") and not (
+            after.isalnum() or after == "_"
+        ):
+            return True
+        start = text.find(token, start + 1)
+    return False
+
+
 def _unique_intent_name(name: str, existing_names: set[str]) -> str:
     if name not in existing_names:
         return name
@@ -4599,6 +5149,15 @@ def _unique_intent_name(name: str, existing_names: set[str]) -> str:
 
 def _extract_agent_output(output_payload: Dict[str, Any]) -> str:
     """Pull assistant content and tool decisions from supported payload shapes."""
+    parts = [_extract_agent_text(output_payload)]
+    tool_calls = _collect_tool_calls(output_payload)
+    if tool_calls:
+        parts.append(f"Tool calls: {_safe_json(tool_calls, max_len=None)}")
+    return "\n".join(_ordered_union([], parts))
+
+
+def _extract_agent_text(output_payload: Dict[str, Any]) -> str:
+    """Pull the visible assistant content, without tool-call decisions."""
     messages = _extract_flattened_messages(output_payload, "gen_ai.completion")
     messages.extend(_extract_structured_messages(output_payload))
     parts = [
@@ -4613,10 +5172,6 @@ def _extract_agent_output(output_payload: Dict[str, Any]) -> str:
         )
         if fallback:
             parts.append(fallback)
-
-    tool_calls = _collect_tool_calls(output_payload)
-    if tool_calls:
-        parts.append(f"Tool calls: {_safe_json(tool_calls, max_len=None)}")
     return "\n".join(_ordered_union([], parts))
 
 
