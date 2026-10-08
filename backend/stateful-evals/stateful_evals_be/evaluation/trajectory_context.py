@@ -324,6 +324,7 @@ class TrajectoryContext:
         self._span_agent_ids: Dict[str, str] = {}
         self._span_coordination_event_types: Dict[str, set[str]] = {}
         self._latest_claim_by_agent: Dict[str, str] = {}
+        self._processed_spans: Dict[str, Dict[str, Any]] = {}
 
         self.policy_text = policy_text.strip() if policy_text else ""
         self.tool_definitions = tool_definitions
@@ -1452,6 +1453,15 @@ class TrajectoryContext:
         span_id = str(span_dict.get("span_id") or "")
         if span_id:
             self._span_index_by_id.setdefault(span_id, span_index)
+            is_tool = entity_type == "tool"
+            self._processed_spans[span_id] = {
+                "span_index": span_index,
+                "timestamp": span_dict.get("timestamp"),
+                "duration_ns": _span_duration_ns(span_dict),
+                "contains_error": bool(span_dict.get("contains_error")),
+                "tool_input": span_dict.get("input_payload") if is_tool else None,
+                "tool_output": span_dict.get("output_payload") if is_tool else None,
+            }
         self._span_timestamps.append(
             (span_index, _timestamp_ns(span_dict.get("timestamp")))
         )
@@ -3342,6 +3352,25 @@ class TrajectoryContext:
                 for event in self.coordination_events[-10:]
             ],
         }
+
+    def retrieve_for_span(
+        self,
+        current_span: Dict[str, Any],
+        *,
+        span_index: int,
+        max_chars: int = 14000,
+        expanded: bool = False,
+    ) -> Dict[str, Any]:
+        """Select a read-only evidence view without changing canonical artifacts."""
+        from stateful_evals_be.evaluation.span_context import select_span_context
+
+        return select_span_context(
+            self,
+            current_span,
+            span_index=span_index,
+            max_chars=max_chars,
+            expanded=expanded,
+        )
 
     def retrieve_for_intent_recognition(
         self, current_span: Dict[str, Any], *, budget: Optional[int] = None

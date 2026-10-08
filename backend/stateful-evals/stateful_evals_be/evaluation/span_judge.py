@@ -23,8 +23,41 @@ the active intent and prior claims; fail material contradiction or non-progress.
 
 Return strict JSON only with a `metrics` array. Each item must contain the exact
 requested `metric_name`, binary numeric `score`, and one concise `reasoning`.
+"""
+
+_LEGACY_RESPONSE_INSTRUCTIONS = """\
 Optionally include a compact `state_delta` object with new claims, intent status
 updates, and evidence links. Do not restate the supplied context.
+"""
+
+_FOCUSED_RESPONSE_INSTRUCTIONS = """\
+Do not restate the supplied context. Keep each reasoning to one sentence.
+When selection metadata is present, the context is a retrieved view. Omitted
+evidence is not proof of absent evidence: set `needs_more_context` to true if
+you cannot decide without additional earlier artifacts. Judge a transition
+against evidence available at that step, not hypothetical later results.
+"""
+
+_FOCUSED_TRANSITION_INSTRUCTIONS = """\
+Assess this transition, not whether the whole task is already complete. An
+intermediate tool call may address one part of a multi-step request; remaining
+work alone is not a Groundedness, IntentRecognition, or Relevancy failure.
+Fail abandonment only when the current action actually drops or contradicts a
+requirement, or claims completion without satisfying it. A proposed tool call
+is an action request, not a claim that its result has already been obtained.
+Its concrete record identifiers and factual arguments must still match the
+available evidence or documented tool contract. A plausible invented identifier
+is not grounded. Distinguish existing-record references from legitimate search
+queries or identifiers the tool explicitly allows the caller to create.
+When argument_evidence is provided, compare requested_values with observed_values
+for existing-record lookups. Different exact IDs are not interchangeable merely
+because they describe the same subject. These are observations, not a closed list
+of every valid ID; consult the referenced artifact and tool instructions before
+deciding whether a mismatch is an error or needs more context.
+source_outcome=error identifies a failed response, not a validated reference.
+unknown means the outcome is not established. echoed_request_values are values
+also present in that source call's arguments; repetition alone does not validate
+them. Use the full source record to distinguish returned data from error echoes.
 """
 
 
@@ -43,7 +76,7 @@ class SpanJudge:
         self.metric_names = list(metric_names)
 
     @staticmethod
-    def compact_value(value: Any, max_chars: int) -> Any:
+    def compact_value(value: Any, max_chars: int | None) -> Any:
         if value is None:
             return None
         if isinstance(value, str):
@@ -53,7 +86,7 @@ class SpanJudge:
                 text = json.dumps(value, ensure_ascii=False, default=str)
             except Exception:
                 text = str(value)
-        if len(text) <= max_chars:
+        if max_chars is None or len(text) <= max_chars:
             if not isinstance(value, str):
                 try:
                     return json.loads(text)
@@ -66,6 +99,8 @@ class SpanJudge:
         """Keep only current-turn I/O; never forward accumulated prompt history."""
         input_payload = span_dict.get("input_payload")
         output_payload = span_dict.get("output_payload")
+        focused = self.options.span_context_mode == "focused"
+        message_limit = None if focused else 1600
         messages: List[Dict[str, str]] = []
 
         if isinstance(input_payload, dict):
@@ -85,7 +120,7 @@ class SpanJudge:
             messages = [
                 {
                     "role": entry.get("role", "user").lower(),
-                    "content": str(entry.get("content", ""))[:1600],
+                    "content": str(entry.get("content", ""))[:message_limit],
                 }
                 for _, entry in sorted(indexed.items())
                 if entry.get("content")
@@ -97,13 +132,13 @@ class SpanJudge:
                 for message in message_list:
                     parsed = SpanNormalizer._extract_message_entry(message)
                     if parsed and parsed["role"] != "system":
-                        parsed["content"] = parsed["content"][:1600]
+                        parsed["content"] = parsed["content"][:message_limit]
                         messages.append(parsed)
 
         max_messages = int(self.options.max_messages or 2)
         current_input: Any = messages[-max_messages:]
         if not current_input:
-            current_input = self.compact_value(input_payload, 2400)
+            current_input = self.compact_value(input_payload, None if focused else 2400)
 
         output_texts: List[str] = []
         if isinstance(output_payload, dict):
@@ -116,10 +151,14 @@ class SpanJudge:
                 for key, value in output_payload.items()
                 if (match := completion_re.match(str(key)))
             )
-            output_texts = [text[:2400] for _, text in indexed_output if text]
+            output_texts = [
+                text[: None if focused else 2400] for _, text in indexed_output if text
+            ]
         current_output: Any = output_texts[-1] if output_texts else None
         if current_output is None:
-            current_output = self.compact_value(output_payload, 3000)
+            current_output = self.compact_value(
+                output_payload, None if focused else 3000
+            )
 
         return {
             "span_id": span_dict.get("span_id", ""),
@@ -153,15 +192,19 @@ class SpanJudge:
                         "reasoning": "concise context-grounded explanation",
                     }
                 ],
-                "state_delta": {
-                    "claims": [],
-                    "intent_updates": [],
-                    "evidence_links": [],
-                },
+                "needs_more_context": "boolean; true only if additional evidence is needed",
             },
         }
+        if self.options.span_context_mode == "legacy":
+            prompt_payload["output_schema"].pop("needs_more_context")
+            prompt_payload["output_schema"]["state_delta"] = {
+                "claims": [],
+                "intent_updates": [],
+                "evidence_links": [],
+            }
         results_by_name: Dict[str, Dict[str, Any]] = {}
         state_delta: Dict[str, Any] = {}
+        needs_more_context = False
         usage_totals = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -253,7 +296,16 @@ class SpanJudge:
                 "requested_metrics": missing,
             }
             messages = [
-                {"role": "system", "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT
+                    + (
+                        _FOCUSED_RESPONSE_INSTRUCTIONS
+                        + _FOCUSED_TRANSITION_INSTRUCTIONS
+                        if self.options.span_context_mode == "focused"
+                        else _LEGACY_RESPONSE_INSTRUCTIONS
+                    ),
+                },
                 {
                     "role": "user",
                     "content": json.dumps(
@@ -291,6 +343,9 @@ class SpanJudge:
                 parse_error = exc
                 continue
             candidate_delta = parsed.get("state_delta")
+            needs_more_context = (
+                needs_more_context or parsed.get("needs_more_context") is True
+            )
             if isinstance(candidate_delta, dict) and candidate_delta:
                 state_delta = candidate_delta
             collect_metrics(parsed, missing)
@@ -317,7 +372,15 @@ class SpanJudge:
                 },
             }
             messages = [
-                {"role": "system", "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT
+                    + (
+                        ""
+                        if self.options.span_context_mode == "focused"
+                        else _LEGACY_RESPONSE_INSTRUCTIONS
+                    ),
+                },
                 {
                     "role": "user",
                     "content": json.dumps(
@@ -371,6 +434,7 @@ class SpanJudge:
             "results": results,
             "failed_metrics": failed,
             "state_delta": state_delta,
+            "needs_more_context": needs_more_context,
             "usage": usage_totals,
         }
 
