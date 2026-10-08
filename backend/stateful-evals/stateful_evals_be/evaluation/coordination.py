@@ -101,6 +101,17 @@ class VerificationProvenance:
     verification_gate_observed: bool
 
 
+@dataclass(frozen=True)
+class RootTurn:
+    """An external user turn started at the root, outside any delegation."""
+
+    call_id: str
+    agent_id: str
+    turn_id: str
+    input: str
+    event_index: int
+
+
 @dataclass
 class CoordinationContext:
     """Framework-neutral coordination artifacts supplied by telemetry adapters."""
@@ -118,6 +129,7 @@ class CoordinationContext:
     verification: VerificationProvenance | None = None
     final_response: str = ""
     final_response_event_index: int = -1
+    root_turns: list[RootTurn] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -272,4 +284,15 @@ class CoordinationContext:
             final_response_event_index=_integer(
                 payload.get("final_response_event_index"), -1
             ),
+            root_turns=[
+                RootTurn(
+                    call_id=str(item.get("call_id") or ""),
+                    agent_id=str(item.get("agent_id") or ""),
+                    turn_id=str(item.get("turn_id") or ""),
+                    input=str(item.get("input") or ""),
+                    event_index=_integer(item.get("event_index"), -1),
+                )
+                for item in payload.get("root_turns") or []
+                if isinstance(item, Mapping)
+            ],
         )

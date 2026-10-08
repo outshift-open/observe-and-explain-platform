@@ -13,7 +13,6 @@ trajectory-aware review pass.
 """
 
 import json
-import logging
 import os
 import re
 from typing import Any, Dict, List
@@ -21,6 +20,7 @@ from typing import Any, Dict, List
 import litellm
 from metrics_computation_engine.llm_judge.llm import LLMClient
 
+from stateful_evals_be.evaluation.span_judge import SpanJudge
 from stateful_evals_be.models.requests import FailureDetail, MetricFailure
 from stateful_evals_be.prompts.inter_step_review import (
     INTER_STEP_REVIEW_SYSTEM_PROMPT,
@@ -28,8 +28,6 @@ from stateful_evals_be.prompts.inter_step_review import (
 )
 
 litellm.drop_params = True
-
-logger = logging.getLogger("stateful_evals_be.inter_step_review")
 
 _MAX_FAILURES_PER_BATCH = 15
 
@@ -69,8 +67,14 @@ def run_inter_step_review(
     policy: str,
     llm_client: LLMClient,
     aftermath: str = "",
+    *,
+    max_tokens: int = 4096,
+    reasoning_effort: str | None = "low",
 ) -> Dict[str, Any]:
-    """Review all span-level failures in trajectory context.
+    """Review every span-level failure in bounded batches.
+
+    An unavailable or incomplete judgment raises rather than inventing a
+    severity. The processor reports that session as unscored.
 
     Returns:
         Dict with:
@@ -89,68 +93,64 @@ def run_inter_step_review(
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
 
-    review_failures = failures[:_MAX_FAILURES_PER_BATCH]
-    failures_text = _format_failures_for_review(review_failures)
-
-    user_prompt = INTER_STEP_REVIEW_USER_PROMPT.format(
-        policy=policy[:3000] if policy else "No policy provided.",
-        trajectory_summary=trajectory_summary[:4000],
-        failures=failures_text,
-        aftermath=aftermath or "End of trajectory.",
-    )
-
-    messages = [
-        {"role": "system", "content": INTER_STEP_REVIEW_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    usage_tokens = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     model_name = os.getenv("LLM_MODEL_NAME", "")
     temperature = 1.0 if "claude-sonnet" in model_name.casefold() else 0.0
-
-    try:
-        response = llm_client.query(
-            messages,
-            temperature=temperature,
-            max_tokens=2000,
-            reasoning_effort="low",
+    query_options = {"temperature": temperature, "max_tokens": max_tokens}
+    if reasoning_effort is not None:
+        query_options["reasoning_effort"] = reasoning_effort
+    combined = {
+        "fatal_failures": [],
+        "minor_failures": [],
+        "trajectory_patterns": [],
+        "overall_assessment": "",
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+    assessments = []
+    for start in range(0, len(failures), _MAX_FAILURES_PER_BATCH):
+        review_failures = failures[start : start + _MAX_FAILURES_PER_BATCH]
+        user_prompt = INTER_STEP_REVIEW_USER_PROMPT.format(
+            policy=policy[:3000] if policy else "No policy provided.",
+            trajectory_summary=trajectory_summary[:4000],
+            failures=_format_failures_for_review(review_failures),
+            aftermath=aftermath or "End of trajectory.",
         )
-        result_text = response.choices[0].message.content
+        messages = [
+            {"role": "system", "content": INTER_STEP_REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ]
+        try:
+            response = llm_client.query(messages, **query_options)
+            choice = response.choices[0]
+            if getattr(choice, "finish_reason", None) in {"length", "max_tokens"}:
+                raise ValueError("judge response exceeded its token budget")
+            result_text = (choice.message.content or "").strip()
+            if not result_text:
+                raise ValueError("judge returned an empty response")
+            if result_text.startswith("{{"):
+                result_text = result_text.replace("{{", "{").replace("}}", "}")
+            parsed = SpanJudge.parse_response(result_text)
+            usage = getattr(response, "usage", None)
+            usage_tokens = {
+                key: getattr(usage, key, 0) or 0 for key in combined["usage"]
+            }
+            reviewed = _build_review_result(review_failures, parsed, usage_tokens)
+        except Exception as exc:
+            batch_number = start // _MAX_FAILURES_PER_BATCH + 1
+            raise RuntimeError(
+                f"Inter-step review failed in batch {batch_number}: {exc}"
+            ) from exc
 
-        if hasattr(response, "usage") and response.usage:
-            usage_tokens["prompt_tokens"] = (
-                getattr(response.usage, "prompt_tokens", 0) or 0
-            )
-            usage_tokens["completion_tokens"] = (
-                getattr(response.usage, "completion_tokens", 0) or 0
-            )
-            usage_tokens["total_tokens"] = (
-                getattr(response.usage, "total_tokens", 0) or 0
-            )
-
-        if not result_text:
-            return _fallback_all_fatal(review_failures, usage_tokens)
-
-        result_text = result_text.strip()
-        if "```json" in result_text:
-            result_text = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            result_text = result_text.split("```")[1].split("```")[0].strip()
-
-        if result_text.startswith("{{"):
-            result_text = result_text.replace("{{", "{").replace("}}", "}")
-
-        parsed = json.loads(result_text)
-        return _build_review_result(review_failures, parsed, usage_tokens)
-
-    except json.JSONDecodeError:
-        logger.warning(
-            "Inter-step review returned non-JSON; falling back to heuristic."
-        )
-        return _fallback_heuristic(review_failures, usage_tokens)
-    except Exception as e:
-        logger.error(f"Inter-step review failed: {e}")
-        return _fallback_heuristic(review_failures, usage_tokens)
+        combined["fatal_failures"].extend(reviewed["fatal_failures"])
+        combined["minor_failures"].extend(reviewed["minor_failures"])
+        for pattern in reviewed["trajectory_patterns"]:
+            if pattern not in combined["trajectory_patterns"]:
+                combined["trajectory_patterns"].append(pattern)
+        for key, value in reviewed["usage"].items():
+            combined["usage"][key] += value
+        if reviewed["overall_assessment"]:
+            assessments.append(reviewed["overall_assessment"])
+    combined["overall_assessment"] = "\n".join(assessments)
+    return combined
 
 
 def _build_review_result(
@@ -158,15 +158,25 @@ def _build_review_result(
     parsed: Dict[str, Any],
     usage: Dict[str, int],
 ) -> Dict[str, Any]:
-    """Convert parsed LLM review into structured result."""
+    """Convert a complete review without silently dropping unmatched findings."""
     fatal_failures: List[FailureDetail] = []
     minor_failures: List[FailureDetail] = []
 
+    items = parsed.get("failures")
+    if not isinstance(items, list):
+        raise ValueError("judge must return a 'failures' array")
+    patterns = parsed.get("trajectory_patterns", [])
+    if not isinstance(patterns, list) or any(not isinstance(p, str) for p in patterns):
+        raise ValueError("judge 'trajectory_patterns' must be an array of strings")
     reviewed_indices = set()
-    for item in parsed.get("failures", []):
-        span_idx = item.get("span_index", -1)
-        metric = item.get("metric", "")
-        verdict = str(item.get("verdict", "MINOR")).upper()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("judge failure entries must be objects")
+        span_idx = int(item.get("span_index", -1))
+        metric = str(item.get("metric", "")).strip().rsplit(".", 1)[-1].casefold()
+        verdict = str(item.get("verdict", "")).strip().upper()
+        if verdict not in {"FATAL", "MINOR"}:
+            raise ValueError("judge failure verdict must be FATAL or MINOR")
         severity = float(item.get("severity", 0.5))
         severity = max(0.0, min(1.0, severity))
         explanation = str(item.get("explanation", ""))
@@ -175,26 +185,33 @@ def _build_review_result(
         policy_compliant = bool(item.get("policy_compliant", False))
         is_hard_rule = bool(item.get("hard_rule_violation", False))
 
-        matching_failure = next(
-            (
-                f
-                for f in failures
-                if f.span_index == span_idx and f.metric_name == metric
-            ),
-            None,
-        )
-        if not matching_failure:
-            matching_failure = next(
-                (f for f in failures if f.span_index == span_idx),
-                None,
+        candidates = [
+            i
+            for i, failure in enumerate(failures)
+            if i not in reviewed_indices and failure.span_index == span_idx
+        ]
+        matching = [
+            i
+            for i in candidates
+            if failures[i].metric_name.rsplit(".", 1)[-1].casefold() == metric
+        ]
+        if matching:
+            matched_index = matching[0]
+        elif (
+            len(candidates) == 1
+            and sum(failure.span_index == span_idx for failure in failures) == 1
+        ):
+            # Preserve the old span-only fallback when it is unambiguous.
+            matched_index = candidates[0]
+        else:
+            raise ValueError(
+                f"judge finding does not identify an unreviewed failure at span {span_idx}"
             )
-        if not matching_failure:
-            continue
+        reviewed_indices.add(matched_index)
+        matching_failure = failures[matched_index]
 
-        reviewed_indices.add(failures.index(matching_failure))
-
-        if is_hard_rule:
-            verdict = "FATAL"
+        # Metadata alone must not turn the judge's explicit MINOR into FATAL.
+        if is_hard_rule and verdict == "FATAL":
             severity = max(severity, 1.0)
         elif self_corrected or policy_compliant:
             verdict = "MINOR"
@@ -221,97 +238,15 @@ def _build_review_result(
         else:
             minor_failures.append(detail)
 
-    for i, failure in enumerate(failures):
-        if i in reviewed_indices:
-            continue
-        minor_failures.append(
-            FailureDetail(
-                metric=failure.metric_name,
-                metric_score=failure.score,
-                fatality_score=0.3,
-                reasoning=failure.reasoning,
-                explanation="Not reviewed in inter-step analysis; defaulting to minor.",
-                span_index=failure.span_index,
-                span_id=failure.span_id or "",
-                span_type=failure.span_type,
-                entity_name=failure.entity_name or "",
-                observed_impact="none",
-                confidence=0.3,
-            )
+    if len(reviewed_indices) != len(failures):
+        raise ValueError(
+            f"judge reviewed {len(reviewed_indices)} of {len(failures)} requested failures"
         )
 
     return {
         "fatal_failures": fatal_failures,
         "minor_failures": minor_failures,
-        "trajectory_patterns": parsed.get("trajectory_patterns", []),
-        "overall_assessment": parsed.get("overall_assessment", ""),
-        "usage": usage,
-    }
-
-
-def _fallback_all_fatal(
-    failures: List[MetricFailure], usage: Dict[str, int]
-) -> Dict[str, Any]:
-    """When LLM returns empty, conservatively mark all as fatal."""
-    fatal = [
-        FailureDetail(
-            metric=f.metric_name,
-            metric_score=f.score,
-            fatality_score=1.0,
-            reasoning=f.reasoning,
-            explanation="Empty LLM response; defaulting to fatal.",
-            span_index=f.span_index,
-            span_id=f.span_id or "",
-            span_type=f.span_type,
-            entity_name=f.entity_name or "",
-            observed_impact="none",
-            confidence=0.5,
-        )
-        for f in failures
-    ]
-    return {
-        "fatal_failures": fatal,
-        "minor_failures": [],
-        "trajectory_patterns": [],
-        "overall_assessment": "Review failed.",
-        "usage": usage,
-    }
-
-
-def _fallback_heuristic(
-    failures: List[MetricFailure], usage: Dict[str, int]
-) -> Dict[str, Any]:
-    """Conservative classification when LLM review fails.
-
-    When the review LLM returns non-JSON or errors out we lack reliable
-    signal to distinguish fatal from minor.  Default everything to minor
-    so that a review infrastructure hiccup does not force trajectory_score
-    to 0.  Genuine fatal failures will still surface through unsatisfied
-    intent tracking.
-    """
-    minor: List[FailureDetail] = []
-
-    for f in failures:
-        minor.append(
-            FailureDetail(
-                metric=f.metric_name,
-                metric_score=f.score,
-                fatality_score=0.3,
-                reasoning=f.reasoning,
-                explanation="LLM review failed; defaulting to minor (low confidence).",
-                span_index=f.span_index,
-                span_id=f.span_id or "",
-                span_type=f.span_type,
-                entity_name=f.entity_name or "",
-                observed_impact="none",
-                confidence=0.3,
-            )
-        )
-
-    return {
-        "fatal_failures": [],
-        "minor_failures": minor,
-        "trajectory_patterns": [],
-        "overall_assessment": "Heuristic fallback (all minor).",
+        "trajectory_patterns": patterns,
+        "overall_assessment": str(parsed.get("overall_assessment", "")),
         "usage": usage,
     }

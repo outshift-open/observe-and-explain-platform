@@ -8,9 +8,11 @@ Tracks four categories of information as spans are processed sequentially:
    Tool outputs are authoritative — they are ground truth.  Agent outputs are
    deliberately excluded as evidence (they are what we evaluate).
 
-2. **Intents** (for Intent Recognition): user requests, planned actions,
-   fulfilled/pending/dropped status.  Built incrementally from user messages
-   and tool actions.
+2. **Intents** (for Intent Recognition): user requests and delegated work
+   items, linked to spans by exact structural scope (ids, call chains,
+   explicit references).  Status is structural bookkeeping, not a completion
+   verdict: user/policy intents stay "unassessed" and completion is left to
+   the judges.
 
 3. **Claims** (for Relevancy): agent assertions, decisions, state
    transitions.  Provides the "reasoning history" that relevancy is checked
@@ -34,75 +36,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from stateful_evals_be.evaluation.coordination import CoordinationContext
+from stateful_evals_be.evaluation.coordination import CoordinationContext, RootTurn
 
 logger = logging.getLogger("stateful_evals_be.trajectory_context")
 
-_SEMANTIC_STOP_WORDS = {
-    "about",
-    "after",
-    "also",
-    "and",
-    "are",
-    "because",
-    "been",
-    "before",
-    "being",
-    "both",
-    "but",
-    "care",
-    "content",
-    "could",
-    "does",
-    "each",
-    "from",
-    "have",
-    "include",
-    "into",
-    "keep",
-    "least",
-    "message",
-    "next",
-    "only",
-    "please",
-    "prompt",
-    "provide",
-    "request",
-    "role",
-    "should",
-    "that",
-    "the",
-    "their",
-    "them",
-    "then",
-    "this",
-    "under",
-    "user",
-    "want",
-    "with",
-    "would",
-}
-
-_TYPE_AFFINITY = {
-    "accessibility": {"accessibility", "accessible", "wheelchair", "ramp", "step-free"},
-    "budget": {"affordable", "budget", "cost", "fare", "price", "pricing"},
-    "indoor_attraction": {"attraction", "indoor", "museum"},
-    "itinerary": {
-        "airplane",
-        "destination",
-        "flight",
-        "itinerary",
-        "route",
-        "schedule",
-        "train",
-        "transport",
-        "travel",
-        "trip",
-    },
-    "outdoor_attraction": {"attraction", "outdoor", "park"},
-    "preference": {"avoid", "dining", "exclude", "optional", "preference"},
-    "request": set(),
-}
+_INTENT_STATUS_LEGEND = (
+    "  (Status is structural bookkeeping, not a completion verdict; judge "
+    "completion from the final answer and evidence.)"
+)
+_ROOT_INTENT_SOURCES = frozenset({"user", "policy", "root", "root_user"})
 
 
 @dataclass
@@ -130,6 +72,8 @@ class EvidenceFact:
     # Tool facts only: the span's start (epoch ns) and OTel ``Duration`` (ns).
     started_at_ns: Optional[int] = None
     duration_ns: Optional[int] = None
+    # Exact identity of a recorded tool invocation, when the trace provides it.
+    tool_call_id: str = ""
 
 
 @dataclass
@@ -140,8 +84,12 @@ class IntentEntry:
     source: str  # "user" | "policy" | "agent_plan"
     first_seen: int  # span index
     last_seen: int
-    status: str  # "pending" | "in_progress" | "fulfilled" | "dropped"
+    # Structural bookkeeping, not a completion verdict: "unassessed" for
+    # user/policy intents, "in_progress" for assigned agent_plan work items.
+    # "fulfilled" | "dropped" only arrive from persisted artifacts.
+    status: str
     description: str = ""
+    # "request" for a user turn (its full message), "subtask" for a work item.
     requirement_type: str = "request"
     events: List[Dict[str, Any]] = field(default_factory=list)
     owner_agent_ids: List[str] = field(default_factory=list)
@@ -322,7 +270,6 @@ class TrajectoryContext:
         ctx = TrajectoryContext(policy_text, tool_definitions)
 
         for n, span_dict in enumerate(evaluable_spans):
-            evidence_ctx = ctx.retrieve_for_groundedness(span_dict)
             intent_ctx = ctx.retrieve_for_intent_recognition(span_dict)
             relevancy_ctx = ctx.retrieve_for_relevancy(span_dict)
 
@@ -390,6 +337,20 @@ class TrajectoryContext:
         self._span_agent_ids: Dict[str, str] = {}
         self._span_coordination_event_types: Dict[str, set[str]] = {}
         self._latest_claim_by_agent: Dict[str, str] = {}
+        self._tool_fact_by_call_id: Dict[str, List[str]] = {}
+        self._processed_spans: Dict[str, Dict[str, Any]] = {}
+        # Spans that ran inside a delegation, so their OTel descendants resolve
+        # to the same work item through the parent span chain. Delegations
+        # themselves are the work units; this only extends them to descendants.
+        self._work_item_by_inner_span_id: Dict[str, str] = {}
+        # Adapter root turns after the first, keyed by their execution id; each
+        # is recorded when the first span of that turn is ingested. Adapter
+        # work items map to the root turn whose events contain them.
+        self._pending_root_turns: Dict[str, RootTurn] = {}
+        self._work_item_root_turn: Dict[str, str] = {}
+        # Adapter work items carry an events.jsonl index as first_seen. They
+        # take the evaluation span index when their delegate span is ingested.
+        self._unobserved_work_items: set[str] = set()
 
         self.policy_text = policy_text.strip() if policy_text else ""
         self.tool_definitions = tool_definitions
@@ -399,7 +360,13 @@ class TrajectoryContext:
         if self.policy_text:
             self.add_policy_rule(self.policy_text, source_name="policy")
 
+        self._ingest_adapter_root_turns()
         self._ingest_adapter_coordination_context()
+        self._unobserved_work_items = {
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source == "agent_plan"
+        }
 
     def add_policy_rule(
         self,
@@ -432,6 +399,87 @@ class TrajectoryContext:
         )
         artifact_id = self._append_evidence(fact)
         self._register_contract(fact, artifact_id)
+
+    def _ingest_adapter_root_turns(self) -> None:
+        """Record the first adapter-declared external user turn before any span.
+
+        The first request precedes every span, so it is recorded at span index
+        -1 like other initial facts. This gives the root user request to traces
+        whose root agent makes no LLM call; a later root LLM span in the same
+        turn joins the same intent by its execution id. Later turns are not yet
+        known to earlier spans: each is recorded when the first span running in
+        it is ingested.
+        """
+        turns = self.coordination_context.root_turns
+        self.root_agent_id = self.root_agent_id or next(
+            (turn.agent_id for turn in turns if turn.agent_id), ""
+        )
+        if turns:
+            self._ingest_root_turn(turns[0], -1)
+        self._pending_root_turns = {
+            turn.call_id: turn for turn in turns[1:] if turn.call_id
+        }
+
+    def _ingest_root_turn(self, turn: RootTurn, span_index: int) -> None:
+        """Record one adapter root turn as a user request and a user statement."""
+        text = turn.input.strip()
+        if not text:
+            return
+        intent_ids = self._observe_user_turn(
+            text,
+            span_index,
+            turn_key=f"mas:{turn.call_id}" if turn.call_id else "",
+        )
+        span_dict = {"agent_id": turn.agent_id}
+        self._observe_intent_ownership(
+            intent_ids,
+            turn.agent_id,
+            "root",
+            span_dict,
+            span_index,
+            basis="received_request",
+        )
+        if any(
+            fact.fact_type == "user_statement" and fact.content == text
+            for fact in self.evidence
+        ):
+            return
+        fact_id = self._append_evidence(
+            EvidenceFact(
+                span_index=span_index,
+                fact_type="user_statement",
+                content=text,
+                source_name="user",
+                agent_id=turn.agent_id,
+                actor_scope="root",
+                related_intent_ids=list(intent_ids),
+            )
+        )
+        self._link_artifacts_to_intents(
+            [fact_id], intent_ids, span_dict=span_dict, span_index=span_index
+        )
+
+    def _edge_root_turn_call_id(self, start_event_index: int) -> Optional[str]:
+        """The adapter root turn whose events contain an edge (by event order)."""
+        if start_event_index < 0:
+            return None
+        call_id = None
+        for turn in self.coordination_context.root_turns:
+            if turn.event_index <= start_event_index:
+                call_id = turn.call_id
+        return call_id
+
+    def _turn_root_intent_ids(self, turn_call_id: Optional[str]) -> List[str]:
+        """Root intents a work item decomposes: its own turn's request if known."""
+        if turn_call_id is None:
+            return self._root_intent_ids()
+        return [
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source == "user"
+            and intent.events
+            and intent.events[0].get("turn_key") == f"mas:{turn_call_id}"
+        ]
 
     def _split_contract_prefix(self, text: str) -> tuple[str, str]:
         """Split a known contract off the start of a prompt message.
@@ -534,13 +582,17 @@ class TrajectoryContext:
         }
         assignment_intent_ids: List[str] = []
         if any(event_type in {"assignment", "handoff"} for event_type in event_types):
+            turn_call_id = self._edge_root_turn_call_id(edge.start_event_index)
             assignment_intent_ids = self._ensure_assignment_intent(
                 span_dict,
                 span_index,
                 event_type=event_types[0],
-                parent_intent_ids=self._matching_intent_ids(edge.request),
                 recipient_agent_ids=recipient_agent_ids,
+                root_turn_call_id=turn_call_id,
             )
+            if turn_call_id is not None:
+                for intent_id in assignment_intent_ids:
+                    self._work_item_root_turn.setdefault(intent_id, turn_call_id)
         unit = self._open_work_unit(
             allocator_agent_id=actor_agent_id,
             recipient_agent_ids=recipient_agent_ids,
@@ -717,7 +769,6 @@ class TrajectoryContext:
         self.latest_root_answer_span_index = span_index
         if record_synthesis:
             self._record_final_synthesis(normalized, span_index)
-        self._resolve_intents_from_final_answer(normalized, span_index)
 
     # ------------------------------------------------------------------
     # Agents, work units and flags
@@ -975,8 +1026,13 @@ class TrajectoryContext:
         source_event_index: Optional[int] = None,
         source_span_ids: Optional[List[str]] = None,
         intent_ids: Optional[List[str]] = None,
+        join_existing: bool = True,
     ) -> Optional[WorkUnit]:
-        """Open (or join) the unit for one allocation decision."""
+        """Open (or join) the unit for one allocation decision.
+
+        With ``join_existing`` false the allocation always gets its own unit,
+        even when a unit with the same call id or source span already exists.
+        """
         recipients = [str(agent) for agent in recipient_agent_ids if agent]
         allocator = str(allocator_agent_id or "")
         if not recipients:
@@ -1000,28 +1056,29 @@ class TrajectoryContext:
                 unit.source_event_index = source_event_index
             return unit
 
-        if call_id:
-            for unit in self.work_units:
-                if unit.call_id == call_id:
+        if join_existing:
+            if call_id:
+                for unit in self.work_units:
+                    if unit.call_id == call_id:
+                        return join(unit)
+            carried = set(source_span_ids or [])
+            if carried:
+                for unit in self.work_units:
+                    if carried & set(unit.source_span_ids) and set(
+                        unit.recipient_agent_ids
+                    ) == set(recipients):
+                        # The same delegation seen from its edge and its span.
+                        return join(unit)
+            for unit in reversed(self.work_units):
+                if (
+                    unit.outcome == "pending"
+                    and not unit.receipt_span_indices
+                    and unit.allocator_agent_id == allocator
+                    and set(unit.recipient_agent_ids) == set(recipients)
+                    and (not call_id or not unit.call_id)
+                ):
+                    # The same allocation decision recorded by another span.
                     return join(unit)
-        carried = set(source_span_ids or [])
-        if carried:
-            for unit in self.work_units:
-                if carried & set(unit.source_span_ids) and set(
-                    unit.recipient_agent_ids
-                ) == set(recipients):
-                    # The same delegation seen from its edge and its span.
-                    return join(unit)
-        for unit in reversed(self.work_units):
-            if (
-                unit.outcome == "pending"
-                and not unit.receipt_span_indices
-                and unit.allocator_agent_id == allocator
-                and set(unit.recipient_agent_ids) == set(recipients)
-                and (not call_id or not unit.call_id)
-            ):
-                # The same allocation decision recorded by another span.
-                return join(unit)
 
         unit = WorkUnit(
             work_id=f"work:{len(self.work_units)}",
@@ -1129,19 +1186,29 @@ class TrajectoryContext:
             unit = self._open_state_route(agent_id)
             if unit is not None:
                 return unit
+        return self._unit_for_span_refs(span_dict, span_index, agent_id)
+
+    def _unit_for_span_refs(
+        self,
+        span_dict: Dict[str, Any],
+        span_index: int,
+        agent_id: str,
+    ) -> Optional[WorkUnit]:
+        """Find the unit a recipient span runs under, without changing state.
+
+        A unit whose call id is a whole id in the span's parent linkage wins;
+        otherwise the latest pending unit addressed to the agent applies.
+        """
         attrs = _span_attributes(span_dict)
-        parent_refs = " ".join(
-            str(value or "")
-            for value in (
-                attrs.get("mas.parent.call.id"),
-                span_dict.get("parent_span_id"),
-            )
-        )
+        parent_refs = [
+            str(attrs.get("mas.parent.call.id") or ""),
+            str(span_dict.get("parent_span_id") or ""),
+        ]
         for unit in reversed(self.work_units):
             if (
                 unit.call_id
                 and agent_id in unit.recipient_agent_ids
-                and re.search(rf"(?<!\w){re.escape(unit.call_id)}(?!\w)", parent_refs)
+                and any(_contains_id(ref, unit.call_id) for ref in parent_refs)
             ):
                 return unit
         for unit in reversed(self.work_units):
@@ -1514,11 +1581,31 @@ class TrajectoryContext:
 
     def ingest_span(self, span_dict: Dict[str, Any], span_index: int) -> None:
         """Extract and store information from a processed span."""
+        attrs = _span_attributes(span_dict)
+        for turn_call_id in (
+            attrs.get("mas.parent.call.id"),
+            attrs.get("mas.call.id"),
+        ):
+            turn = self._pending_root_turns.pop(str(turn_call_id or ""), None)
+            if turn is not None:
+                self._ingest_root_turn(turn, span_index)
         entity_type = span_dict.get("entity_type", "")
         entity_name = span_dict.get("entity_name", "unknown")
         span_id = str(span_dict.get("span_id") or "")
+        work_item_id = self._span_work_item_id(span_dict, span_index=span_index)
+        if work_item_id and span_id:
+            self._work_item_by_inner_span_id[span_id] = work_item_id
         if span_id:
             self._span_index_by_id.setdefault(span_id, span_index)
+            is_tool = entity_type == "tool"
+            self._processed_spans[span_id] = {
+                "span_index": span_index,
+                "timestamp": span_dict.get("timestamp"),
+                "duration_ns": _span_duration_ns(span_dict),
+                "contains_error": bool(span_dict.get("contains_error")),
+                "tool_input": span_dict.get("input_payload") if is_tool else None,
+                "tool_output": span_dict.get("output_payload") if is_tool else None,
+            }
         self._span_timestamps.append(
             (span_index, _timestamp_ns(span_dict.get("timestamp")))
         )
@@ -1630,7 +1717,7 @@ class TrajectoryContext:
     def _ingest_tool_span(
         self, span_dict: Dict[str, Any], span_index: int, tool_name: str
     ) -> None:
-        """Index tool input+output as authoritative evidence and track as intent progress."""
+        """Index tool input+output as authoritative evidence for its scoped intents."""
         input_payload = span_dict.get("input_payload")
         output_payload = span_dict.get("output_payload")
         explicit_agent = self._explicit_agent_id(span_dict)
@@ -1651,7 +1738,13 @@ class TrajectoryContext:
             self._record_receipt(work_unit, span_index)
         tool_outcome = _tool_outcome(span_dict, output_payload)
         provenance = self._operation_provenance(span_dict)
-        related_intent_ids = self._update_intent_from_tool(
+        related_intent_ids = self._scope_intent_ids(
+            span_dict,
+            actor_scope=provenance["actor_scope"],
+            span_index=span_index,
+        )
+        self._record_tool_attempt_on_intents(
+            related_intent_ids,
             tool_name,
             span_index,
             input_payload,
@@ -1676,12 +1769,16 @@ class TrajectoryContext:
                     source_name=tool_name,
                     related_intent_ids=related_intent_ids,
                     work_id=work_id,
+                    tool_call_id=_span_call_id(span_dict),
                     outcome=tool_outcome,
                     started_at_ns=_timestamp_ns(span_dict.get("timestamp")),
                     duration_ns=_span_duration_ns(span_dict),
                     **provenance,
                 )
             )
+            call_id = _span_call_id(span_dict)
+            if call_id:
+                self._tool_fact_by_call_id.setdefault(call_id, []).append(evidence_id)
         else:
             evidence_id = ""
 
@@ -1784,16 +1881,26 @@ class TrajectoryContext:
             if str(message.get("role") or "").lower() != "tool":
                 continue
             result = _message_content(message.get("content"))
-            name, arguments = calls.get(
-                str(message.get("tool_call_id") or ""), ("tool", None)
+            call_id = str(message.get("tool_call_id") or "")
+            name, arguments = calls.get(call_id, ("tool", None))
+            recorded = self._tool_exchange_recorded(
+                call_id, result, span_dict, explicit_call=call_id in calls
             )
-            if not result or self._tool_result_recorded(name, result):
+            if not recorded:
+                recorded = self._tool_result_recorded(
+                    name if call_id in calls else None, result, call_id=call_id
+                )
+            if not result or recorded:
                 continue
             self._ingest_tool_span(
                 {
                     **span_dict,
                     "entity_type": "tool",
                     "entity_name": name,
+                    "attributes": {
+                        **_span_attributes(span_dict),
+                        "mas.call.id": call_id,
+                    },
                     "input_payload": arguments if isinstance(arguments, dict) else {},
                     "output_payload": {"output": _json_value(result)},
                 },
@@ -1801,13 +1908,94 @@ class TrajectoryContext:
                 name,
             )
 
-    def _tool_result_recorded(self, tool_name: str, result: str) -> bool:
-        return any(
-            fact.fact_type == "tool_output"
-            and fact.source_name == tool_name
-            and (result in fact.content or _content_matches(result, fact.content))
-            for fact in self.evidence
-        )
+    def _tool_exchange_recorded(
+        self,
+        call_id: str,
+        result: str,
+        span_dict: Dict[str, Any],
+        *,
+        explicit_call: bool = False,
+    ) -> bool:
+        if not call_id:
+            return False
+        agent_id = self._explicit_agent_id(span_dict)
+        trace_id = str(span_dict.get("trace_id") or "")
+        for fact in self.evidence:
+            if fact.fact_type != "tool_output" or fact.tool_call_id != call_id:
+                continue
+            different_scope = bool(
+                (agent_id and fact.agent_id and agent_id != fact.agent_id)
+                or (trace_id and fact.trace_id and trace_id != fact.trace_id)
+            )
+            if different_scope and explicit_call:
+                # A paired request in another conversation is a distinct call,
+                # even when both invocations returned identical text.
+                continue
+            # Replays in one agent's conversation may elide the recorded output.
+            # Another conversation can reuse the id for a distinct invocation;
+            # retain its differing result instead of silently dropping it.
+            if not different_scope or (
+                result and _exact_text_key(result) in self._tool_result_keys(fact)
+            ):
+                return True
+        return False
+
+    def _tool_result_recorded(
+        self, tool_name: Optional[str], result: str, *, call_id: str = ""
+    ) -> bool:
+        matches = []
+        for index, fact in enumerate(self.evidence):
+            if fact.fact_type != "tool_output" or (
+                tool_name is not None and fact.source_name != tool_name
+            ):
+                continue
+            # An unknown explicit id can identify legacy evidence lacking an id,
+            # but must never alias a different recorded invocation.
+            if call_id and fact.tool_call_id:
+                continue
+            if not result or _exact_text_key(result) not in self._tool_result_keys(fact):
+                continue
+            matches.append((index, fact))
+        if call_id and len(matches) == 1:
+            index, fact = matches[0]
+            fact.tool_call_id = call_id
+            self._tool_fact_by_call_id.setdefault(call_id, []).append(
+                self._evidence_artifact_id(index, fact)
+            )
+            return True
+        return bool(matches) if not call_id else False
+
+    @staticmethod
+    def _tool_result_keys(fact: EvidenceFact) -> set[str]:
+        returned = fact.content.partition("\n  Returned: ")[2]
+        keys = {_exact_text_key(returned)}
+        payload = _json_value(returned)
+        # Chat-only exchanges are stored in this one-field transport wrapper.
+        # Do not extract a result field from a larger observation and lose its
+        # status, conditions, or other accompanying evidence.
+        if isinstance(payload, dict) and set(payload) == {"output"}:
+            keys.add(_exact_text_key(payload["output"]))
+        return keys
+
+    def _tool_input_artifact_ids(self, call_id: str, content: str) -> List[str]:
+        recorded = self._tool_fact_by_call_id.get(call_id, []) if call_id else []
+        if len(recorded) == 1:
+            return list(recorded)
+        matches = [
+            self._evidence_artifact_id(index, fact)
+            for index, fact in enumerate(self.evidence)
+            if fact.fact_type == "tool_output"
+            and (
+                self._evidence_artifact_id(index, fact) in recorded
+                if recorded
+                else not call_id or not fact.tool_call_id
+            )
+            and content
+            and _exact_text_key(content) in self._tool_result_keys(fact)
+        ]
+        # Reused call ids can occur in independent agent conversations. A reply
+        # disambiguates them only if its content matches exactly one result.
+        return matches if not call_id or len(matches) == 1 else []
 
     def _ingest_llm_span(
         self, span_dict: Dict[str, Any], span_index: int, entity_name: str
@@ -1911,7 +2099,11 @@ class TrajectoryContext:
                         span_dict=span_dict,
                     )
                 else:
-                    message_intent_ids = self._matching_intent_ids(text)
+                    message_intent_ids = self._scope_intent_ids(
+                        span_dict,
+                        actor_scope=provenance["actor_scope"],
+                        span_index=span_index,
+                    )
                 if fact_type == "user_statement":
                     self._observe_intent_ownership(
                         message_intent_ids,
@@ -1975,9 +2167,11 @@ class TrajectoryContext:
             ):
                 self.latest_root_answer = agent_text
                 self.latest_root_answer_span_index = span_index
-                if _looks_like_final_answer(agent_text):
-                    self._resolve_intents_from_final_answer(agent_text, span_index)
-            claim_intent_ids = self._matching_intent_ids(agent_text)
+            claim_intent_ids = self._scope_intent_ids(
+                span_dict,
+                actor_scope=provenance["actor_scope"],
+                span_index=span_index,
+            )
             related_intent_ids = _ordered_union(
                 related_intent_ids,
                 claim_intent_ids,
@@ -2142,18 +2336,156 @@ class TrajectoryContext:
         self.claims.append(claim)
         return artifact_id
 
-    def _intent_artifact_id(self, intent: IntentEntry) -> str:
-        return f"intent:{self.intents.index(intent)}"
+    def _scope_intent_ids(
+        self,
+        span_dict: Dict[str, Any],
+        *,
+        actor_scope: Optional[str] = None,
+        span_index: Optional[int] = None,
+    ) -> List[str]:
+        """Return the intents a span works on, by exact structural rules only.
 
-    def _matching_intent_ids(self, text: str, *, max_matches: int = 4) -> List[str]:
+        Explicit references come first. A delegate span, or a span running
+        inside a known delegation (execution id, parent span chain, or the
+        unit addressed to its agent), maps to that delegation's work item. A
+        root-scope span maps to the root user/policy intents. Anything else
+        is left unlinked rather than guessed. The lookup never changes state.
+        """
+        intent_ids = self._resolve_intent_references(
+            _span_intent_references(span_dict, dependency=False)
+        )
+        work_item_id = self._span_work_item_id(span_dict, span_index=span_index)
+        if work_item_id:
+            return _ordered_union(intent_ids, [work_item_id])
+        if intent_ids:
+            return intent_ids
+        if actor_scope is None:
+            actor_scope = self._operation_provenance(span_dict)["actor_scope"]
+        if actor_scope != "root":
+            return []
+        return self._root_intent_ids()
+
+    def _span_work_item_id(
+        self,
+        span_dict: Dict[str, Any],
+        *,
+        span_index: Optional[int] = None,
+    ) -> str:
+        """Return the intent of the delegation a span belongs to, or ``""``.
+
+        The delegations are the work units. A span belongs to one when it
+        carries the unit's call id or is one of its delegate spans, runs under
+        the receiver's execution id (``<recipient>-<call id>-exec``), is a
+        child of a delegate span or of a span already resolved to the unit, or
+        is the work of an agent the unit was addressed to.
+        """
+        attrs = _span_attributes(span_dict)
+        call_id = str(attrs.get("mas.call.id") or "")
+        parent_call_id = str(attrs.get("mas.parent.call.id") or "")
+        span_id = str(span_dict.get("span_id") or "")
+        parent_span_id = str(span_dict.get("parent_span_id") or "")
+        units = [unit for unit in reversed(self.work_units) if unit.intent_id]
+
+        if call_id:
+            for unit in units:
+                if unit.call_id == call_id:
+                    return unit.intent_id
+        if span_id:
+            for unit in units:
+                if span_id in unit.source_span_ids:
+                    return unit.intent_id
+        if parent_call_id:
+            for unit in units:
+                if unit.call_id and parent_call_id in {
+                    f"{recipient}-{unit.call_id}-exec"
+                    for recipient in unit.recipient_agent_ids
+                }:
+                    return unit.intent_id
+        if parent_span_id:
+            for unit in units:
+                if parent_span_id in unit.source_span_ids:
+                    return unit.intent_id
+            inner = self._work_item_by_inner_span_id.get(parent_span_id)
+            if inner:
+                return inner
+
+        agent_id = self._explicit_agent_id(span_dict)
+        if not agent_id:
+            return ""
+        linked = {link["span_id"] for link in _span_links(span_dict)} - {""}
+        for unit in units:
+            if agent_id in unit.recipient_agent_ids and linked & set(
+                unit.source_span_ids
+            ):
+                return unit.intent_id
+        addressed = self._unit_for_span_refs(
+            span_dict,
+            self._last_span_index() + 1 if span_index is None else span_index,
+            agent_id,
+        )
+        return addressed.intent_id if addressed is not None else ""
+
+    def _root_intent_ids(self) -> List[str]:
         return [
-            self._intent_artifact_id(intent)
-            for intent, _ in _matching_intents(
-                self.intents,
-                text,
-                max_matches=max_matches,
-            )
+            f"intent:{index}"
+            for index, intent in enumerate(self.intents)
+            if intent.source in _ROOT_INTENT_SOURCES
         ]
+
+    def _register_work_item(
+        self,
+        intent_id: str,
+        span_dict: Dict[str, Any],
+        recipient_agent_ids: List[str],
+    ) -> None:
+        """Bind an intent to the delegation a span identifies.
+
+        The delegation is a work unit. One that carries the span's call id or
+        span id and has no intent yet takes this intent; when there is no such
+        unit, or it already carries another intent, a unit of its own is opened
+        for the recipients.
+        """
+        recipients = [str(agent) for agent in recipient_agent_ids if agent]
+        span_id = str(span_dict.get("span_id") or "")
+        call_id = str(_span_attributes(span_dict).get("mas.call.id") or "")
+        known = next(
+            (unit for unit in self.work_units if unit.intent_id == intent_id), None
+        )
+        if known is None:
+            known = next(
+                (
+                    unit
+                    for unit in reversed(self.work_units)
+                    if not unit.intent_id
+                    and (
+                        (call_id and unit.call_id == call_id)
+                        or (span_id and span_id in unit.source_span_ids)
+                    )
+                ),
+                None,
+            )
+        if known is not None:
+            known.intent_id = intent_id
+            known.call_id = known.call_id or call_id
+            known.source_span_ids = _ordered_union(
+                known.source_span_ids, [span_id] if span_id else []
+            )
+            known.recipient_agent_ids = _ordered_union(
+                known.recipient_agent_ids, recipients
+            )
+            return
+        intent = self._intent_by_artifact_id(intent_id)
+        self._open_work_unit(
+            allocator_agent_id=_span_agent_id(span_dict),
+            recipient_agent_ids=recipients,
+            request=intent.description if intent is not None else "",
+            span_index=intent.first_seen if intent is not None else -1,
+            source="span",
+            call_id=call_id,
+            source_span_ids=[span_id] if span_id else [],
+            intent_ids=[intent_id],
+            join_existing=False,
+        )
 
     def _remember_span(self, span_dict: Dict[str, Any], *artifact_ids: str) -> None:
         span_id = str(span_dict.get("span_id") or "")
@@ -2177,10 +2509,14 @@ class TrajectoryContext:
         return artifact_ids
 
     def _input_artifact_ids(self, input_payload: Dict[str, Any]) -> List[str]:
-        """Resolve recorded prompt messages to artifacts already in context."""
+        """Resolve recorded prompt messages to artifacts already in context.
+
+        A tool call id identifies its recorded result even when the prompt has
+        elided its text. Without an id, the whole normalized text must match.
+        """
         artifact_ids: List[str] = []
         for message in _extract_prompt_messages(input_payload):
-            content = message["content"]
+            content = _exact_text_key(message["content"])
             role = message["role"]
             if role == "system":
                 candidates = [
@@ -2190,15 +2526,14 @@ class TrajectoryContext:
                 ]
             elif role in {"assistant", "ai"}:
                 candidates = [
-                    (f"claim:{index}", claim.content)
+                    (f"claim:{index}", _reply_without_tool_calls(claim.content))
                     for index, claim in enumerate(self.claims)
                 ]
             elif role in {"tool", "function"}:
-                candidates = [
-                    (self._evidence_artifact_id(index, fact), fact.content)
-                    for index, fact in enumerate(self.evidence)
-                    if fact.fact_type == "tool_output"
-                ]
+                artifact_ids.extend(self._tool_input_artifact_ids(
+                    message.get("tool_call_id", ""), message["content"]
+                ))
+                continue
             else:
                 candidates = [
                     (self._evidence_artifact_id(index, fact), fact.content)
@@ -2212,7 +2547,7 @@ class TrajectoryContext:
                     }
                 ]
             for artifact_id, candidate_content in candidates:
-                if _content_matches(content, candidate_content):
+                if content and content == _exact_text_key(candidate_content):
                     artifact_ids.append(artifact_id)
         return _ordered_union([], artifact_ids)
 
@@ -2300,7 +2635,7 @@ class TrajectoryContext:
             ):
                 continue
             if (
-                intent.source in {"user", "policy", "root", "root_user"}
+                intent.source in _ROOT_INTENT_SOURCES
                 and actor_scope == "peer"
                 and any(
                     candidate.source == "agent_plan"
@@ -2499,9 +2834,7 @@ class TrajectoryContext:
         output_ids = list(output_artifact_ids or [])
         intent_ids = list(related_intent_ids or [])
         if not intent_ids:
-            intent_ids = self._matching_intent_ids(
-                _safe_json(span_dict.get("input_payload"), max_len=None)
-            )
+            intent_ids = self._scope_intent_ids(span_dict, span_index=span_index)
 
         duplicate_types = [
             event_type for event_type in event_types if event_type in parent_types
@@ -2563,7 +2896,6 @@ class TrajectoryContext:
                     span_dict,
                     span_index,
                     event_type=event_type,
-                    parent_intent_ids=intent_ids,
                     recipient_agent_ids=type_recipient_ids,
                     description_override=request_text if actor_override else "",
                     actor_override=actor_override,
@@ -2840,12 +3172,18 @@ class TrajectoryContext:
         span_index: int,
         *,
         event_type: str,
-        parent_intent_ids: List[str],
         recipient_agent_ids: List[str],
         description_override: str = "",
         actor_override: str = "",
+        root_turn_call_id: Optional[str] = None,
     ) -> List[str]:
-        """Create one child work item for an explicit assignment or handoff."""
+        """Create one child work item for an explicit assignment or handoff.
+
+        Parents are the explicit references in the payload, else the root
+        user/policy intents known at that point (only the request of its own
+        adapter root turn, when the adapter places it in one); a work item is
+        never its own parent.
+        """
         description = description_override or _span_work_description(span_dict)
         if not description and event_type == "handoff":
             return []
@@ -2855,6 +3193,9 @@ class TrajectoryContext:
             return []
 
         span_id = str(span_dict.get("span_id") or "")
+        explicit_parent_ids = self._resolve_intent_references(
+            _span_intent_references(span_dict, dependency=False)
+        )
         for index, intent in enumerate(self.intents):
             if intent.source != "agent_plan":
                 continue
@@ -2867,9 +3208,20 @@ class TrajectoryContext:
                 _normalise_semantic_text(description)
             ) and bool(set(intent.owner_agent_ids) & set(recipient_agent_ids))
             if same_span or same_work:
-                intent.parent_intent_ids = _ordered_union(
-                    intent.parent_intent_ids,
-                    parent_intent_ids,
+                intent_id = f"intent:{index}"
+                if intent_id in self._unobserved_work_items:
+                    self._unobserved_work_items.discard(intent_id)
+                    intent.first_seen = span_index
+                    intent.last_seen = span_index
+                intent.parent_intent_ids = [
+                    parent_id
+                    for parent_id in _ordered_union(
+                        intent.parent_intent_ids,
+                        explicit_parent_ids,
+                    )
+                    if parent_id != intent_id
+                ] or self._turn_root_intent_ids(
+                    self._work_item_root_turn.get(intent_id)
                 )
                 intent.dependency_intent_ids = _ordered_union(
                     intent.dependency_intent_ids,
@@ -2877,29 +3229,16 @@ class TrajectoryContext:
                         _span_intent_references(span_dict, dependency=True)
                     ),
                 )
-                return [f"intent:{index}"]
+                return [intent_id]
 
         actor_agent_id = actor_override or _span_agent_id(span_dict)
         expected_output = _span_expected_output_from_payload(span_dict)
         dependency_intent_ids = self._resolve_intent_references(
             _span_intent_references(span_dict, dependency=True)
         )
-        explicit_parent_ids = self._resolve_intent_references(
-            _span_intent_references(span_dict, dependency=False)
+        resolved_parent_ids = explicit_parent_ids or self._turn_root_intent_ids(
+            root_turn_call_id
         )
-        inferred_root_ids = [
-            intent_id
-            for intent_id in parent_intent_ids
-            if (intent := self._intent_by_artifact_id(intent_id)) is not None
-            and intent.source != "agent_plan"
-        ]
-        if not inferred_root_ids:
-            inferred_root_ids = [
-                f"intent:{index}"
-                for index, intent in enumerate(self.intents)
-                if intent.source in {"user", "policy", "root", "root_user"}
-            ][:4]
-        resolved_parent_ids = _ordered_union(explicit_parent_ids, inferred_root_ids)
         recipient_name = "_and_".join(
             _normalise_actor_id(agent_id) for agent_id in recipient_agent_ids
         ).strip("_")
@@ -2976,8 +3315,6 @@ class TrajectoryContext:
             )
             if exact:
                 resolved.append(exact)
-                continue
-            resolved.extend(self._matching_intent_ids(reference, max_matches=2))
         return _ordered_union([], resolved)
 
     def _merge_parent_coordination_event(
@@ -3287,12 +3624,43 @@ class TrajectoryContext:
 
     def rebuild_runtime_indexes(self) -> None:
         """Rebuild private lookup indexes after loading a persisted context."""
-        self.root_agent_id = ""
         self._span_artifact_ids = {}
         self._span_agent_ids = {}
         self._span_coordination_event_types = {}
         self._latest_claim_by_agent = {}
+        self._tool_fact_by_call_id = {}
+        self._work_item_by_inner_span_id = {}
+        # The adapter's root turn names the root agent; else the first root claim.
+        self.root_agent_id = next(
+            (
+                turn.agent_id
+                for turn in self.coordination_context.root_turns
+                if turn.agent_id
+            ),
+            "",
+        )
+        recorded_turn_keys = {
+            intent.events[0].get("turn_key")
+            for intent in self.intents
+            if intent.source == "user" and intent.events
+        }
+        self._pending_root_turns = {
+            call_id: turn
+            for call_id, turn in self._pending_root_turns.items()
+            if f"mas:{call_id}" not in recorded_turn_keys
+        }
+        recorded: List[tuple[str, str]] = [
+            (fact.work_id, fact.span_id) for fact in self.evidence
+        ] + [(claim.work_id, claim.span_id) for claim in self.claims]
+        for work_id, span_id in recorded:
+            unit = self._work_unit_by_id(work_id)
+            if unit is not None and unit.intent_id and span_id:
+                self._work_item_by_inner_span_id.setdefault(span_id, unit.intent_id)
         for index, fact in enumerate(self.evidence):
+            if fact.fact_type == "tool_output" and fact.tool_call_id:
+                self._tool_fact_by_call_id.setdefault(fact.tool_call_id, []).append(
+                    self._evidence_artifact_id(index, fact)
+                )
             if fact.span_id:
                 self._span_artifact_ids.setdefault(fact.span_id, []).append(
                     self._evidence_artifact_id(index, fact)
@@ -3333,28 +3701,21 @@ class TrajectoryContext:
         delegated_task: bool = False,
         span_dict: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
-        """Register semantic requirements or link a delegated task to them."""
-        if delegated_task and self.intents:
-            agent_id = _span_agent_id(span_dict or {})
-            assigned_matches = [
-                self._intent_artifact_id(intent)
-                for intent, _ in _matching_intents(
-                    [
-                        candidate
-                        for candidate in self.intents
-                        if candidate.source == "agent_plan"
-                        and agent_id in candidate.owner_agent_ids
-                    ],
-                    user_text,
-                    max_matches=4,
-                )
-            ]
-            intent_ids = assigned_matches or self._link_text_to_intents(
-                user_text,
-                span_index,
-                event_type="delegated_task",
+        """Record one external user turn, or link a delegated task to its scope.
+
+        A delegated task never creates user intents.
+        """
+        if delegated_task:
+            provenance = self._operation_provenance(
+                span_dict or {},
+                delegated_task=True,
             )
-            for intent_id in assigned_matches:
+            intent_ids = self._scope_intent_ids(
+                span_dict or {},
+                actor_scope=provenance["actor_scope"],
+                span_index=span_index,
+            )
+            for intent_id in intent_ids:
                 intent = self._intent_by_artifact_id(intent_id)
                 if intent is None:
                     continue
@@ -3367,92 +3728,129 @@ class TrajectoryContext:
                     }
                 )
             if span_dict is not None:
-                provenance = self._operation_provenance(
-                    span_dict,
-                    delegated_task=True,
-                )
                 self._observe_intent_ownership(
                     intent_ids,
                     provenance["agent_id"],
                     provenance["actor_scope"],
                     span_dict,
                     span_index,
-                    basis="delegated_execution",
+                    basis="received_request",
                 )
             return intent_ids
 
-        requirements = _extract_semantic_requirements(user_text)
-        intent_ids: List[str] = []
-        for requirement in requirements:
-            existing = _best_matching_intent(
-                self.intents,
-                requirement["description"],
-                requirement["requirement_type"],
-            )
-            if existing is not None:
-                existing.last_seen = span_index
-                existing.events.append(
-                    {
-                        "span_index": span_index,
-                        "type": "user_restatement",
-                        "content": user_text,
-                    }
-                )
-                intent_ids.append(self._intent_artifact_id(existing))
-                continue
+        return self._observe_user_turn(user_text, span_index, span_dict=span_dict)
 
-            self.intents.append(
-                IntentEntry(
-                    name=_unique_intent_name(
-                        requirement["name"],
-                        {intent.name for intent in self.intents},
-                    ),
-                    description=requirement["description"],
-                    requirement_type=requirement["requirement_type"],
-                    source="user",
-                    first_seen=span_index,
-                    last_seen=span_index,
-                    status="pending",
-                    events=[
-                        {
-                            "span_index": span_index,
-                            "type": "requirement_observed",
-                            "content": requirement["source_text"],
-                        }
-                    ],
-                )
-            )
-            intent_ids.append(f"intent:{len(self.intents) - 1}")
-        return _ordered_union([], intent_ids)
-
-    def _update_intent_from_tool(
+    def _observe_user_turn(
         self,
+        user_text: str,
+        span_index: int,
+        *,
+        span_dict: Optional[Dict[str, Any]] = None,
+        turn_key: str = "",
+    ) -> List[str]:
+        """One "User request" intent per external user turn, verbatim.
+
+        Identity is exact: the turn key (the MAS-Lab root execution id) when
+        known, else the whole message after normalization. Splitting the
+        request into constraints is left to the judges.
+        """
+        turn_key = turn_key or _external_turn_key(span_dict or {})
+        text_key = _exact_text_key(user_text)
+        for index, intent in enumerate(self.intents):
+            if intent.source != "user":
+                continue
+            intent_turn_key = (intent.events[0] if intent.events else {}).get(
+                "turn_key", ""
+            )
+            if turn_key and intent_turn_key:
+                same_turn = intent_turn_key == turn_key
+            else:
+                same_turn = bool(text_key) and (
+                    _exact_text_key(intent.description) == text_key
+                )
+            if not same_turn:
+                continue
+            intent.last_seen = max(intent.last_seen, span_index)
+            intent.events.append(
+                {
+                    "span_index": span_index,
+                    "type": "user_restatement",
+                    "content": user_text,
+                }
+            )
+            return [f"intent:{index}"]
+
+        event: Dict[str, Any] = {
+            "span_index": span_index,
+            "type": "requirement_observed",
+            "content": user_text,
+        }
+        if turn_key:
+            event["turn_key"] = turn_key
+        self.intents.append(
+            IntentEntry(
+                name=_unique_intent_name(
+                    "User request",
+                    {intent.name for intent in self.intents},
+                ),
+                description=user_text,
+                requirement_type="request",
+                source="user",
+                first_seen=span_index,
+                last_seen=span_index,
+                status="unassessed",
+                events=[event],
+            )
+        )
+        intent_ids = [f"intent:{len(self.intents) - 1}"]
+        # Adapter work items ingested before this turn get it as their parent;
+        # one placed in an adapter root turn gets only that turn's request.
+        root_ids = self._root_intent_ids()
+        for index, intent in enumerate(self.intents):
+            if intent.source != "agent_plan" or intent.parent_intent_ids:
+                continue
+            item_turn = self._work_item_root_turn.get(f"intent:{index}")
+            if item_turn is not None and f"mas:{item_turn}" != turn_key:
+                continue
+            intent.parent_intent_ids = list(
+                root_ids if item_turn is None else intent_ids
+            )
+            for parent_id in intent.parent_intent_ids:
+                self._add_provenance_link(
+                    parent_id,
+                    f"intent:{index}",
+                    "decomposes_to",
+                    span_dict=span_dict or {},
+                    span_index=span_index,
+                )
+        return intent_ids
+
+    def _record_tool_attempt_on_intents(
+        self,
+        intent_ids: List[str],
         tool_name: str,
         span_index: int,
         input_payload: Any,
         output_payload: Any,
         *,
-        contains_error: bool = False,
-    ) -> List[str]:
-        """Link a tool attempt to the semantic requirements it advances."""
-        if isinstance(output_payload, dict):
-            status = str(output_payload.get("status", "")).lower()
-            contains_error = contains_error or status in ("error", "failed")
+        contains_error: Optional[bool] = None,
+    ) -> None:
+        """Log a tool call on the intents in its structural scope.
 
-        activity = " ".join(
-            (
-                tool_name,
-                _safe_json(input_payload, max_len=1200),
-                _safe_json(output_payload, max_len=800),
-            )
-        )
-        matches = _matching_intents(self.intents, activity, max_matches=3)
-        intent_ids: List[str] = []
-        for intent, matched_terms in matches:
-            intent_ids.append(self._intent_artifact_id(intent))
-            intent.last_seen = span_index
-            if not contains_error and intent.status == "pending":
-                intent.status = "in_progress"
+        This is activity bookkeeping only; it never changes intent status.
+        ``contains_error`` is read from the output's ``status`` when not given.
+        """
+        if contains_error is None:
+            contains_error = False
+            if isinstance(output_payload, dict):
+                status = str(output_payload.get("status", "")).lower()
+                contains_error = status in ("error", "failed")
+
+        for intent_id in intent_ids:
+            intent = self._intent_by_artifact_id(intent_id)
+            if intent is None:
+                continue
+            intent.last_seen = max(intent.last_seen, span_index)
             intent.events.append(
                 {
                     "span_index": span_index,
@@ -3460,90 +3858,9 @@ class TrajectoryContext:
                     "tool": tool_name,
                     "input": _safe_json(input_payload, max_len=None),
                     "output": _safe_json(output_payload, max_len=None),
-                    "matched_terms": sorted(matched_terms)[:8],
                     "error": contains_error,
                 }
             )
-        return intent_ids
-
-    def _link_text_to_intents(
-        self,
-        text: str,
-        span_index: int,
-        *,
-        event_type: str,
-    ) -> List[str]:
-        """Attach a handoff or restatement to the requirements it references."""
-        intent_ids: List[str] = []
-        for intent, matched_terms in _matching_intents(
-            self.intents,
-            text,
-            max_matches=4,
-        ):
-            intent_ids.append(self._intent_artifact_id(intent))
-            intent.last_seen = span_index
-            intent.events.append(
-                {
-                    "span_index": span_index,
-                    "type": event_type,
-                    "content": text,
-                    "matched_terms": sorted(matched_terms)[:8],
-                }
-            )
-        return intent_ids
-
-    def _resolve_intents_from_final_answer(
-        self,
-        text: str,
-        span_index: int,
-    ) -> None:
-        """Mark semantic requirements addressed by the final root response."""
-        matched = _matching_intents(
-            self.intents,
-            text,
-            max_matches=len(self.intents),
-        )
-        matched_names = {intent.name for intent, _ in matched}
-        lower = text.lower()
-        for intent, matched_terms in matched:
-            intent.status = "fulfilled"
-            intent.last_seen = span_index
-            if not any(
-                event.get("type") == "final_answer_alignment"
-                and event.get("span_index") == span_index
-                and event.get("content") == text
-                for event in intent.events
-            ):
-                intent.events.append(
-                    {
-                        "span_index": span_index,
-                        "type": "final_answer_alignment",
-                        "content": text,
-                        "matched_terms": sorted(matched_terms)[:8],
-                    }
-                )
-
-        for intent in self.intents:
-            if intent.name in matched_names or intent.requirement_type != "preference":
-                continue
-            if "not required" in intent.description.lower() and "dining" not in lower:
-                intent.status = "fulfilled"
-                intent.last_seen = span_index
-                content = "Optional item correctly omitted from final answer."
-                if not any(
-                    event.get("type") == "final_answer_alignment"
-                    and event.get("span_index") == span_index
-                    and event.get("content") == content
-                    for event in intent.events
-                ):
-                    intent.events.append(
-                        {
-                            "span_index": span_index,
-                            "type": "final_answer_alignment",
-                            "content": content,
-                            "matched_terms": ["omitted"],
-                        }
-                    )
 
     # ------------------------------------------------------------------
     # Retrieval: tailored context for each metric
@@ -3563,7 +3880,8 @@ class TrajectoryContext:
         evidence, and reasoning history for Groundedness, Intent Recognition,
         and Relevancy.  This representation is deliberately policy-free (the
         caller sends policy once) and contains only the state needed to judge
-        the current transition.
+        the current transition.  ``current_span`` is kept for API
+        compatibility; selection is by recency, not by the span's text.
         """
         current_index = self._current_span_index()
         recent_evidence = self._get_recent_evidence(current_index)
@@ -3573,22 +3891,19 @@ class TrajectoryContext:
             for item in selected
         }
 
-        query_terms = _extract_query_terms(current_span)
-        ranked = _rank_by_keywords(
-            [
-                fact
-                for fact in self.evidence
-                if (
-                    fact.span_index,
-                    fact.fact_type,
-                    fact.source_name,
-                    fact.content,
-                )
-                not in selected_keys
-            ],
-            query_terms,
-        )
-        for fact, _ in ranked:
+        # Fill the remaining slots with the most recent other facts.
+        older = [
+            fact
+            for fact in self.evidence
+            if (
+                fact.span_index,
+                fact.fact_type,
+                fact.source_name,
+                fact.content,
+            )
+            not in selected_keys
+        ]
+        for fact in sorted(older, key=lambda item: item.span_index, reverse=True):
             if len(selected) >= max_facts:
                 break
             selected.append(fact)
@@ -3662,59 +3977,24 @@ class TrajectoryContext:
             ],
         }
 
-    def retrieve_for_groundedness(
-        self, current_span: Dict[str, Any], *, budget: Optional[int] = None
-    ) -> str:
-        """Build evidence-focused context for Groundedness evaluation."""
-        budget = budget or self.max_context_chars
-        sections: List[str] = []
-        used = 0
+    def retrieve_for_span(
+        self,
+        current_span: Dict[str, Any],
+        *,
+        span_index: int,
+        max_chars: int = 14000,
+        expanded: bool = False,
+    ) -> Dict[str, Any]:
+        """Select a read-only evidence view without changing canonical artifacts."""
+        from stateful_evals_be.evaluation.span_context import select_span_context
 
-        if self.policy_text:
-            sec = f"POLICY:\n{self.policy_text}"
-            sections.append(sec)
-            used += len(sec)
-
-        if self.tool_definitions:
-            sec = f"AVAILABLE TOOLS:\n{_safe_json(self.tool_definitions, max_len=1000)}"
-            sections.append(sec)
-            used += len(sec)
-
-        recency = self._get_recent_evidence(self._current_span_index())
-        if recency:
-            lines = ["RECENT EVIDENCE:"]
-            for fact in recency:
-                line = (
-                    f"  [Step {fact.span_index + 1}, {fact.fact_type}] {fact.content}"
-                )
-                if used + len(line) + 2 > budget:
-                    break
-                lines.append(line)
-                used += len(line) + 1
-            if len(lines) > 1:
-                sections.append("\n".join(lines))
-
-        query_terms = _extract_query_terms(current_span)
-        tool_facts = [f for f in self.evidence if f.fact_type == "tool_output"]
-        recency_indices = {f.span_index for f in recency}
-        ranked = _rank_by_keywords(
-            [f for f in tool_facts if f.span_index not in recency_indices],
-            query_terms,
+        return select_span_context(
+            self,
+            current_span,
+            span_index=span_index,
+            max_chars=max_chars,
+            expanded=expanded,
         )
-
-        remaining = budget - used
-        if ranked:
-            lines = ["TOOL OUTPUTS (authoritative evidence):"]
-            for fact, _ in ranked[:8]:
-                line = f"  [Step {fact.span_index + 1}] {fact.content}"
-                if len(line) > remaining:
-                    break
-                lines.append(line)
-                remaining -= len(line) + 1
-            if len(lines) > 1:
-                sections.append("\n".join(lines))
-
-        return "\n\n".join(sections)
 
     def retrieve_for_intent_recognition(
         self, current_span: Dict[str, Any], *, budget: Optional[int] = None
@@ -3723,7 +4003,7 @@ class TrajectoryContext:
         budget = budget or self.max_context_chars
         sections: List[str] = []
 
-        intent_lines = ["INTENT REGISTER:"]
+        intent_lines = ["INTENT REGISTER:", _INTENT_STATUS_LEGEND]
         for intent in self.intents:
             if intent.source == "agent_plan":
                 continue
@@ -3734,7 +4014,7 @@ class TrajectoryContext:
                 f"last=step {intent.last_seen + 1})"
             )
             intent_lines.append(line)
-        if len(intent_lines) > 1:
+        if len(intent_lines) > 2:
             sections.append("\n".join(intent_lines))
 
         recency = self._get_recent_evidence(self._current_span_index())
@@ -3804,10 +4084,15 @@ class TrajectoryContext:
         if self.policy_text:
             sections.append(f"POLICY:\n{self.policy_text[:2000]}")
 
-        intent_lines = ["INTENT REGISTER:"]
+        intent_lines = ["INTENT REGISTER:", _INTENT_STATUS_LEGEND]
         for intent in self.intents:
+            # Final synthesis is already represented in coordination history.
+            # Repeating its lifecycle link here is not evidence of fulfillment.
+            intent_events = [
+                event for event in intent.events if event.get("type") != "synthesis"
+            ]
             event_summary = ", ".join(
-                f"step {e['span_index'] + 1}:{e['type']}" for e in intent.events[-5:]
+                f"step {e['span_index'] + 1}:{e['type']}" for e in intent_events[-5:]
             )
             intent_lines.append(
                 f"  [{intent.status.upper()}] {intent.name}: {intent.description} "
@@ -4050,9 +4335,20 @@ def _normalise_message(message: Any) -> Optional[Dict[str, str]]:
         or kwargs.get("tool_calls")
         or _semconv_tool_call_parts(parts)
     )
-    if not content and not has_tool_calls:
+    tool_call_id = str(
+        message.get("tool_call_id")
+        or kwargs.get("tool_call_id")
+        or attributes.get("tool_call_id")
+        or ""
+    ).strip()
+    if not content and not has_tool_calls and not (
+        role in {"tool", "function"} and tool_call_id
+    ):
         return None
-    return {"role": role, "content": content}
+    normalized = {"role": role, "content": content}
+    if tool_call_id:
+        normalized["tool_call_id"] = tool_call_id
+    return normalized
 
 
 def _semconv_tool_call_parts(parts: Any) -> List[Dict[str, Any]]:
@@ -4100,9 +4396,11 @@ def _extract_flattened_messages(
     indexed: Dict[int, Dict[str, str]] = {}
     role_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.role$")
     content_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.content$")
+    tool_call_id_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.tool_call_id$")
     for key, value in payload.items():
         role_match = role_re.match(key)
         content_match = content_re.match(key)
+        tool_call_id_match = tool_call_id_re.match(key)
         if role_match:
             indexed.setdefault(int(role_match.group(1)), {})["role"] = (
                 str(value).strip().lower()
@@ -4111,15 +4409,26 @@ def _extract_flattened_messages(
             indexed.setdefault(int(content_match.group(1)), {})["content"] = (
                 _message_content(value)
             )
+        elif tool_call_id_match and str(value or "").strip():
+            indexed.setdefault(int(tool_call_id_match.group(1)), {})["tool_call_id"] = (
+                str(value).strip()
+            )
     return [
         {
             "role": entry.get(
                 "role", "assistant" if "completion" in prefix else "user"
             ),
             "content": entry.get("content", ""),
+            **(
+                {"tool_call_id": entry["tool_call_id"]}
+                if entry.get("tool_call_id")
+                else {}
+            ),
         }
         for _, entry in sorted(indexed.items())
-        if entry.get("content")
+        if entry.get("content") or (
+            entry.get("role") in {"tool", "function"} and entry.get("tool_call_id")
+        )
     ]
 
 
@@ -4127,9 +4436,13 @@ def _extract_prompt_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     messages = _extract_flattened_messages(payload, "gen_ai.prompt")
     messages.extend(_extract_structured_messages(payload))
     unique: List[Dict[str, str]] = []
-    identities: set[tuple[str, str]] = set()
+    identities: set[tuple[str, str, str]] = set()
     for message in messages:
-        identity = (message["role"], message["content"])
+        identity = (
+            message["role"],
+            message["content"],
+            message.get("tool_call_id", ""),
+        )
         if identity in identities:
             continue
         identities.add(identity)
@@ -4137,29 +4450,22 @@ def _extract_prompt_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return unique
 
 
-def _content_matches(observed: str, recorded: str) -> bool:
-    """Match an input message to a prior artifact despite JSON formatting."""
+def _exact_text_key(value: Any) -> str:
+    """Identity key of a message or recorded payload; equal keys mean equal text.
 
-    def normalized(value: str) -> str:
-        # Tool results are stored inside JSON envelopes, where line breaks and
-        # quotes are escaped. Remove those serialization artifacts before
-        # comparing them with the decoded messages in a later LLM prompt.
-        text = str(value or "").casefold()
-        text = re.sub(r"\\[nrt]", " ", text)
-        text = text.replace(r"\"", '"').replace(r"\\/", "/")
-        text = re.sub(r"\\u[0-9a-f]{4}", " ", text)
-        return re.sub(r"[^a-z0-9]+", " ", text).strip()
-
-    observed_text = normalized(observed)
-    recorded_text = normalized(recorded)
-    if not observed_text or not recorded_text:
-        return False
-    if observed_text == recorded_text:
-        return True
-    minimum_substring = 8 if any(char.isdigit() for char in observed_text) else 20
-    if len(observed_text) < minimum_substring:
-        return False
-    return observed_text in recorded_text or recorded_text in observed_text
+    JSON text compares as its decoded value, without a ``{"value": ...}``
+    wrapper; other text compares whole after ``_normalise_semantic_text``.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return _normalise_semantic_text(value)
+    if isinstance(value, dict) and set(value) == {"value"}:
+        return _exact_text_key(value["value"])
+    if isinstance(value, str):
+        return _normalise_semantic_text(value)
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _first_text_value(payload: Any, keys: tuple[str, ...]) -> str:
@@ -4939,212 +5245,25 @@ def _is_delegated_agent_input(
     return not any(marker in normalized_system for marker in moderator_markers)
 
 
-def _extract_semantic_requirements(user_text: str) -> List[Dict[str, str]]:
-    """Extract concise, human-readable requirements from an external user turn.
+def _external_turn_key(span_dict: Dict[str, Any]) -> str:
+    """Exact identity of the external turn a root span runs in (MAS-Lab exec id)."""
+    exec_id = str(_span_attributes(span_dict).get("mas.parent.call.id") or "")
+    return f"mas:{exec_id}" if exec_id else ""
 
-    This deliberately stays deterministic. The original statement remains evidence;
-    these entries provide a semantic index that tools and handoffs can link back to.
-    """
-    normalized = " ".join(user_text.split()).strip()
-    if not normalized:
-        return []
 
-    sentences = [
-        sentence.strip(" ,")
-        for sentence in re.split(r"(?<=[.!?])\s+|[\r\n]+", normalized)
-        if sentence.strip(" ,")
-    ]
-    requirements: List[Dict[str, str]] = []
-
-    def add(name: str, description: str, requirement_type: str, source: str) -> None:
-        key = (requirement_type, description.lower())
-        if any(
-            (item["requirement_type"], item["description"].lower()) == key
-            for item in requirements
+def _contains_id(text: str, token: str) -> bool:
+    """Whether ``token`` occurs in ``text`` as a whole id, not inside a longer one."""
+    start = text.find(token) if token else -1
+    while start >= 0:
+        end = start + len(token)
+        before = text[start - 1] if start else ""
+        after = text[end] if end < len(text) else ""
+        if not (before.isalnum() or before == "_") and not (
+            after.isalnum() or after == "_"
         ):
-            return
-        requirements.append(
-            {
-                "name": name,
-                "description": description.rstrip(". ") + ".",
-                "requirement_type": requirement_type,
-                "source_text": source,
-            }
-        )
-
-    main_sentence = next(
-        (
-            sentence
-            for sentence in sentences
-            if re.search(
-                r"\b(plan|book|build|create|find|prepare|schedule|summarize|write)\b",
-                sentence,
-                re.IGNORECASE,
-            )
-            and not re.match(r"^(hello|hi|hey)\b", sentence, re.IGNORECASE)
-        ),
-        None,
-    )
-    if main_sentence:
-        requirement_type = (
-            "itinerary"
-            if re.search(
-                r"\b(trip|travel|visit|route|itinerary|weekend|depart|leaving)\b",
-                main_sentence,
-                re.I,
-            )
-            else "request"
-        )
-        add(
-            "Trip itinerary" if requirement_type == "itinerary" else "Primary request",
-            main_sentence,
-            requirement_type,
-            main_sentence,
-        )
-
-    budget_source = next(
-        (
-            sentence
-            for sentence in sentences
-            if re.search(r"\b(affordable|budget|cost|spend|price)\b", sentence, re.I)
-            or re.search(
-                r"\b(under|below|less than|up to)\s*[$€£]?\s*\d",
-                sentence,
-                re.I,
-            )
-        ),
-        "",
-    )
-    if budget_source:
-        limit_match = re.search(
-            r"(?:\b(?:under|below|less than|up to|maximum(?: of)?|max(?:imum)?(?: of)?)"
-            r"|\bbudget(?:\s+(?:of|is))?)\s*"
-            r"([$€£]?\s*\d[\d,.]*\s*(?:eur|usd|gbp)?)",
-            budget_source,
-            re.IGNORECASE,
-        )
-        if limit_match:
-            limit = " ".join(limit_match.group(1).upper().split())
-            description = f"Keep total cost under {limit}"
-        else:
-            description = "Keep total cost affordable within the stated budget"
-        add("Budget ceiling", description, "budget", budget_source)
-
-    lower = normalized.lower()
-    if re.search(
-        r"\bindoor(?:\s+(?:and|or)\s+outdoor)?\s+attractions?",
-        lower,
-    ):
-        qualifier = "at least one" if "at least one indoor" in lower else "one"
-        add(
-            "Indoor attraction",
-            f"Include {qualifier} indoor attraction",
-            "indoor_attraction",
-            normalized,
-        )
-    if re.search(r"\boutdoor\s+attraction", lower):
-        qualifier = "at least one" if "at least one outdoor" in lower else "one"
-        add(
-            "Outdoor attraction",
-            f"Include {qualifier} outdoor attraction",
-            "outdoor_attraction",
-            normalized,
-        )
-    if re.search(r"\b(accessible|accessibility|wheelchair|step-free)\b", lower):
-        source = next(
-            (
-                sentence
-                for sentence in sentences
-                if re.search(
-                    r"\b(accessible|accessibility|wheelchair|step-free)\b",
-                    sentence,
-                    re.I,
-                )
-            ),
-            normalized,
-        )
-        add("Accessibility", source, "accessibility", source)
-    if re.search(r"\b(don't care|do not care|no need)\b[^.]*\bdining\b", lower):
-        add(
-            "Dining preference",
-            "Dining options are not required",
-            "preference",
-            normalized,
-        )
-
-    if not requirements:
-        add("Primary request", normalized, "request", normalized)
-    return requirements
-
-
-def _semantic_tokens(text: str) -> set[str]:
-    tokens: set[str] = set()
-    for raw in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)?", text.lower()):
-        token = raw
-        if token.endswith("ies") and len(token) > 4:
-            token = token[:-3] + "y"
-        elif token.endswith("s") and len(token) > 4 and not token.endswith("ss"):
-            token = token[:-1]
-        if token in _SEMANTIC_STOP_WORDS or len(token) < 3:
-            continue
-        tokens.add(token)
-        if "-" in token:
-            tokens.update(
-                part
-                for part in token.split("-")
-                if len(part) >= 3 and part not in _SEMANTIC_STOP_WORDS
-            )
-
-    if "affordable" in tokens:
-        tokens.update({"budget", "cost"})
-    if "fare" in tokens or "pricing" in tokens:
-        tokens.update({"cost", "price"})
-    if tokens & {"airplane", "flight", "train"}:
-        tokens.update({"route", "transport"})
-    return tokens
-
-
-def _best_matching_intent(
-    intents: List[IntentEntry],
-    description: str,
-    requirement_type: str,
-) -> Optional[IntentEntry]:
-    target_tokens = _semantic_tokens(description)
-    best: Optional[IntentEntry] = None
-    best_score = 0.0
-    for intent in intents:
-        if intent.requirement_type != requirement_type:
-            continue
-        intent_tokens = _semantic_tokens(f"{intent.name} {intent.description}")
-        overlap = target_tokens & intent_tokens
-        score = len(overlap) / max(1, min(len(target_tokens), len(intent_tokens)))
-        if score > best_score:
-            best = intent
-            best_score = score
-    return best if best_score >= 0.45 else None
-
-
-def _matching_intents(
-    intents: List[IntentEntry],
-    activity: str,
-    *,
-    max_matches: int,
-) -> List[tuple[IntentEntry, set[str]]]:
-    activity_tokens = _semantic_tokens(activity)
-    ranked: List[tuple[IntentEntry, set[str], float]] = []
-    for intent in intents:
-        intent_tokens = _semantic_tokens(f"{intent.name} {intent.description}")
-        matched = intent_tokens & activity_tokens
-        affinity = _TYPE_AFFINITY.get(intent.requirement_type, set())
-        affinity_match = affinity & activity_tokens
-        score = len(matched) / max(3, min(len(intent_tokens), 8))
-        if affinity_match:
-            score += 0.2
-            matched |= affinity_match
-        if score >= 0.2:
-            ranked.append((intent, matched, score))
-    ranked.sort(key=lambda item: (-item[2], item[0].first_seen, item[0].name))
-    return [(intent, terms) for intent, terms, _ in ranked[:max_matches]]
+            return True
+        start = text.find(token, start + 1)
+    return False
 
 
 def _unique_intent_name(name: str, existing_names: set[str]) -> str:
@@ -5158,6 +5277,15 @@ def _unique_intent_name(name: str, existing_names: set[str]) -> str:
 
 def _extract_agent_output(output_payload: Dict[str, Any]) -> str:
     """Pull assistant content and tool decisions from supported payload shapes."""
+    parts = [_extract_agent_text(output_payload)]
+    tool_calls = _collect_tool_calls(output_payload)
+    if tool_calls:
+        parts.append(f"Tool calls: {_safe_json(tool_calls, max_len=None)}")
+    return "\n".join(_ordered_union([], parts))
+
+
+def _extract_agent_text(output_payload: Dict[str, Any]) -> str:
+    """Pull the visible assistant content, without tool-call decisions."""
     messages = _extract_flattened_messages(output_payload, "gen_ai.completion")
     messages.extend(_extract_structured_messages(output_payload))
     parts = [
@@ -5172,10 +5300,6 @@ def _extract_agent_output(output_payload: Dict[str, Any]) -> str:
         )
         if fallback:
             parts.append(fallback)
-
-    tool_calls = _collect_tool_calls(output_payload)
-    if tool_calls:
-        parts.append(f"Tool calls: {_safe_json(tool_calls, max_len=None)}")
     return "\n".join(_ordered_union([], parts))
 
 
@@ -5187,22 +5311,6 @@ def _has_visible_content(text: str) -> bool:
         flags=re.IGNORECASE,
     ).strip()
     return bool(visible)
-
-
-def _looks_like_final_answer(text: str) -> bool:
-    visible = re.sub(
-        r"<\|?channel\|?>\s*(?:thought|analysis)?",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    ).strip()
-    if len(visible) < 120:
-        return False
-    opening = visible[:350].lower()
-    return not re.search(
-        r"\b(?:i need to|i will (?:start|ask|call|use|first)|let me|next,? i will)\b",
-        opening,
-    )
 
 
 def _span_agent_id(span_dict: Dict[str, Any]) -> str:
@@ -5636,69 +5744,3 @@ def _epoch_to_ns(number: int | float) -> int:
     if number > 1e11:
         return int(number * 1_000_000)
     return int(number * 1_000_000_000)
-
-
-def _extract_query_terms(span_dict: Dict[str, Any]) -> set:
-    parts: List[str] = []
-    for payload_key in ("input_payload", "output_payload"):
-        payload = span_dict.get(payload_key)
-        if payload:
-            text = (
-                json.dumps(payload, default=str)
-                if isinstance(payload, dict)
-                else str(payload)
-            )
-            parts.append(text)
-    name = span_dict.get("entity_name", "")
-    if name:
-        parts.append(name)
-
-    combined = " ".join(parts).lower()
-    tokens = set(re.findall(r"[a-z0-9_]{3,}", combined))
-    tokens -= {
-        "the",
-        "and",
-        "for",
-        "that",
-        "this",
-        "with",
-        "from",
-        "are",
-        "was",
-        "not",
-        "but",
-        "has",
-        "have",
-        "will",
-        "can",
-        "content",
-        "role",
-        "gen_ai",
-        "prompt",
-        "completion",
-        "true",
-        "false",
-        "none",
-        "null",
-        "message",
-        "string",
-        "type",
-        "value",
-        "status",
-    }
-    return tokens
-
-
-def _rank_by_keywords(facts: List[EvidenceFact], query_terms: set) -> List[tuple]:
-    if not facts or not query_terms:
-        return [(f, 0.0) for f in facts]
-
-    scored = []
-    for fact in facts:
-        fact_tokens = set(re.findall(r"[a-z0-9_]{3,}", fact.content.lower()))
-        overlap = len(query_terms & fact_tokens)
-        score = overlap / len(query_terms) if query_terms else 0.0
-        scored.append((fact, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored

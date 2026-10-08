@@ -1148,6 +1148,12 @@ class SpanNormalizer:
 
     @staticmethod
     def deduplicate_spans(raw_spans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Drop re-exported copies of the same operation.
+
+        The fingerprint covers the full content plus who performed the operation
+        and, when recorded, its call id. Two agents making the same call, or one
+        agent repeating a call, are separate observations and are kept.
+        """
         seen: set = set()
         unique: List[Dict[str, Any]] = []
 
@@ -1188,9 +1194,17 @@ class SpanNormalizer:
                     ),
                     "",
                 )
+                agent_id = str(
+                    SpanNormalizer._first_span_attribute(
+                        attrs, "mas.agent.id", "agent.id", "application_id"
+                    )
+                    or span.get("ServiceName")
+                    or ""
+                )
                 raw = (
                     SpanNormalizer._span_kind(attrs),
                     SpanNormalizer._entity_name(attrs) or "",
+                    agent_id,
                     call_id,
                     *(
                         hashlib.sha256(

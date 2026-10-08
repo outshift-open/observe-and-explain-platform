@@ -69,6 +69,7 @@ def load_trajectory_context_artifact(
             trace_id=str(item.get("trace_id") or ""),
             related_intent_ids=_string_list(item.get("related_intent_ids")),
             work_id=str(item.get("work_id") or ""),
+            tool_call_id=str(item.get("tool_call_id") or ""),
             outcome=str(item.get("outcome") or ""),
             relayed_from_agent_id=str(item.get("relayed_from_agent_id") or ""),
             started_at_ns=_optional_integer(item.get("started_at_ns")),
@@ -82,7 +83,7 @@ def load_trajectory_context_artifact(
             source=str(item.get("source") or ""),
             first_seen=_integer(item.get("first_seen"), -1),
             last_seen=_integer(item.get("last_seen"), -1),
-            status=str(item.get("status") or ""),
+            status=_intent_status(item),
             description=str(item.get("description") or ""),
             requirement_type=str(item.get("requirement_type") or "request"),
             events=[
@@ -292,6 +293,19 @@ def trajectory_context_to_payload(
     if metadata:
         payload.update(_jsonable(dict(metadata)))
     return payload
+
+
+def _intent_status(item: Mapping[str, Any]) -> str:
+    status = str(item.get("status") or "unassessed")
+    # Progress statuses saved for user and policy intents carry no recorded
+    # evidence, so they load as unassessed.
+    if item.get("source") in {"user", "policy"} and status in {
+        "pending",
+        "in_progress",
+        "fulfilled",
+    }:
+        return "unassessed"
+    return status
 
 
 def _items(value: Any) -> list[Mapping[str, Any]]:

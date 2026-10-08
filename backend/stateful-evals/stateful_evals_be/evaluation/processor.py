@@ -22,6 +22,7 @@ import re
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from metrics_computation_engine.llm_judge.llm import LLMClient
@@ -32,6 +33,7 @@ from stateful_evals_be.evaluation.span_judge import SpanJudge
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.evaluation.trajectory_context import (
     TrajectoryContext,
+    _normalise_semantic_text,
     _timestamp_ns,
 )
 from stateful_evals_be.models.requests import (
@@ -189,8 +191,10 @@ class TemporalMetricsProcessor:
 
                 def _capturing_query(*a, _orig=_orig_query, _tls=tls, **kw):
                     kw.setdefault("max_tokens", self.options.span_judge_max_tokens)
-                    if self.options.reasoning_effort:
-                        kw.setdefault("reasoning_effort", self.options.reasoning_effort)
+                    if self.options.span_reasoning_effort:
+                        kw.setdefault(
+                            "reasoning_effort", self.options.span_reasoning_effort
+                        )
                     resp = _orig(*a, **kw)
                     usage = getattr(resp, "usage", None)
                     if usage:
@@ -339,7 +343,7 @@ class TemporalMetricsProcessor:
 
     def _create_span_judge(self) -> SpanJudge:
         return SpanJudge(
-            query=self._query_with_budget,
+            query=partial(self._query_with_budget, span_processing=True),
             options=self.options,
             metric_names=self.metric_names,
         )
@@ -365,6 +369,7 @@ class TemporalMetricsProcessor:
         *,
         max_tokens: int,
         temperature: float = 0.0,
+        span_processing: bool = False,
     ) -> Any:
         model_name = str(
             getattr(getattr(self, "llm_config", None), "LLM_MODEL_NAME", "")
@@ -377,8 +382,8 @@ class TemporalMetricsProcessor:
         }
         reasoning_effort = getattr(
             getattr(self, "options", None),
-            "reasoning_effort",
-            "low",
+            "span_reasoning_effort" if span_processing else "reasoning_effort",
+            "none" if span_processing else "low",
         )
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
@@ -524,22 +529,6 @@ class TemporalMetricsProcessor:
     # Intent state resolution
     # ================================================================
 
-    _POLICY_REJECTION_SIGNALS = re.compile(
-        r"(policy\s+(prohibit|reject|refus|den|restrict|forbid|disallow|prevent|block))"
-        r"|(reject(?:ed|ing|s)?\s+(?:per|due\s+to|because\s+of|by)\s+policy)"
-        r"|(per\s+policy\b.{0,40}(?:cannot|denied|refused|rejected))"
-        r"|(correctly\s+(?:denied|rejected|refused|declined))"
-        r"|(not\s+permitted\s+by\s+policy)"
-        r"|(compliance.{0,20}(?:reject|refus|den))",
-        re.IGNORECASE,
-    )
-
-    @staticmethod
-    def _has_policy_rejection_signal(reasoning: str) -> bool:
-        return bool(
-            TemporalMetricsProcessor._POLICY_REJECTION_SIGNALS.search(reasoning or "")
-        )
-
     @staticmethod
     def _coerce_bool(value: Any, default: bool = False) -> bool:
         if isinstance(value, bool):
@@ -604,19 +593,8 @@ class TemporalMetricsProcessor:
 
             best_score = max(float(e.get("score", 0)) for e in events)
 
-            has_policy_rejection = any(
-                TemporalMetricsProcessor._has_policy_rejection_signal(
-                    e.get("reasoning", "")
-                )
-                for e in events
-            )
-
-            if best_score >= 1.0 and has_policy_rejection:
-                state = "rejected_per_policy"
-            elif best_score >= 1.0:
+            if best_score >= 1.0:
                 state = "fulfilled"
-            elif has_policy_rejection:
-                state = "rejected_per_policy"
             elif len(events) == 1 and first_span < total_spans * 0.4:
                 state = "dormant"
             elif best_score == 0.0 and first_span >= total_spans * 0.8:
@@ -640,13 +618,12 @@ class TemporalMetricsProcessor:
             "failed": 0,
             "drifting": 1,
             "fulfilled": 2,
-            "rejected_per_policy": 3,
-            "dormant": 4,
+            "dormant": 3,
         }
-        states.sort(key=lambda s: state_order.get(s.state, 5))
+        states.sort(key=lambda s: state_order.get(s.state, 4))
         return states
 
-    _RESOLVED_INTENT_STATES = {"fulfilled", "rejected_per_policy", "dormant"}
+    _RESOLVED_INTENT_STATES = {"fulfilled", "dormant"}
 
     @staticmethod
     def _count_unsatisfied_intents(intent_states: List[Any]) -> int:
@@ -665,27 +642,19 @@ class TemporalMetricsProcessor:
             return "No tracked intents."
 
         fulfilled = [s for s in intent_states if getattr(s, "state", "") == "fulfilled"]
-        rejected = [
-            s for s in intent_states if getattr(s, "state", "") == "rejected_per_policy"
-        ]
         drifting = [s for s in intent_states if getattr(s, "state", "") == "drifting"]
         dormant = [s for s in intent_states if getattr(s, "state", "") == "dormant"]
         failed = [s for s in intent_states if getattr(s, "state", "") == "failed"]
 
         parts = [
             f"Intent resolution at trajectory end: "
-            f"{len(fulfilled)} fulfilled, {len(rejected)} rejected per policy, "
+            f"{len(fulfilled)} fulfilled, "
             f"{len(drifting)} drifting, {len(dormant)} dormant, {len(failed)} failed "
             f"(out of {len(intent_states)} total tracked intents).",
         ]
         if fulfilled:
             names = [getattr(s, "name", "?") for s in fulfilled]
             parts.append(f"Fulfilled intents: {', '.join(names)}.")
-        if rejected:
-            names = [getattr(s, "name", "?") for s in rejected]
-            parts.append(
-                f"Rejected per policy (agent correctly denied): {', '.join(names)}."
-            )
         if drifting:
             names = [getattr(s, "name", "?") for s in drifting]
             parts.append(f"Drifting intents: {', '.join(names)}.")
@@ -761,7 +730,9 @@ class TemporalMetricsProcessor:
         user_prompt = CROSS_SPAN_VALIDATION_USER_PROMPT.format(
             user_question=user_question,
             final_answer=final_answer[:4000],
-            tool_outputs=tool_output_text[:20000],
+            # The extractor bounds each record. A combined prefix would hide
+            # later verification results and actions from the final review.
+            tool_outputs=tool_output_text,
             policy=policy,
         )
 
@@ -794,12 +765,13 @@ class TemporalMetricsProcessor:
             }
 
             if not result_text:
-                return []
+                raise ValueError("judge returned an empty response")
 
             parsed = self._parse_json_response(result_text)
+            if not isinstance(parsed.get("is_grounded"), bool):
+                raise ValueError("judge must return a boolean 'is_grounded'")
         except Exception as exc:
-            logger.warning(f"[{session_id}] Cross-span validation failed: {exc}")
-            return []
+            raise RuntimeError(f"Cross-span validation failed: {exc}") from exc
 
         failures_out: List[MetricFailure] = []
 
@@ -930,7 +902,7 @@ class TemporalMetricsProcessor:
             policy=(system_message or "No policy provided.")[:5000],
             aftermath=aftermath[:3000],
             trajectory_summary=trajectory_summary[:5000],
-            tool_outputs=(tool_output_text or "No tool outputs captured.")[:20000],
+            tool_outputs=tool_output_text or "No tool outputs captured.",
         )
 
         messages = [
@@ -962,15 +934,19 @@ class TemporalMetricsProcessor:
             }
 
             if not result_text:
-                logger.warning(f"[{session_id}] Final outcome review returned empty")
-                return [], []
+                raise ValueError("judge returned an empty response")
 
             parsed = self._parse_json_response(result_text)
+            verdict = str(parsed.get("verdict", "")).strip().upper()
+            if "verdict" in parsed and verdict not in {"PASS", "FAIL"}:
+                raise ValueError("judge verdict must be 'PASS' or 'FAIL'")
+            if "passes" in parsed and not isinstance(parsed["passes"], bool):
+                raise ValueError("judge 'passes' must be a boolean")
+            if not verdict and "passes" not in parsed:
+                raise ValueError("judge must return 'passes' or a PASS/FAIL verdict")
         except Exception as exc:
-            logger.warning(f"[{session_id}] Final outcome review failed: {exc}")
-            return [], []
+            raise RuntimeError(f"Final outcome review failed: {exc}") from exc
 
-        verdict = str(parsed.get("verdict", "")).strip().upper()
         passes = self._coerce_bool(parsed.get("passes"), default=(verdict == "PASS"))
         if passes and verdict != "FAIL":
             return [], []
@@ -1019,8 +995,8 @@ class TemporalMetricsProcessor:
         traj_ctx: TrajectoryContext,
         threshold: int = 3,
     ) -> Optional[MetricFailure]:
-        from difflib import SequenceMatcher
-
+        # A loop is an exact repeat of the whole normalized output, not a
+        # similar-looking one: distinct bookings or values never count.
         claims = traj_ctx.claims
         if len(claims) < threshold:
             return None
@@ -1030,16 +1006,15 @@ class TemporalMetricsProcessor:
         current_run = 1
 
         for i in range(1, len(claims)):
-            prev = claims[i - 1].content.strip()
-            curr = claims[i].content.strip()
+            prev = _normalise_semantic_text(claims[i - 1].content)
+            curr = _normalise_semantic_text(claims[i].content)
 
             if not prev or not curr:
                 current_run = 1
                 run_start = i
                 continue
 
-            ratio = SequenceMatcher(None, prev, curr).ratio()
-            if ratio > 0.85:
+            if prev == curr:
                 current_run += 1
                 if current_run > best_run:
                     best_run = current_run
@@ -1060,8 +1035,8 @@ class TemporalMetricsProcessor:
             metric_name="Relevancy",
             score=0.0,
             reasoning=(
-                f"Loop entrapment: agent produced {best_run} near-identical "
-                f"consecutive outputs (similarity > 85%). "
+                f"Loop entrapment: agent produced {best_run} identical "
+                f"consecutive outputs. "
                 f"Content: {last_claim.content[:200]}"
             ),
             span_index=last_claim.span_index,
@@ -1316,28 +1291,8 @@ class TemporalMetricsProcessor:
             if failure.eval_context == "loop_detection":
                 patterns.append("loop_entrapment")
 
-        if (
-            metric_suite != PAPER_METRIC_SUITE
-            and unsatisfied_intents > 0
-            and "Task Completeness" not in failed_metric_names
-        ):
-            fatal_details.append(
-                FailureDetail(
-                    metric="Task Completeness",
-                    metric_score=0.0,
-                    fatality_score=1.0,
-                    reasoning=(
-                        f"{unsatisfied_intents} intent(s) remained unresolved at the "
-                        "end of the trajectory."
-                    ),
-                    explanation="Deterministic unresolved-intent trajectory check.",
-                    span_type="trajectory",
-                    entity_name="intent_register",
-                    observed_impact="incomplete_resolution",
-                    confidence=1.0,
-                    affects_trajectory_score=True,
-                )
-            )
+        # Task Completeness is decided by its LLM rubric. The span-score intent
+        # states are reported in the supplemental, never turned into a fatal.
 
         payloads = [result.to_payload() for result in audit_results]
         usage = _empty_usage()
@@ -1733,7 +1688,16 @@ class TemporalMetricsProcessor:
                     traj_ctx.ingest_span(span_dict, span_index=n)
                     continue
 
-                context_state = traj_ctx.retrieve_for_state_delta(span_dict)
+                focused = self.options.span_context_mode == "focused"
+                context_state = (
+                    traj_ctx.retrieve_for_span(
+                        span_dict,
+                        span_index=n,
+                        max_chars=self.options.span_context_max_chars,
+                    )
+                    if focused
+                    else traj_ctx.retrieve_for_state_delta(span_dict)
+                )
                 compact_span = self._compact_span_delta(span_dict)
                 mce_spans_evaluated += 1
                 mce_call_attempts += 1
@@ -1741,9 +1705,56 @@ class TemporalMetricsProcessor:
                     mce_response = self.compute_span_state_delta(
                         span_dict,
                         context_state=context_state,
-                        policy=system_message,
+                        policy="" if focused else system_message,
                         metrics=metrics_to_run,
                     )
+                    # Recheck provisional failures against all available prior
+                    # artifacts once, so retrieval omissions do not become failures.
+                    needs_expansion = mce_response.get("needs_more_context") or any(
+                        result.get("value") == 0
+                        for result in mce_response.get("results", [])
+                    )
+                    if (
+                        focused
+                        and needs_expansion
+                        and context_state["selection"]["omitted_artifacts"]
+                    ):
+                        first_usage = mce_response.get("usage") or {}
+                        mce_prompt_tokens += int(first_usage.get("prompt_tokens", 0))
+                        mce_completion_tokens += int(
+                            first_usage.get("completion_tokens", 0)
+                        )
+                        mce_total_tokens += int(first_usage.get("total_tokens", 0))
+                        context_state = traj_ctx.retrieve_for_span(
+                            span_dict,
+                            span_index=n,
+                            max_chars=self.options.span_context_max_chars,
+                            expanded=True,
+                        )
+                        logger.info(
+                            f"[{session_id}] Expanding evidence for span {n + 1}"
+                        )
+                        mce_response = self.compute_span_state_delta(
+                            span_dict,
+                            context_state=context_state,
+                            policy="",
+                            metrics=metrics_to_run,
+                        )
+                    mce_usage = (
+                        mce_response.get("usage")
+                        or mce_response.get("token_usage")
+                        or {}
+                    )
+                    mce_prompt_tokens += int(mce_usage.get("prompt_tokens", 0))
+                    mce_completion_tokens += int(mce_usage.get("completion_tokens", 0))
+                    mce_total_tokens += int(mce_usage.get("total_tokens", 0))
+                    if focused and mce_response.get("needs_more_context"):
+                        mce_response["results"] = []
+                        mce_response["failed_metrics"] = [
+                            {
+                                "error_message": "Span judge could not decide with available evidence"
+                            }
+                        ]
                     if not mce_response.get("results"):
                         internal_errors = mce_response.get("failed_metrics", [])
                         err_msg = (
@@ -1761,14 +1772,6 @@ class TemporalMetricsProcessor:
                         continue
 
                     mce_call_successes += 1
-                    mce_usage = (
-                        mce_response.get("usage")
-                        or mce_response.get("token_usage")
-                        or {}
-                    )
-                    mce_prompt_tokens += int(mce_usage.get("prompt_tokens", 0))
-                    mce_completion_tokens += int(mce_usage.get("completion_tokens", 0))
-                    mce_total_tokens += int(mce_usage.get("total_tokens", 0))
                 except Exception as e:
                     logger.error(f"[{session_id}] Combined span judge failed: {e}")
                     mce_call_failures += 1
@@ -1857,9 +1860,24 @@ class TemporalMetricsProcessor:
                 and mce_call_successes == 0
                 and mce_call_failures > 0
             ):
+                token_usage = TokenUsage(
+                    prompt_tokens=mce_prompt_tokens,
+                    completion_tokens=mce_completion_tokens,
+                    total_tokens=mce_total_tokens,
+                    mce_prompt_tokens=mce_prompt_tokens,
+                    mce_completion_tokens=mce_completion_tokens,
+                    mce_total_tokens=mce_total_tokens,
+                )
                 return SessionResult(
                     session_id=session_id,
                     app_name=app_name,
+                    total_spans=total_spans,
+                    mce_spans_evaluated=mce_spans_evaluated,
+                    spans_sampled_out=spans_sampled_out,
+                    token_usage=token_usage,
+                    cost_estimate=estimate_token_cost(
+                        token_usage, self.llm_config.LLM_MODEL_NAME
+                    ),
                     error=(
                         f"All MCE metric calls failed ({mce_call_failures}/{mce_call_attempts}). "
                         f"Last error: {last_mce_error or 'unknown'}"
@@ -1934,6 +1952,8 @@ class TemporalMetricsProcessor:
                     policy=system_message,
                     llm_client=self.llm_client,
                     aftermath=aftermath,
+                    max_tokens=self.options.final_judge_max_tokens,
+                    reasoning_effort=self.options.reasoning_effort,
                 )
                 fatal_failures = review_result["fatal_failures"]
                 minor_failures = review_result["minor_failures"]
@@ -2014,8 +2034,10 @@ class TemporalMetricsProcessor:
                     for failure in fatal_failures
                     if failure.affects_trajectory_score
                 ]
+                # The unified audit's judges decide completion; only the legacy
+                # inter-step path still gates on span-score intent states.
                 preliminary_pass = (
-                    True if uses_paper_suite else unsatisfied_intents == 0
+                    True if use_unified_audit else unsatisfied_intents == 0
                 ) and len(scoring_fatal_failures) == 0
 
                 if preliminary_pass and not use_unified_audit:
@@ -2073,7 +2095,7 @@ class TemporalMetricsProcessor:
                     0
                     if (
                         scoring_fatal_failures
-                        or (unsatisfied_intents > 0 and not uses_paper_suite)
+                        or (unsatisfied_intents > 0 and not use_unified_audit)
                     )
                     else 1
                 )

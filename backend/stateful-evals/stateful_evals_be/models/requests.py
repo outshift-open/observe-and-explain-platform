@@ -74,6 +74,19 @@ class SamplingConfig(BaseModel):
 class TemporalMetricOptions(BaseModel):
     """Configuration options for temporal metric computation."""
 
+    span_context_mode: Literal["focused", "legacy"] = Field(
+        default="focused",
+        description="Select task-linked span context, or the previous recency-based view.",
+    )
+    span_context_max_chars: int = Field(
+        default=14000,
+        ge=2000,
+        description=(
+            "Soft character budget for retrieved span context. Direct evidence and "
+            "active instructions are retained in full even when they exceed it."
+        ),
+    )
+
     high_level_metric_suite: Literal[
         "legacy_v1",
         "paper_v1",
@@ -139,7 +152,15 @@ class TemporalMetricOptions(BaseModel):
     )
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
         default="low",
-        description="Reasoning effort requested from compatible evaluation models.",
+        description="Reasoning effort for final audits and trajectory metric judges.",
+    )
+    span_reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = Field(
+        default="none",
+        description=(
+            "Reasoning effort for span judgments only. 'none' requests disabled "
+            "thinking where supported; null omits the setting and uses the provider "
+            "default. Does not change final-audit or trajectory-metric reasoning."
+        ),
     )
     use_unified_final_audit: bool = Field(
         default=True,
@@ -296,7 +317,9 @@ class IntentState(BaseModel):
     """Resolved status of a single tracked intent across the trajectory."""
 
     name: str
-    state: str  # fulfilled | rejected_per_policy | failed | drifting | dormant
+    # fulfilled | failed | drifting | dormant. Older saved results may hold a
+    # policy-rejection state that is no longer produced.
+    state: str
     first_span: int = 0
     last_span: int = 0
     occurrences: int = 0

@@ -71,134 +71,6 @@ def _convert(raw_span: dict) -> dict:
     return TemporalMetricsProcessor._otel_trace_to_span_dict(raw_span)
 
 
-def test_centralized_handoff_populates_work_ownership_and_provenance() -> None:
-    policy = "You are the lead agent. Delegate specialist investigations."
-    context = TrajectoryContext(policy_text=policy)
-    context.ingest_span(
-        _convert(
-            _raw_observe_span(
-                span_id="root-llm",
-                kind="llm",
-                name="LLMCall",
-                agent_id="lead",
-                role="orchestrator",
-                input_payload={
-                    "messages": [
-                        {"role": "system", "content": policy},
-                        {
-                            "role": "user",
-                            "content": "Investigate payment-service latency.",
-                        },
-                    ]
-                },
-                output_payload={"content": "I will ask telemetry to inspect latency."},
-            )
-        ),
-        span_index=0,
-    )
-    context.ingest_span(
-        _convert(
-            _raw_observe_span(
-                span_id="delegate-tool",
-                kind="tool",
-                name="delegate_to_telemetry",
-                agent_id="lead",
-                role="orchestrator",
-                input_payload={
-                    "task": "Investigate payment-service latency.",
-                    "expected_output": "A latency finding with supporting evidence.",
-                },
-                output_payload={"status": "delivered"},
-                operation_kind="handoff",
-            )
-        ),
-        span_index=1,
-    )
-
-    root_intent, delegated_work = context.intents
-    assert root_intent.owner_agent_ids == ["lead"]
-    assert delegated_work.source == "agent_plan"
-    assert delegated_work.requirement_type == "subtask"
-    assert delegated_work.owner_agent_ids == ["telemetry"]
-    assert delegated_work.assigned_by_agent_id == "lead"
-    assert delegated_work.assignment_mode == "dynamic"
-    assert delegated_work.parent_intent_ids == ["intent:0"]
-    assert delegated_work.expected_output == (
-        "A latency finding with supporting evidence."
-    )
-
-    context.ingest_span(
-        _convert(
-            _raw_observe_span(
-                span_id="delegate-backend",
-                kind="tool",
-                name="delegate_to_backend",
-                agent_id="lead",
-                role="orchestrator",
-                input_payload={
-                    "task": "Assess root cause using the telemetry finding.",
-                    "depends_on": ["intent:1"],
-                },
-                output_payload={"status": "delivered"},
-                operation_kind="assignment",
-            )
-        ),
-        span_index=2,
-    )
-    backend_work = context.intents[2]
-    assert backend_work.owner_agent_ids == ["backend"]
-    assert backend_work.parent_intent_ids == ["intent:0"]
-    assert backend_work.dependency_intent_ids == ["intent:1"]
-    assert any(
-        link.source_artifact_id == "intent:1"
-        and link.target_artifact_id == "intent:2"
-        and link.relation_type == "precedes"
-        for link in context.provenance_links
-    )
-    metric_payload = build_context_payload(
-        context,
-        metric_input_config("operations"),
-        metric_name="Delegation Accuracy",
-    )
-    assert metric_payload["work_ledger"][2] == {
-        "artifact_id": "intent:2",
-        "name": backend_work.name,
-        "description": "Assess root cause using the telemetry finding.",
-        "status": "in_progress",
-        "owner_agent_ids": ["backend"],
-        "assigned_by_agent_id": "lead",
-        "assignment_mode": "dynamic",
-        "parent_intent_ids": ["intent:0"],
-        "dependency_intent_ids": ["intent:1"],
-        "expected_output": "",
-        "phase": "",
-        "round_index": None,
-    }
-
-    event_types = [event.event_type for event in context.coordination_events]
-    assert "assignment" in event_types
-    assert "handoff" in event_types
-    assignment = next(
-        event
-        for event in context.coordination_events
-        if event.event_type == "assignment"
-    )
-    assert assignment.recipient_agent_ids == ["telemetry"]
-    assert assignment.related_intent_ids == ["intent:1", "intent:0"]
-    assert any(
-        link.source_artifact_id == assignment.event_id
-        and link.target_artifact_id == "intent:1"
-        and link.relation_type == "advances"
-        for link in context.provenance_links
-    )
-    assert any(
-        link.source_artifact_id == "intent:0"
-        and link.target_artifact_id == "intent:1"
-        and link.relation_type == "decomposes_to"
-        for link in context.provenance_links
-    )
-
-
 def test_linked_peer_round_becomes_peer_context_and_revision() -> None:
     context = TrajectoryContext(policy_text="")
     round_one = []
@@ -419,50 +291,12 @@ def test_embedded_request_is_separated_from_environment_and_peer_guidance() -> N
         span_index=0,
     )
 
-    assert [intent.description for intent in context.intents] == [
-        "Diagnose checkout latency."
-    ]
     assert [fact.fact_type for fact in context.evidence] == [
         "policy_rule",
         "user_statement",
         "environment_context",
         "agent_handoff",
     ]
-    assert context.intents[0].owner_agent_ids == ["agent_1"]
-    assert context.intents[0].assignment_mode == "observed"
-
-
-def test_response_retains_input_intent_even_when_output_semantically_drifts() -> None:
-    context = TrajectoryContext(policy_text="Investigate the assigned incident.")
-    context.ingest_span(
-        _convert(
-            _raw_observe_span(
-                span_id="drifted-response",
-                kind="llm",
-                name="LLMCall",
-                agent_id="telemetry",
-                role="specialist",
-                input_payload={
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Investigate payment-service latency.",
-                        }
-                    ]
-                },
-                output_payload={"content": "I cannot help with that."},
-            )
-        ),
-        span_index=0,
-    )
-
-    assert context.claims[-1].related_intent_ids == ["intent:0"]
-    assert any(
-        link.source_artifact_id == "claim:0"
-        and link.target_artifact_id == "intent:0"
-        and link.relation_type == "advances"
-        for link in context.provenance_links
-    )
 
 
 def test_verifier_response_is_verification_but_assignment_to_verifier_is_not() -> None:

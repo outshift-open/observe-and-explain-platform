@@ -82,16 +82,13 @@ export the spans to a file and call `evaluate_file`, as `evaluate_trajectories.p
 $ .venv-evals/bin/python stateful-evals/quickstart/inspect_trajectory.py
 file:     trajectory_e7f32992.json
 session:  noa-trip-planner-mas_e7f32992-5222-41eb-b9dc-72f6e21fc2d4
-spans:    26 read, 24 after de-duplication
-types:    other=12, llm=5, agent=4, tool=2, workflow=1
-evidence: user_statement=4, tool_output=2
+spans:    26 read, 26 after de-duplication
+types:    other=13, agent=5, llm=5, tool=2, workflow=1
+evidence: user_statement=3, policy_rule=2, tool_output=2
 claims:   assertion=5, tool_result=2
 coordination events: assignment=2, synthesis=1
 intents:
-  intent:0  fulfilled    Primary request
-  intent:1  fulfilled    delegated_agent
-  intent:2  fulfilled    Primary request 2
-  intent:3  fulfilled    Primary request 3
+  intent:0  in_progress  delegated_agent
 final answer: Luminos is famous for its vibrant attractions centered around light and color. Here are some of the highlights:
 ```
 
