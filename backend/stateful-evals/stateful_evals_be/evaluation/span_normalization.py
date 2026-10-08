@@ -418,19 +418,6 @@ class SpanNormalizer:
         seen: set[str] = set()
         root_system_text = ""
 
-        def is_moderator_system(text: str) -> bool:
-            lower = text.lower()
-            return any(
-                marker in lower
-                for marker in (
-                    "you are a moderator",
-                    "you are a coordinator",
-                    "coordinating a team",
-                    "available agents",
-                    "delegate sub-tasks",
-                )
-            )
-
         def add_entry(span_index: int, text: str) -> None:
             normalized = SpanNormalizer._normalize_text(text)
             if not normalized or normalized in seen:
@@ -459,7 +446,6 @@ class SpanNormalizer:
                         root_system_text
                         and system_text
                         and system_text != root_system_text
-                        and not is_moderator_system(system_text)
                     )
                     payload_is_delegated = payload_is_delegated or delegated
                     if delegated:
@@ -1307,19 +1293,6 @@ class SpanNormalizer:
             if str(span.get("ServiceName") or "").strip()
         }
 
-        def is_moderator_system(text: str) -> bool:
-            lower = text.lower()
-            return any(
-                marker in lower
-                for marker in (
-                    "you are a moderator",
-                    "you are a coordinator",
-                    "coordinating a team",
-                    "available agents",
-                    "delegate sub-tasks",
-                )
-            )
-
         def delivered_text(text: str) -> tuple:
             """Return ``(user-facing text, addressed only to another agent)``.
 
@@ -1347,7 +1320,7 @@ class SpanNormalizer:
                 message = SpanNormalizer._normalize_text(
                     entry.get("message") or entry.get("content")
                 )
-                if target and "user" not in target.casefold():
+                if target and target.strip().casefold() not in {"user", "human"}:
                     agent_targets = True
                 elif message:
                     user_texts.append(message)
@@ -1441,13 +1414,7 @@ class SpanNormalizer:
                 root_agent_id = agent_id
 
             is_root_llm = bool(
-                (
-                    system_text
-                    and (
-                        system_text == root_system_text
-                        or is_moderator_system(system_text)
-                    )
-                )
+                (system_text and system_text == root_system_text)
                 or (not system_text and root_agent_id and agent_id == root_agent_id)
             )
             if is_root_llm:
