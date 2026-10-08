@@ -37,29 +37,26 @@ _HANDLERS: dict[str, Any] = {
 }
 
 
-def build_kg(
-    spans: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Build (nodes, edges) JSON dicts from raw ClickHouse-shaped OTel spans."""
-    registry = Registry()
+def dispatch_span(span: dict[str, Any], registry: Registry) -> None:
+    """Run the one per-span handler matching ``span``'s ``SpanName`` (if any)."""
+    span_name = str(span.get("SpanName") or "")
+    span_attrs = attrs(span)
 
-    for span in spans:
-        span_name = str(span.get("SpanName") or "")
-        span_attrs = attrs(span)
+    handler = _HANDLERS.get(span_name)
+    if handler is not None:
+        handler(span, span_attrs, registry)
+    elif span_name.endswith(".graph"):
+        handle_graph(span, span_attrs, registry)
+    elif span_name.endswith(".agent"):
+        handle_agent(span, span_attrs, registry)
+    elif span_name.endswith(".chat"):
+        handle_chat(span, span_attrs, registry)
+    elif span_name.endswith(".tool"):
+        handle_tool(span, span_attrs, registry)
 
-        handler = _HANDLERS.get(span_name)
-        if handler is not None:
-            handler(span, span_attrs, registry)
-        elif span_name.endswith(".graph"):
-            handle_graph(span, span_attrs, registry)
-        elif span_name.endswith(".agent"):
-            handle_agent(span, span_attrs, registry)
-        elif span_name.endswith(".chat"):
-            handle_chat(span, span_attrs, registry)
-        elif span_name.endswith(".tool"):
-            handle_tool(span, span_attrs, registry)
 
-    # Clean up trajectory once all spans are processed
+def apply_heuristics(spans: list[dict[str, Any]], registry: Registry) -> None:
+    """Cross-span clean-up of the trajectory, once ``spans`` are all handled."""
     # Agent handoffs
     explicit_handoff_targets = link_agent_handoffs(spans, registry)
     # Fallback: timestamp-order sibling AgentCalls the above left unlinked
@@ -69,6 +66,11 @@ def build_kg(
     # Session and MAS call i/o
     assign_container_boundary_states(registry)
 
+
+def serialize_registry(
+    registry: Registry,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Registry -> (nodes, edges) JSON dicts."""
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     for item in registry.all_items():
@@ -86,3 +88,14 @@ def build_kg(
                 payload[attr] = value
         nodes.append(payload)
     return nodes, edges
+
+
+def build_kg(
+    spans: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build (nodes, edges) JSON dicts from raw ClickHouse-shaped OTel spans."""
+    registry = Registry()
+    for span in spans:
+        dispatch_span(span, registry)
+    apply_heuristics(spans, registry)
+    return serialize_registry(registry)

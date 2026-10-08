@@ -53,6 +53,14 @@ class Registry:
         key = (type(edge), edge.source_id, edge.target_id)
         self.edges.setdefault(key, edge)
 
+    def remove_node(self, cls: type[KGBase], node_id: str) -> None:
+        self.nodes.pop((cls.__name__, node_id), None)
+
+    def remove_edges_where(self, predicate: Callable[[type, str, str], bool]) -> None:
+        """Drop every edge for which predicate(edge_class, source_id, target_id) holds."""
+        for key in [k for k in self.edges if predicate(*k)]:
+            del self.edges[key]
+
     def find(self, cls: type[T], predicate: Callable[[T], bool]) -> T | None:
         """Return the first node of this class satisfying predicate."""
         for (type_name, _node_id), node in self.nodes.items():
