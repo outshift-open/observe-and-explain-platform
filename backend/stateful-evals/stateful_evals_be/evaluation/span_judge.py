@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
+from stateful_evals_be.evaluation.span_context import current_agent_instruction_records
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.models.requests import TemporalMetricOptions
 
@@ -20,6 +21,19 @@ IntentRecognition: pass when the transition correctly recognizes and advances
 the active user/delegated intent; fail missed, distorted, or abandoned intent.
 Relevancy: pass when the transition is relevant and logically compatible with
 the active intent and prior claims; fail material contradiction or non-progress.
+
+Assess the current agent's responsibility from its attributed instructions and
+observed interactions. Instruction sources identify root policy, the current
+agent's instructions, or earlier recorded instructions. Identical text
+may have multiple sources. Do not apply another agent's instructions to the
+current agent merely because they appear in context. Responsibilities can
+include moderating, routing, reviewing, or synthesizing work; infer their meaning
+from the full instructions and recorded flow, not special names or phrases.
+Assigning or proposing work does not establish that it was executed. Quoted or
+relayed material is not automatically the current agent's own assertion.
+An unknown role or outcome alone is not a failure. When deciding a requested
+metric requires missing earlier evidence, set `needs_more_context` to true if
+that field is available in the output schema.
 
 Return strict JSON only with a `metrics` array. Each item must contain the exact
 requested `metric_name`, binary numeric `score`, and one concise `reasoning`.
@@ -160,14 +174,18 @@ class SpanJudge:
                 output_payload, None if focused else 3000
             )
 
-        return {
+        prepared = {
             "span_id": span_dict.get("span_id", ""),
+            "agent_id": span_dict.get("agent_id") or None,
             "entity_type": span_dict.get("entity_type", ""),
             "entity_name": span_dict.get("entity_name", ""),
             "contains_error": bool(span_dict.get("contains_error")),
             "current_input": current_input,
             "current_output": current_output,
         }
+        if not focused:
+            prepared["instructions"] = current_agent_instruction_records(span_dict)
+        return prepared
 
     def evaluate(
         self,

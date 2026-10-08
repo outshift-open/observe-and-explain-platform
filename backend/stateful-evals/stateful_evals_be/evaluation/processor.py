@@ -674,6 +674,20 @@ class TemporalMetricsProcessor:
 
     _MIN_FINAL_ANSWER_LEN = 40
 
+    @staticmethod
+    def _final_answer_review_text(
+        final_answer: str, origin: str, max_chars: int
+    ) -> str:
+        answer = final_answer[:max_chars]
+        if origin == "unattributed_candidate":
+            return (
+                "Origin: unattributed reply candidate. The trace does not establish "
+                "whether this reply was delivered to the user. Assess its role from "
+                "the available evidence; uncertain origin alone is not a failure.\n\n"
+                f"Candidate reply:\n{answer}"
+            )
+        return answer
+
     def _cross_validate_final_answer(
         self,
         traj_ctx: TrajectoryContext,
@@ -689,6 +703,7 @@ class TemporalMetricsProcessor:
         ctx = traj_ctx.get_final_answer_context()
         final_answer = ctx["final_answer"]
         span_index = ctx["final_answer_span_index"]
+        final_answer_origin = ctx.get("final_answer_origin", "")
 
         if (
             not final_answer or len(final_answer.strip()) < self._MIN_FINAL_ANSWER_LEN
@@ -696,6 +711,7 @@ class TemporalMetricsProcessor:
             final_answer, span_index = self._extract_final_answer_from_raw_spans(
                 raw_spans
             )
+            final_answer_origin = ""
 
         if not final_answer or len(final_answer.strip()) < self._MIN_FINAL_ANSWER_LEN:
             logger.info(
@@ -729,7 +745,9 @@ class TemporalMetricsProcessor:
 
         user_prompt = CROSS_SPAN_VALIDATION_USER_PROMPT.format(
             user_question=user_question,
-            final_answer=final_answer[:4000],
+            final_answer=self._final_answer_review_text(
+                final_answer, final_answer_origin, 4000
+            ),
             # The extractor bounds each record. A combined prefix would hide
             # later verification results and actions from the final review.
             tool_outputs=tool_output_text,
@@ -898,7 +916,9 @@ class TemporalMetricsProcessor:
 
         user_prompt = FINAL_OUTCOME_REVIEW_USER_PROMPT.format(
             user_question=user_question[:2000],
-            final_answer=final_answer[:5000],
+            final_answer=self._final_answer_review_text(
+                final_answer, ctx.get("final_answer_origin", ""), 5000
+            ),
             policy=(system_message or "No policy provided.")[:5000],
             aftermath=aftermath[:3000],
             trajectory_summary=trajectory_summary[:5000],

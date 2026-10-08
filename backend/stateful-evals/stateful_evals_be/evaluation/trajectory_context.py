@@ -803,6 +803,18 @@ class TrajectoryContext:
     def declare_root_request(self, text: str) -> None:
         """Record the request the run was started with, read from its input."""
         self.root_request = str(text or "").strip()
+        if not self.root_request or any(
+            fact.fact_type == "user_statement"
+            and _exact_text_key(fact.content) == _exact_text_key(self.root_request)
+            for fact in self.evidence
+        ):
+            return
+        # The workflow input establishes an external request, not an agent's
+        # identity. Preserve it independently of user-role transport messages.
+        self._ingest_root_turn(
+            RootTurn("", "", "", self.root_request, -1),
+            -1,
+        )
 
     def declare_roster(self, agents: List[tuple[str, int]]) -> None:
         """Declare the complete roster seen in a trace before ingestion.
@@ -1547,6 +1559,8 @@ class TrajectoryContext:
     def ingest_span(self, span_dict: Dict[str, Any], span_index: int) -> None:
         """Extract and store information from a processed span."""
         attrs = _span_attributes(span_dict)
+        if not self.root_agent_id and _span_actor_scope(span_dict) == "root":
+            self.root_agent_id = self._explicit_agent_id(span_dict)
         for turn_call_id in (
             attrs.get("mas.parent.call.id"),
             attrs.get("mas.call.id"),
@@ -1997,54 +2011,29 @@ class TrajectoryContext:
         work_unit = self._work_unit_for_span(span_dict, span_index, explicit_agent)
         if work_unit is not None:
             self._record_receipt(work_unit, span_index)
-        delegated_task = (
-            _is_delegated_agent_input(
-                input_payload,
-                root_policy_text=self.policy_text,
-            )
-            or work_unit is not None
-        )
         agent_id = _span_agent_id(span_dict)
         provenance = self._operation_provenance(
             span_dict,
-            delegated_task=delegated_task,
+            delegated_task=True if work_unit is not None else None,
         )
-        peer_assertion = delegated_task or provenance["actor_scope"] == "peer"
-        if not peer_assertion and agent_id and not self.root_agent_id:
-            self.root_agent_id = agent_id
+        actor_scope = provenance["actor_scope"]
+        peer_assertion = actor_scope == "peer"
+        if actor_scope == "root" and explicit_agent and not self.root_agent_id:
+            self.root_agent_id = explicit_agent
         input_artifact_ids = self._input_artifact_ids(input_payload)
         related_intent_ids: List[str] = []
         user_messages = _extract_user_messages(input_payload)
-        embedded_user_requests = _ordered_union(
-            [],
-            [
-                request
-                for message in user_messages
-                if (request := _extract_embedded_user_request(message))
-            ],
-        )
-        if self.root_request and not embedded_user_requests:
-            root = " ".join(self.root_request.split()).casefold()
-            if any(
-                root in (normalized := " ".join(message.split()).casefold())
-                and len(normalized) > len(root) + 40
-                for message in user_messages
-            ):
-                # An orchestration prompt that wraps the user's request in
-                # instructions and replayed turns: only the request is theirs.
-                embedded_user_requests = [self.root_request]
-        message_records = [
-            (request, "user_statement") for request in embedded_user_requests
-        ]
+        message_records = []
         for message in user_messages:
-            if _is_runtime_feedback_message(message):
-                fact_type = "runtime_feedback"
-            elif delegated_task or _is_coordination_context_message(message):
+            if peer_assertion or _is_coordination_context_message(message):
                 fact_type = "agent_handoff"
-            elif embedded_user_requests:
-                fact_type = "environment_context"
-            else:
+            elif actor_scope == "root":
                 fact_type = "user_statement"
+            else:
+                # A user-role transport slot can carry a task, shared state,
+                # runtime feedback, or an external request. Without native
+                # origin evidence, retain it without inventing a user intent.
+                fact_type = "environment_context"
             message_records.append((message, fact_type))
 
         for msg, fact_type in message_records:
@@ -2090,6 +2079,8 @@ class TrajectoryContext:
                         source_name=(
                             "coordination_context"
                             if fact_type == "agent_handoff"
+                            else "prompt_user"
+                            if fact_type == "environment_context"
                             else fact_type.removesuffix("_statement")
                         ),
                         related_intent_ids=message_intent_ids,
@@ -2126,7 +2117,7 @@ class TrajectoryContext:
         )
         if agent_text:
             if (
-                not peer_assertion
+                actor_scope == "root"
                 and not routing_output
                 and _has_visible_content(agent_text)
             ):
@@ -2244,6 +2235,7 @@ class TrajectoryContext:
     ) -> Dict[str, str]:
         """Retain the actor and trace linkage needed by trajectory metrics."""
         agent_id = _span_agent_id(span_dict)
+        explicit_agent = self._explicit_agent_id(span_dict)
         explicit_scope = (
             str(span_dict.get("actor_scope") or _span_actor_scope(span_dict))
             .strip()
@@ -2253,12 +2245,10 @@ class TrajectoryContext:
             actor_scope = explicit_scope
         elif delegated_task is True:
             actor_scope = "peer"
-        elif delegated_task is False:
-            actor_scope = "root"
-        elif agent_id and self.root_agent_id:
+        elif explicit_agent and self.root_agent_id:
             actor_scope = (
                 "root"
-                if _normalise_actor_id(agent_id)
+                if _normalise_actor_id(explicit_agent)
                 == _normalise_actor_id(self.root_agent_id)
                 else "peer"
             )
@@ -4192,18 +4182,26 @@ class TrajectoryContext:
     _INTERNAL_PREFIXES = ("REASONING:", "THOUGHT:", "PLAN:")
 
     def get_final_answer_context(self) -> Dict[str, Any]:
-        """Return user-facing agent claims and all tool-output evidence for cross-validation."""
+        """Return a final reply and its known origin with tool-output evidence."""
         user_facing: list[ClaimEntry] = []
+        unattributed: list[ClaimEntry] = []
         for claim in self.claims:
-            if claim.claim_type not in ("assertion", "completion_claim"):
+            if (
+                claim.claim_type not in ("assertion", "completion_claim")
+                or claim.actor_scope not in ("", "root")
+            ):
                 continue
             text = claim.content.strip()
             if not text:
                 continue
             if any(text.upper().startswith(p) for p in self._INTERNAL_PREFIXES):
                 continue
-            user_facing.append(claim)
+            if claim.actor_scope == "root":
+                user_facing.append(claim)
+            else:
+                unattributed.append(claim)
 
+        final_answer_origin = ""
         if self.latest_root_answer:
             final_answer = self.latest_root_answer
             final_answer_span_index = self.latest_root_answer_span_index
@@ -4216,6 +4214,11 @@ class TrajectoryContext:
             latest = user_facing[-1]
             final_answer = latest.content
             final_answer_span_index = latest.span_index
+        elif unattributed:
+            latest = unattributed[-1]
+            final_answer = latest.content
+            final_answer_span_index = latest.span_index
+            final_answer_origin = "unattributed_candidate"
         else:
             final_answer = ""
             final_answer_span_index = -1
@@ -4241,13 +4244,16 @@ class TrajectoryContext:
 
         all_tool_outputs = [f for f in self.evidence if f.fact_type == "tool_output"]
 
-        return {
+        result = {
             "final_answer": final_answer,
             "final_answer_span_index": final_answer_span_index,
             "user_question": user_question,
             "all_tool_outputs": all_tool_outputs,
             "coordination_context": self.coordination_context.compact_payload(),
         }
+        if final_answer_origin:
+            result["final_answer_origin"] = final_answer_origin
+        return result
 
     def get_intent_events(self) -> List[Dict[str, Any]]:
         """Return intent tracking data for result building."""
@@ -4622,28 +4628,14 @@ def _span_phase(span_dict: Dict[str, Any]) -> str:
 
 
 def _span_actor_scope(span_dict: Dict[str, Any]) -> str:
+    """Read native topology scope; a role label does not establish topology."""
     attrs = _span_attributes(span_dict)
-    role = (
-        str(
-            span_dict.get("agent_role")
-            or _first_populated(attrs, "mas.agent.role", "agent.role")
-            or ""
-        )
-        .strip()
-        .lower()
-    )
-    if role in {"lead", "leader", "moderator", "orchestrator", "coordinator"}:
-        return "root"
-    if role in {
-        "peer",
-        "worker",
-        "specialist",
-        "reviewer",
-        "verifier",
-        "executor",
-    }:
-        return "peer"
-    return ""
+    value = str(
+        span_dict.get("actor_scope")
+        or _first_populated(attrs, "mas.actor.scope", "actor.scope", "actor_scope")
+        or ""
+    ).strip().lower()
+    return value if value in {"root", "peer"} else ""
 
 
 def _span_links(span_dict: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -5118,12 +5110,6 @@ _AGENT_OUTPUT_MAP_KEYS = {
     "prior_agent_outputs",
 }
 
-_EMBEDDED_USER_REQUEST_RE = re.compile(
-    r"(?:original\s+)?user\s+request\s*:\s*(.+?)(?:\n\s*begin!?\s*$|$)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
 def _payload_contains_coordination_context(payload: Any) -> bool:
     stack: List[Any] = [payload]
     while stack:
@@ -5168,83 +5154,13 @@ def _payload_agent_references(payload: Any) -> List[str]:
     return _ordered_union([], agent_ids)
 
 
-def _extract_embedded_user_request(text: str) -> str:
-    """Extract an external request carried inside an agent task envelope."""
-    match = _EMBEDDED_USER_REQUEST_RE.search(str(text or "").strip())
-    return match.group(1).strip() if match else ""
-
-
 def _is_coordination_context_message(text: str) -> bool:
-    """Identify machine-injected peer, handoff, review, or shared context."""
-    normalized = " ".join(str(text or "").casefold().split())
-    if _extract_embedded_user_request(text) and any(
-        marker in normalized
-        for marker in (
-            "objective and guidance",
-            "coordination round",
-            "guidance from the lead",
-        )
-    ):
-        return True
+    """Read explicit structured peer, handoff, review, or shared context."""
     try:
         payload = json.loads(text)
     except (TypeError, json.JSONDecodeError):
         return False
     return _payload_contains_coordination_context(payload)
-
-
-def _is_runtime_feedback_message(text: str) -> bool:
-    """Identify tool/runtime feedback represented as a user-role message."""
-    normalized = " ".join(str(text or "").casefold().split())
-    if not re.match(
-        r"^(?:error|warning|budget warning|step warning|system notice):",
-        normalized,
-    ):
-        return False
-    return any(
-        marker in normalized
-        for marker in (
-            "available tools",
-            "completion tool",
-            "continue or submit",
-            "steps remain",
-            "tool call",
-            "use one of the",
-        )
-    )
-
-
-def _extract_system_messages(input_payload: Dict[str, Any]) -> List[str]:
-    """Pull system messages from flattened or native structured payloads."""
-    messages = _extract_prompt_messages(input_payload)
-    system_messages = [
-        message["content"]
-        for message in messages
-        if message["role"] == "system" and message["content"]
-    ]
-    explicit = _first_text_value(input_payload, ("system_prompt", "system_message"))
-    if explicit:
-        system_messages.append(explicit)
-    return _ordered_union([], system_messages)
-
-
-def _normalized_contract_text(text: str) -> str:
-    """Normalize a system contract for stable root-agent identity checks."""
-    return " ".join(text.split()).casefold()
-
-
-def _is_delegated_agent_input(
-    input_payload: Dict[str, Any],
-    *,
-    root_policy_text: str = "",
-) -> bool:
-    """Compare explicit system contracts without guessing roles from prose."""
-    system_messages = _extract_system_messages(input_payload)
-    normalized_root = _normalized_contract_text(root_policy_text)
-    return bool(normalized_root and system_messages) and not any(
-        _normalized_contract_text(message) == normalized_root
-        for message in system_messages
-    )
 
 
 def _external_turn_key(span_dict: Dict[str, Any]) -> str:

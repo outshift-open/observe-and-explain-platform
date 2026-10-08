@@ -18,6 +18,50 @@ def _size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
 
 
+def current_agent_instruction_records(span: dict[str, Any]) -> list[dict[str, Any]]:
+    """Retain full current contracts with recorded ownership in either judge mode."""
+    from stateful_evals_be.evaluation.trajectory_context import _extract_prompt_messages
+
+    payload = span.get("input_payload") or {}
+    if not isinstance(payload, dict):
+        return []
+    source = {
+        "kind": "current_agent_instruction",
+        "agent_id": span.get("agent_id") or None,
+        "span_id": str(span.get("span_id") or ""),
+    }
+    texts = [
+        (message["content"], "system_message")
+        for message in _extract_prompt_messages(payload)
+        if message["role"] == "system"
+    ]
+    texts.extend(
+        (payload[key], "system_message")
+        for key in ("system_prompt", "system_message")
+        if isinstance(payload.get(key), str)
+    )
+    contract = payload.get("agent_contract")
+    if isinstance(contract, dict):
+        texts.append(
+            (
+                "Agent contract: "
+                + json.dumps(contract, ensure_ascii=False, sort_keys=True, default=str),
+                "agent_contract",
+            )
+        )
+    records: dict[str, dict[str, Any]] = {}
+    for content, source_name in texts:
+        if not content:
+            continue
+        record = records.setdefault(
+            content.strip(), {"content": content, "sources": []}
+        )
+        origin = {**source, "source_name": source_name}
+        if origin not in record["sources"]:
+            record["sources"].append(origin)
+    return list(records.values())
+
+
 def _identifier_fields(value: Any, *, arguments: bool = False) -> set[str]:
     """Find record-reference fields in structured tool arguments."""
     if isinstance(value, str):
@@ -125,15 +169,39 @@ def select_span_context(
         call_payload, arguments=span.get("entity_type") == "tool"
     )
     roots = [m["content"] for m in messages if m["role"] in {"user", "human"}][:1]
-    policies = [m["content"] for m in messages if m["role"] == "system"]
-    if expanded:
-        policies.extend(
-            f.content
-            for f in context.evidence
-            if f.fact_type == "policy_rule" and f.span_index < span_index
+    budget_policies = [m["content"] for m in messages if m["role"] == "system"]
+    # Keep ownership with each instruction without repeating shared contracts.
+    # Use recorded identity here; the retrieval agent may be a service fallback.
+    instructions: dict[str, dict[str, Any]] = {}
+
+    def add_instruction(content: str, source: dict[str, Any]) -> None:
+        if not content:
+            return
+        record = instructions.setdefault(
+            content.strip(), {"content": content, "sources": []}
         )
-    policies = list(dict.fromkeys([context.policy_text, *policies]))
-    policies = [p for p in policies if p]
+        if source not in record["sources"]:
+            record["sources"].append(source)
+
+    add_instruction(context.policy_text, {"kind": "root_policy"})
+    for record in current_agent_instruction_records(span):
+        for source in record["sources"]:
+            add_instruction(record["content"], source)
+    if expanded:
+        for i, fact in enumerate(context.evidence):
+            if fact.fact_type == "policy_rule" and fact.span_index < span_index:
+                budget_policies.append(fact.content)
+                add_instruction(
+                    fact.content,
+                    {
+                        "kind": "prior_agent_instruction",
+                        "agent_id": fact.agent_id or None,
+                        "artifact_id": context._evidence_artifact_id(i, fact),
+                        "source_name": fact.source_name,
+                    },
+                )
+    budget_policies = list(dict.fromkeys([context.policy_text, *budget_policies]))
+    budget_policies = [text for text in budget_policies if text]
 
     facts = {
         context._evidence_artifact_id(i, f): f
@@ -237,7 +305,7 @@ def select_span_context(
 
     view: dict[str, Any] = {
         "intents": intents,
-        "instructions": policies,
+        "instructions": list(instructions.values()),
         "current_request": roots,
         "facts": [],
         "recent_claims": [],
@@ -246,7 +314,9 @@ def select_span_context(
     }
     included: set[str] = set()
     seen_content: dict[str, dict[str, Any]] = {}
-    used = _size(view)
+    # Instruction provenance and newly exposed full contracts are mandatory
+    # overhead; they must not evict evidence that fit the prior text-only budget.
+    used = _size({**view, "instructions": budget_policies})
     # Rank by structure only: same work item, then the agent's own artifacts and
     # coordination edges it sent or received, then recency.
     ranked = []
@@ -340,6 +410,6 @@ def select_span_context(
     view["selection"] = {
         "mode": "expanded" if expanded else "focused",
         "omitted_artifacts": len(artifacts.keys() - included),
-        "soft_budget_exceeded": used > max_chars,
+        "soft_budget_exceeded": _size(view) > max_chars,
     }
     return view
