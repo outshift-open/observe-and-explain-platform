@@ -103,11 +103,36 @@ its `CLICKHOUSE_*` settings.
 | `high_level_metric_suite` | `"legacy_v1"` | Metric suite used by the final audit: `legacy_v1`, `paper_v1`, or `paper_v2` |
 | `use_fatal_mode` | `True` | Fatal/minor audit with a binary trajectory score |
 | `fatality_threshold` | `0.69` | Severity at or above which a failure is fatal |
-| `reasoning_effort` | `"low"` | Reasoning effort requested from compatible models |
+| `reasoning_effort` | `"low"` | Reasoning effort for final audits and trajectory metric judges |
+| `span_reasoning_effort` | `"none"` | Reasoning effort for span judgments only; `None` omits the setting |
+| `span_context_mode` | `"focused"` | Span evidence view: `focused`, or `legacy` for the previous recent-facts view |
+| `span_context_max_chars` | `14000` | Soft character budget for the focused span view |
 | `batch_size` | `50` | Sessions evaluated concurrently by `EvaluationEngine` |
 | `sampling` | `None` | Span sampling (`tail_weighted`); `None` judges every span |
 
 See `stateful_evals_be/models/requests.py` for the rest.
+
+### Span context
+
+Each span judgment receives a view of the earlier trajectory. `span_context_mode`
+selects how that view is built:
+
+- `focused` (default) selects the evidence relevant to the span being judged:
+  exact message matches and explicit span links first, then the same work unit,
+  then the agent's own artifacts and coordination edges, then recency. The
+  current span's input and output are not truncated. Retrieval is budgeted by
+  `span_context_max_chars`; required evidence and the current span can exceed it.
+  When a span fails, or the judge asks for more context, while evidence was
+  omitted, the span is judged once more with all available prior artifacts. The
+  extra tokens count towards the session's usage.
+- `legacy` keeps the previous recent-facts view, prompts and truncation limits.
+
+`span_reasoning_effort` sets the reasoning effort for span judge calls only; it
+is independent of the mode, and `reasoning_effort` still applies to final audits
+and trajectory metrics. `"none"` asks for thinking to be disabled where the model
+supports it; `None` leaves the provider default. Final audits and trajectory
+metrics read the full trajectory context in either mode. Changing these options
+can change individual span judgments.
 
 ## Results
 

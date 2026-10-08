@@ -22,6 +22,7 @@ import re
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from metrics_computation_engine.llm_judge.llm import LLMClient
@@ -190,8 +191,10 @@ class TemporalMetricsProcessor:
 
                 def _capturing_query(*a, _orig=_orig_query, _tls=tls, **kw):
                     kw.setdefault("max_tokens", self.options.span_judge_max_tokens)
-                    if self.options.reasoning_effort:
-                        kw.setdefault("reasoning_effort", self.options.reasoning_effort)
+                    if self.options.span_reasoning_effort:
+                        kw.setdefault(
+                            "reasoning_effort", self.options.span_reasoning_effort
+                        )
                     resp = _orig(*a, **kw)
                     usage = getattr(resp, "usage", None)
                     if usage:
@@ -340,7 +343,7 @@ class TemporalMetricsProcessor:
 
     def _create_span_judge(self) -> SpanJudge:
         return SpanJudge(
-            query=self._query_with_budget,
+            query=partial(self._query_with_budget, span_processing=True),
             options=self.options,
             metric_names=self.metric_names,
         )
@@ -366,6 +369,7 @@ class TemporalMetricsProcessor:
         *,
         max_tokens: int,
         temperature: float = 0.0,
+        span_processing: bool = False,
     ) -> Any:
         model_name = str(
             getattr(getattr(self, "llm_config", None), "LLM_MODEL_NAME", "")
@@ -378,8 +382,8 @@ class TemporalMetricsProcessor:
         }
         reasoning_effort = getattr(
             getattr(self, "options", None),
-            "reasoning_effort",
-            "low",
+            "span_reasoning_effort" if span_processing else "reasoning_effort",
+            "none" if span_processing else "low",
         )
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
@@ -1677,7 +1681,16 @@ class TemporalMetricsProcessor:
                     traj_ctx.ingest_span(span_dict, span_index=n)
                     continue
 
-                context_state = traj_ctx.retrieve_for_state_delta(span_dict)
+                focused = self.options.span_context_mode == "focused"
+                context_state = (
+                    traj_ctx.retrieve_for_span(
+                        span_dict,
+                        span_index=n,
+                        max_chars=self.options.span_context_max_chars,
+                    )
+                    if focused
+                    else traj_ctx.retrieve_for_state_delta(span_dict)
+                )
                 compact_span = self._compact_span_delta(span_dict)
                 mce_spans_evaluated += 1
                 mce_call_attempts += 1
@@ -1685,9 +1698,56 @@ class TemporalMetricsProcessor:
                     mce_response = self.compute_span_state_delta(
                         span_dict,
                         context_state=context_state,
-                        policy=system_message,
+                        policy="" if focused else system_message,
                         metrics=metrics_to_run,
                     )
+                    # Recheck provisional failures against all available prior
+                    # artifacts once, so retrieval omissions do not become failures.
+                    needs_expansion = mce_response.get("needs_more_context") or any(
+                        result.get("value") == 0
+                        for result in mce_response.get("results", [])
+                    )
+                    if (
+                        focused
+                        and needs_expansion
+                        and context_state["selection"]["omitted_artifacts"]
+                    ):
+                        first_usage = mce_response.get("usage") or {}
+                        mce_prompt_tokens += int(first_usage.get("prompt_tokens", 0))
+                        mce_completion_tokens += int(
+                            first_usage.get("completion_tokens", 0)
+                        )
+                        mce_total_tokens += int(first_usage.get("total_tokens", 0))
+                        context_state = traj_ctx.retrieve_for_span(
+                            span_dict,
+                            span_index=n,
+                            max_chars=self.options.span_context_max_chars,
+                            expanded=True,
+                        )
+                        logger.info(
+                            f"[{session_id}] Expanding evidence for span {n + 1}"
+                        )
+                        mce_response = self.compute_span_state_delta(
+                            span_dict,
+                            context_state=context_state,
+                            policy="",
+                            metrics=metrics_to_run,
+                        )
+                    mce_usage = (
+                        mce_response.get("usage")
+                        or mce_response.get("token_usage")
+                        or {}
+                    )
+                    mce_prompt_tokens += int(mce_usage.get("prompt_tokens", 0))
+                    mce_completion_tokens += int(mce_usage.get("completion_tokens", 0))
+                    mce_total_tokens += int(mce_usage.get("total_tokens", 0))
+                    if focused and mce_response.get("needs_more_context"):
+                        mce_response["results"] = []
+                        mce_response["failed_metrics"] = [
+                            {
+                                "error_message": "Span judge could not decide with available evidence"
+                            }
+                        ]
                     if not mce_response.get("results"):
                         internal_errors = mce_response.get("failed_metrics", [])
                         err_msg = (
@@ -1705,14 +1765,6 @@ class TemporalMetricsProcessor:
                         continue
 
                     mce_call_successes += 1
-                    mce_usage = (
-                        mce_response.get("usage")
-                        or mce_response.get("token_usage")
-                        or {}
-                    )
-                    mce_prompt_tokens += int(mce_usage.get("prompt_tokens", 0))
-                    mce_completion_tokens += int(mce_usage.get("completion_tokens", 0))
-                    mce_total_tokens += int(mce_usage.get("total_tokens", 0))
                 except Exception as e:
                     logger.error(f"[{session_id}] Combined span judge failed: {e}")
                     mce_call_failures += 1
@@ -1801,9 +1853,24 @@ class TemporalMetricsProcessor:
                 and mce_call_successes == 0
                 and mce_call_failures > 0
             ):
+                token_usage = TokenUsage(
+                    prompt_tokens=mce_prompt_tokens,
+                    completion_tokens=mce_completion_tokens,
+                    total_tokens=mce_total_tokens,
+                    mce_prompt_tokens=mce_prompt_tokens,
+                    mce_completion_tokens=mce_completion_tokens,
+                    mce_total_tokens=mce_total_tokens,
+                )
                 return SessionResult(
                     session_id=session_id,
                     app_name=app_name,
+                    total_spans=total_spans,
+                    mce_spans_evaluated=mce_spans_evaluated,
+                    spans_sampled_out=spans_sampled_out,
+                    token_usage=token_usage,
+                    cost_estimate=estimate_token_cost(
+                        token_usage, self.llm_config.LLM_MODEL_NAME
+                    ),
                     error=(
                         f"All MCE metric calls failed ({mce_call_failures}/{mce_call_attempts}). "
                         f"Last error: {last_mce_error or 'unknown'}"
