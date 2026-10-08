@@ -72,6 +72,8 @@ class EvidenceFact:
     # Tool facts only: the span's start (epoch ns) and OTel ``Duration`` (ns).
     started_at_ns: Optional[int] = None
     duration_ns: Optional[int] = None
+    # Exact identity of a recorded tool invocation, when the trace provides it.
+    tool_call_id: str = ""
 
 
 @dataclass
@@ -335,6 +337,7 @@ class TrajectoryContext:
         self._span_agent_ids: Dict[str, str] = {}
         self._span_coordination_event_types: Dict[str, set[str]] = {}
         self._latest_claim_by_agent: Dict[str, str] = {}
+        self._tool_fact_by_call_id: Dict[str, List[str]] = {}
         self._processed_spans: Dict[str, Dict[str, Any]] = {}
         # Spans that ran inside a delegation, so their OTel descendants resolve
         # to the same work item through the parent span chain. Delegations
@@ -1766,12 +1769,16 @@ class TrajectoryContext:
                     source_name=tool_name,
                     related_intent_ids=related_intent_ids,
                     work_id=work_id,
+                    tool_call_id=_span_call_id(span_dict),
                     outcome=tool_outcome,
                     started_at_ns=_timestamp_ns(span_dict.get("timestamp")),
                     duration_ns=_span_duration_ns(span_dict),
                     **provenance,
                 )
             )
+            call_id = _span_call_id(span_dict)
+            if call_id:
+                self._tool_fact_by_call_id.setdefault(call_id, []).append(evidence_id)
         else:
             evidence_id = ""
 
@@ -1874,16 +1881,26 @@ class TrajectoryContext:
             if str(message.get("role") or "").lower() != "tool":
                 continue
             result = _message_content(message.get("content"))
-            name, arguments = calls.get(
-                str(message.get("tool_call_id") or ""), ("tool", None)
+            call_id = str(message.get("tool_call_id") or "")
+            name, arguments = calls.get(call_id, ("tool", None))
+            recorded = self._tool_exchange_recorded(
+                call_id, result, span_dict, explicit_call=call_id in calls
             )
-            if not result or self._tool_result_recorded(name, result):
+            if not recorded:
+                recorded = self._tool_result_recorded(
+                    name if call_id in calls else None, result, call_id=call_id
+                )
+            if not result or recorded:
                 continue
             self._ingest_tool_span(
                 {
                     **span_dict,
                     "entity_type": "tool",
                     "entity_name": name,
+                    "attributes": {
+                        **_span_attributes(span_dict),
+                        "mas.call.id": call_id,
+                    },
                     "input_payload": arguments if isinstance(arguments, dict) else {},
                     "output_payload": {"output": _json_value(result)},
                 },
@@ -1891,16 +1908,94 @@ class TrajectoryContext:
                 name,
             )
 
-    def _tool_result_recorded(self, tool_name: str, result: str) -> bool:
-        return any(
-            fact.fact_type == "tool_output"
-            and fact.source_name == tool_name
-            and (
-                result in fact.content
-                or _safe_json(_json_value(result), max_len=None) in fact.content
+    def _tool_exchange_recorded(
+        self,
+        call_id: str,
+        result: str,
+        span_dict: Dict[str, Any],
+        *,
+        explicit_call: bool = False,
+    ) -> bool:
+        if not call_id:
+            return False
+        agent_id = self._explicit_agent_id(span_dict)
+        trace_id = str(span_dict.get("trace_id") or "")
+        for fact in self.evidence:
+            if fact.fact_type != "tool_output" or fact.tool_call_id != call_id:
+                continue
+            different_scope = bool(
+                (agent_id and fact.agent_id and agent_id != fact.agent_id)
+                or (trace_id and fact.trace_id and trace_id != fact.trace_id)
             )
-            for fact in self.evidence
-        )
+            if different_scope and explicit_call:
+                # A paired request in another conversation is a distinct call,
+                # even when both invocations returned identical text.
+                continue
+            # Replays in one agent's conversation may elide the recorded output.
+            # Another conversation can reuse the id for a distinct invocation;
+            # retain its differing result instead of silently dropping it.
+            if not different_scope or (
+                result and _exact_text_key(result) in self._tool_result_keys(fact)
+            ):
+                return True
+        return False
+
+    def _tool_result_recorded(
+        self, tool_name: Optional[str], result: str, *, call_id: str = ""
+    ) -> bool:
+        matches = []
+        for index, fact in enumerate(self.evidence):
+            if fact.fact_type != "tool_output" or (
+                tool_name is not None and fact.source_name != tool_name
+            ):
+                continue
+            # An unknown explicit id can identify legacy evidence lacking an id,
+            # but must never alias a different recorded invocation.
+            if call_id and fact.tool_call_id:
+                continue
+            if not result or _exact_text_key(result) not in self._tool_result_keys(fact):
+                continue
+            matches.append((index, fact))
+        if call_id and len(matches) == 1:
+            index, fact = matches[0]
+            fact.tool_call_id = call_id
+            self._tool_fact_by_call_id.setdefault(call_id, []).append(
+                self._evidence_artifact_id(index, fact)
+            )
+            return True
+        return bool(matches) if not call_id else False
+
+    @staticmethod
+    def _tool_result_keys(fact: EvidenceFact) -> set[str]:
+        returned = fact.content.partition("\n  Returned: ")[2]
+        keys = {_exact_text_key(returned)}
+        payload = _json_value(returned)
+        # Chat-only exchanges are stored in this one-field transport wrapper.
+        # Do not extract a result field from a larger observation and lose its
+        # status, conditions, or other accompanying evidence.
+        if isinstance(payload, dict) and set(payload) == {"output"}:
+            keys.add(_exact_text_key(payload["output"]))
+        return keys
+
+    def _tool_input_artifact_ids(self, call_id: str, content: str) -> List[str]:
+        recorded = self._tool_fact_by_call_id.get(call_id, []) if call_id else []
+        if len(recorded) == 1:
+            return list(recorded)
+        matches = [
+            self._evidence_artifact_id(index, fact)
+            for index, fact in enumerate(self.evidence)
+            if fact.fact_type == "tool_output"
+            and (
+                self._evidence_artifact_id(index, fact) in recorded
+                if recorded
+                else not call_id or not fact.tool_call_id
+            )
+            and content
+            and _exact_text_key(content) in self._tool_result_keys(fact)
+        ]
+        # Reused call ids can occur in independent agent conversations. A reply
+        # disambiguates them only if its content matches exactly one result.
+        return matches if not call_id or len(matches) == 1 else []
 
     def _ingest_llm_span(
         self, span_dict: Dict[str, Any], span_index: int, entity_name: str
@@ -2416,7 +2511,8 @@ class TrajectoryContext:
     def _input_artifact_ids(self, input_payload: Dict[str, Any]) -> List[str]:
         """Resolve recorded prompt messages to artifacts already in context.
 
-        A message links to an artifact only when the whole text is equal.
+        A tool call id identifies its recorded result even when the prompt has
+        elided its text. Without an id, the whole normalized text must match.
         """
         artifact_ids: List[str] = []
         for message in _extract_prompt_messages(input_payload):
@@ -2434,16 +2530,10 @@ class TrajectoryContext:
                     for index, claim in enumerate(self.claims)
                 ]
             elif role in {"tool", "function"}:
-                # A tool fact is stored as its call followed by the returned
-                # payload; a later prompt replays only that payload.
-                candidates = [
-                    (
-                        self._evidence_artifact_id(index, fact),
-                        fact.content.partition("\n  Returned: ")[2],
-                    )
-                    for index, fact in enumerate(self.evidence)
-                    if fact.fact_type == "tool_output"
-                ]
+                artifact_ids.extend(self._tool_input_artifact_ids(
+                    message.get("tool_call_id", ""), message["content"]
+                ))
+                continue
             else:
                 candidates = [
                     (self._evidence_artifact_id(index, fact), fact.content)
@@ -3538,6 +3628,7 @@ class TrajectoryContext:
         self._span_agent_ids = {}
         self._span_coordination_event_types = {}
         self._latest_claim_by_agent = {}
+        self._tool_fact_by_call_id = {}
         self._work_item_by_inner_span_id = {}
         # The adapter's root turn names the root agent; else the first root claim.
         self.root_agent_id = next(
@@ -3566,6 +3657,10 @@ class TrajectoryContext:
             if unit is not None and unit.intent_id and span_id:
                 self._work_item_by_inner_span_id.setdefault(span_id, unit.intent_id)
         for index, fact in enumerate(self.evidence):
+            if fact.fact_type == "tool_output" and fact.tool_call_id:
+                self._tool_fact_by_call_id.setdefault(fact.tool_call_id, []).append(
+                    self._evidence_artifact_id(index, fact)
+                )
             if fact.span_id:
                 self._span_artifact_ids.setdefault(fact.span_id, []).append(
                     self._evidence_artifact_id(index, fact)
@@ -3991,8 +4086,13 @@ class TrajectoryContext:
 
         intent_lines = ["INTENT REGISTER:", _INTENT_STATUS_LEGEND]
         for intent in self.intents:
+            # Final synthesis is already represented in coordination history.
+            # Repeating its lifecycle link here is not evidence of fulfillment.
+            intent_events = [
+                event for event in intent.events if event.get("type") != "synthesis"
+            ]
             event_summary = ", ".join(
-                f"step {e['span_index'] + 1}:{e['type']}" for e in intent.events[-5:]
+                f"step {e['span_index'] + 1}:{e['type']}" for e in intent_events[-5:]
             )
             intent_lines.append(
                 f"  [{intent.status.upper()}] {intent.name}: {intent.description} "
@@ -4235,9 +4335,20 @@ def _normalise_message(message: Any) -> Optional[Dict[str, str]]:
         or kwargs.get("tool_calls")
         or _semconv_tool_call_parts(parts)
     )
-    if not content and not has_tool_calls:
+    tool_call_id = str(
+        message.get("tool_call_id")
+        or kwargs.get("tool_call_id")
+        or attributes.get("tool_call_id")
+        or ""
+    ).strip()
+    if not content and not has_tool_calls and not (
+        role in {"tool", "function"} and tool_call_id
+    ):
         return None
-    return {"role": role, "content": content}
+    normalized = {"role": role, "content": content}
+    if tool_call_id:
+        normalized["tool_call_id"] = tool_call_id
+    return normalized
 
 
 def _semconv_tool_call_parts(parts: Any) -> List[Dict[str, Any]]:
@@ -4285,9 +4396,11 @@ def _extract_flattened_messages(
     indexed: Dict[int, Dict[str, str]] = {}
     role_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.role$")
     content_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.content$")
+    tool_call_id_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.tool_call_id$")
     for key, value in payload.items():
         role_match = role_re.match(key)
         content_match = content_re.match(key)
+        tool_call_id_match = tool_call_id_re.match(key)
         if role_match:
             indexed.setdefault(int(role_match.group(1)), {})["role"] = (
                 str(value).strip().lower()
@@ -4296,15 +4409,26 @@ def _extract_flattened_messages(
             indexed.setdefault(int(content_match.group(1)), {})["content"] = (
                 _message_content(value)
             )
+        elif tool_call_id_match and str(value or "").strip():
+            indexed.setdefault(int(tool_call_id_match.group(1)), {})["tool_call_id"] = (
+                str(value).strip()
+            )
     return [
         {
             "role": entry.get(
                 "role", "assistant" if "completion" in prefix else "user"
             ),
             "content": entry.get("content", ""),
+            **(
+                {"tool_call_id": entry["tool_call_id"]}
+                if entry.get("tool_call_id")
+                else {}
+            ),
         }
         for _, entry in sorted(indexed.items())
-        if entry.get("content")
+        if entry.get("content") or (
+            entry.get("role") in {"tool", "function"} and entry.get("tool_call_id")
+        )
     ]
 
 
@@ -4312,9 +4436,13 @@ def _extract_prompt_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     messages = _extract_flattened_messages(payload, "gen_ai.prompt")
     messages.extend(_extract_structured_messages(payload))
     unique: List[Dict[str, str]] = []
-    identities: set[tuple[str, str]] = set()
+    identities: set[tuple[str, str, str]] = set()
     for message in messages:
-        identity = (message["role"], message["content"])
+        identity = (
+            message["role"],
+            message["content"],
+            message.get("tool_call_id", ""),
+        )
         if identity in identities:
             continue
         identities.add(identity)

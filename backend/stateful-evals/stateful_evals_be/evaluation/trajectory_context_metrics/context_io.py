@@ -69,6 +69,7 @@ def load_trajectory_context_artifact(
             trace_id=str(item.get("trace_id") or ""),
             related_intent_ids=_string_list(item.get("related_intent_ids")),
             work_id=str(item.get("work_id") or ""),
+            tool_call_id=str(item.get("tool_call_id") or ""),
             outcome=str(item.get("outcome") or ""),
             relayed_from_agent_id=str(item.get("relayed_from_agent_id") or ""),
             started_at_ns=_optional_integer(item.get("started_at_ns")),

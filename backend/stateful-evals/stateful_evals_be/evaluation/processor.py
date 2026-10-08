@@ -730,7 +730,9 @@ class TemporalMetricsProcessor:
         user_prompt = CROSS_SPAN_VALIDATION_USER_PROMPT.format(
             user_question=user_question,
             final_answer=final_answer[:4000],
-            tool_outputs=tool_output_text[:20000],
+            # The extractor bounds each record. A combined prefix would hide
+            # later verification results and actions from the final review.
+            tool_outputs=tool_output_text,
             policy=policy,
         )
 
@@ -763,12 +765,13 @@ class TemporalMetricsProcessor:
             }
 
             if not result_text:
-                return []
+                raise ValueError("judge returned an empty response")
 
             parsed = self._parse_json_response(result_text)
+            if not isinstance(parsed.get("is_grounded"), bool):
+                raise ValueError("judge must return a boolean 'is_grounded'")
         except Exception as exc:
-            logger.warning(f"[{session_id}] Cross-span validation failed: {exc}")
-            return []
+            raise RuntimeError(f"Cross-span validation failed: {exc}") from exc
 
         failures_out: List[MetricFailure] = []
 
@@ -899,7 +902,7 @@ class TemporalMetricsProcessor:
             policy=(system_message or "No policy provided.")[:5000],
             aftermath=aftermath[:3000],
             trajectory_summary=trajectory_summary[:5000],
-            tool_outputs=(tool_output_text or "No tool outputs captured.")[:20000],
+            tool_outputs=tool_output_text or "No tool outputs captured.",
         )
 
         messages = [
@@ -931,15 +934,19 @@ class TemporalMetricsProcessor:
             }
 
             if not result_text:
-                logger.warning(f"[{session_id}] Final outcome review returned empty")
-                return [], []
+                raise ValueError("judge returned an empty response")
 
             parsed = self._parse_json_response(result_text)
+            verdict = str(parsed.get("verdict", "")).strip().upper()
+            if "verdict" in parsed and verdict not in {"PASS", "FAIL"}:
+                raise ValueError("judge verdict must be 'PASS' or 'FAIL'")
+            if "passes" in parsed and not isinstance(parsed["passes"], bool):
+                raise ValueError("judge 'passes' must be a boolean")
+            if not verdict and "passes" not in parsed:
+                raise ValueError("judge must return 'passes' or a PASS/FAIL verdict")
         except Exception as exc:
-            logger.warning(f"[{session_id}] Final outcome review failed: {exc}")
-            return [], []
+            raise RuntimeError(f"Final outcome review failed: {exc}") from exc
 
-        verdict = str(parsed.get("verdict", "")).strip().upper()
         passes = self._coerce_bool(parsed.get("passes"), default=(verdict == "PASS"))
         if passes and verdict != "FAIL":
             return [], []
@@ -1945,6 +1952,8 @@ class TemporalMetricsProcessor:
                     policy=system_message,
                     llm_client=self.llm_client,
                     aftermath=aftermath,
+                    max_tokens=self.options.final_judge_max_tokens,
+                    reasoning_effort=self.options.reasoning_effort,
                 )
                 fatal_failures = review_result["fatal_failures"]
                 minor_failures = review_result["minor_failures"]
