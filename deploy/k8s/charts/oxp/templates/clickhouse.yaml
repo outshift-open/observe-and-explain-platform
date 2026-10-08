@@ -43,14 +43,29 @@ spec:
     spec:
       securityContext:
         fsGroup: 101
+      {{- if not .Values.clickhouse.auth.existingSecret }}
       volumes:
         - name: clickhouse-users
           secret:
             secretName: {{ include "oxp.clickhouseUsersSecretName" . }}
+      {{- end }}
       containers:
         - name: clickhouse
           image: "{{ .Values.clickhouse.image.repository }}:{{ .Values.clickhouse.image.tag }}"
           imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          {{- if .Values.clickhouse.auth.existingSecret }}
+          env:
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.usernameKey }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "oxp.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.auth.passwordKey }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8123
@@ -69,9 +84,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            {{- if not .Values.clickhouse.auth.existingSecret }}
             - name: clickhouse-users
               mountPath: /etc/clickhouse-server/users.d/zz-oxp-users.xml
               subPath: users.xml
+            {{- end }}
           resources:
             {{- toYaml .Values.clickhouse.resources | nindent 12 }}
   volumeClaimTemplates:

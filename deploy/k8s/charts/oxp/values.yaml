@@ -207,6 +207,8 @@ rabbitmq:
 neo4j:
   enabled: true
   fullnameOverride: oxp-neo4j
+  # Set to disableLookups: true if deployed with Argo
+  disableLookups: false
   database: neo4j
   # Optional external endpoint when reusing an existing Neo4j service.
   # Leave empty to use the bundled Neo4j service.
@@ -261,13 +263,13 @@ otelCollector:
     - name: CLICKHOUSE_USER
       valueFrom:
         secretKeyRef:
-          name: oxp-clickhouse-users
-          key: CLICKHOUSE_USER
+          name: oxp-clickhouse-secret
+          key: username
     - name: CLICKHOUSE_PASSWORD
       valueFrom:
         secretKeyRef:
-          name: oxp-clickhouse-users
-          key: CLICKHOUSE_PASSWORD
+          name: oxp-clickhouse-secret
+          key: password
   mode: deployment
   initContainers:
     - name: wait-for-clickhouse
@@ -517,7 +519,6 @@ workers:
       - new_session_to_stateful_eval
     feedbackQueue: ""
     embedderType: OpenAIEmbedder
-    layer: transition
     maxInflightMessages: "32"
     extraEnv: {}
     image:
