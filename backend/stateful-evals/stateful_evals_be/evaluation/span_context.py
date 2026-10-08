@@ -8,7 +8,6 @@ the initial selection cannot support a decision.
 from __future__ import annotations
 
 import json
-import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -96,51 +95,6 @@ def _tool_reference(source: dict[str, Any], content: str) -> tuple[Any, str]:
             for key in ("status", "outcome", "result_status")
         )
     return output, "error" if failed else "unknown"
-
-
-def _scope_intent_ids(
-    context: TrajectoryContext, span: dict[str, Any], agent: str, index: int
-) -> list[str]:
-    """Find the intent of the work unit a span runs under, without changing state.
-
-    A unit matches by its call id in the span's parent linkage, or by one of its
-    delegation spans being the span's parent or link target; otherwise the latest
-    pending unit addressed to the agent applies.
-    """
-    from stateful_evals_be.evaluation.trajectory_context import (
-        _span_attributes,
-        _span_links,
-    )
-
-    if not agent:
-        return []
-    parent = str(span.get("parent_span_id") or "")
-    parent_refs = " ".join(
-        [str(_span_attributes(span).get("mas.parent.call.id") or ""), parent]
-    )
-    linked = {link["span_id"] for link in _span_links(span)} | {parent}
-    units = [
-        unit
-        for unit in reversed(context.work_units)
-        if unit.intent_id and unit.request_span_index <= index
-    ]
-    for unit in units:
-        if agent not in unit.recipient_agent_ids:
-            continue
-        if linked.intersection(unit.source_span_ids) or (
-            unit.call_id
-            and re.search(rf"(?<!\w){re.escape(unit.call_id)}(?!\w)", parent_refs)
-        ):
-            return [unit.intent_id]
-    for unit in units:
-        if (
-            unit.outcome == "pending"
-            and agent in unit.recipient_agent_ids
-            and agent != unit.allocator_agent_id
-            and not unit.call_id
-        ):
-            return [unit.intent_id]
-    return []
 
 
 def select_span_context(
@@ -248,7 +202,7 @@ def select_span_context(
     # "Same work" is the intent of the span's own work unit plus the exact
     # intent ids of its direct artifacts, so a span reading a delegation result
     # ranks that delegation's records. Parents/dependencies only widen the view.
-    work_ids = set(_scope_intent_ids(context, span, agent, span_index))
+    work_ids = set(context._scope_intent_ids(span, span_index=span_index))
     for artifact_id in direct:
         work_ids.update(artifacts[artifact_id].related_intent_ids)
     intent_ids = set(work_ids)
