@@ -15,10 +15,18 @@ from .quality.context_preservation import ContextPreservation
 from .quality.groundedness import Groundedness
 from .quality.information_retention import InformationRetention
 from .quality.component_conflict_rate import ComponentConflictRate
-from .quality.consistency import Consistency
+from .quality.semantic_consistency import SemanticConsistency
 from .quality.tool_utilization_accuracy import ToolUtilizationAccuracy
 from .quality.task_delegation_accuracy import TaskDelegationAccuracy
 from .quality.goal_success_rate import GoalSuccessRate
+from .safety.policy_safety import PolicySafety
+from .quality.goal_alignment import GoalAlignment
+from .quality.instruction_following import InstructionFollowing
+from .quality.handoff_quality import HandoffQuality
+from .quality.confidence_calibration import ConfidenceCalibration
+from .quality.verification_quality import VerificationQuality
+from .quality.communication_efficiency import CommunicationEfficiency
+from .quality.constraint_satisfaction import ConstraintSatisfaction
 from .workflow.workflow_cohesion_index import WorkflowCohesionIndex
 from .workflow.workflow_efficiency import WorkflowEfficiency
 from .workflow.agent_to_agent_interactions import AgentToAgentInteractions
@@ -46,7 +54,15 @@ __all__ = [
     "Groundedness",
     "InformationRetention",
     "ComponentConflictRate",
-    "Consistency",
+    "SemanticConsistency",
+    "PolicySafety",
+    "GoalAlignment",
+    "InstructionFollowing",
+    "HandoffQuality",
+    "ConfidenceCalibration",
+    "VerificationQuality",
+    "CommunicationEfficiency",
+    "ConstraintSatisfaction",
     "ToolUtilizationAccuracy",
     "TaskDelegationAccuracy",
     "GoalSuccessRate",

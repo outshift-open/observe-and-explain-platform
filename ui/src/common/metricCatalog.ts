@@ -92,6 +92,51 @@ export const metricCatalog = {
     description: 'The number of agent-to-tool interactions.',
     unit: Unit.Scalar
   },
+  PolicySafety: {
+    name: 'Policy Safety',
+    description: 'Whether the policies in place allow evidence-based correction.',
+    unit: Unit.Percentage
+  },
+  GoalAlignment: {
+    name: 'Goal Alignment',
+    description: 'Whether delegated work preserves the root objective.',
+    unit: Unit.Percentage
+  },
+  InstructionFollowing: {
+    name: 'Instruction Following',
+    description: 'Whether agents followed their instructions and constraints.',
+    unit: Unit.Percentage
+  },
+  HandoffQuality: {
+    name: 'Handoff Quality',
+    description: 'The quality of handoffs between agents.',
+    unit: Unit.Percentage
+  },
+  ConfidenceCalibration: {
+    name: 'Confidence Calibration',
+    description: 'Whether expressed confidence matches the evidence.',
+    unit: Unit.Percentage
+  },
+  VerificationQuality: {
+    name: 'Verification Quality',
+    description: 'Whether outputs were verified before synthesis or action.',
+    unit: Unit.Percentage
+  },
+  CommunicationEfficiency: {
+    name: 'Communication Efficiency',
+    description: 'Whether inter-agent communication adds enough value.',
+    unit: Unit.Percentage
+  },
+  ConstraintSatisfaction: {
+    name: 'Constraint Satisfaction',
+    description: 'Whether the final outcome satisfies hard constraints.',
+    unit: Unit.Percentage
+  },
+  SemanticConsistency: {
+    name: 'Semantic Consistency',
+    description: 'The semantic consistency of the session.',
+    unit: Unit.Percentage
+  },
   LLMErrorRate: {
     name: 'LLM Error Rate',
     description: 'The error rate of LLM calls.',

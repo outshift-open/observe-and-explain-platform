@@ -8,7 +8,7 @@ from mce.providers.native.metrics import (
     GoalSuccessRate,
     IntentRecognitionAccuracy,
     ComponentConflictRate,
-    Consistency,
+    SemanticConsistency,
     ContextPreservation,
     Groundedness,
     InformationRetention,
@@ -71,7 +71,7 @@ def test_component_conflict_rate():
 
 
 def test_consistency():
-    metric = Consistency()
+    metric = SemanticConsistency()
     _mock_llm(metric)
     # Missing
     assert metric.compute("id", {}).value == 0.0

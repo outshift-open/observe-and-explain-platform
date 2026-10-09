@@ -6,12 +6,12 @@ from mce.core.metadata import MetricLayer, MetricNature, MetricScope
 from mce.core.metric import MetricRequirements
 
 SPEC = MetricSpec(
-    name="Consistency",
-    description="Evaluates consistency across multiple responses in a conversation.",
+    name="InstructionFollowing",
+    description="Evaluates whether components acted on the instructions and constraints available to them.",
     layer=MetricLayer.EXECUTION,
     nature=MetricNature.STOCHASTIC,
     scope=MetricScope.SESSION,
-    ontology_class="Consistency",
+    ontology_class="InstructionFollowing",
     input_requirements=MetricRequirements(
         text_fields=["conversation_data", "conversation_text", "transcript"],
     ),

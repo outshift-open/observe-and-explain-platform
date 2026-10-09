@@ -5,13 +5,13 @@ from mce.core.specs import SpecRegistry
 from mce.providers.native.metrics._base import _BaseLLMJudgeConversationMetric
 
 
-class Consistency(_BaseLLMJudgeConversationMetric):
+class SemanticConsistency(_BaseLLMJudgeConversationMetric):
     """Evaluates consistency across responses in a conversation."""
 
-    metadata = SpecRegistry.require("Consistency").metadata
+    metadata = SpecRegistry.require("SemanticConsistency").metadata
 
     PROMPT_TEMPLATE = """
-You are evaluating Consistency across a multi-turn conversation.
+You are evaluating Semantic Consistency across a multi-turn conversation.
 
 Conversation:
 {conversation}

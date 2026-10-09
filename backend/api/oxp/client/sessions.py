@@ -1281,9 +1281,7 @@ def fetch_execution_hierarchy_graph(
         call_nodes.append({"id": transition_id, "timestamp": timestamp})
 
         if parent_agent_exec_id:
-            parent_agent_id = agent_exec_to_transition_id.get(
-                str(parent_agent_exec_id)
-            )
+            parent_agent_id = agent_exec_to_transition_id.get(str(parent_agent_exec_id))
             if parent_agent_id:
                 hierarchy_edges.append(
                     {
@@ -1402,9 +1400,7 @@ def fetch_agent_conversation(
             execution_id = record.get("executionId")
             sub_call = AgentSubCallMessage(
                 transition_id=transition_id,
-                execution_id=(
-                    str(execution_id) if execution_id is not None else None
-                ),
+                execution_id=(str(execution_id) if execution_id is not None else None),
                 call_type=call_type,
                 name=record.get(name_field),
                 timestamp=record.get("timestamp") or 0,
