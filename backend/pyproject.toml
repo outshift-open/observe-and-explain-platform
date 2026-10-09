@@ -30,6 +30,7 @@ members = [
     "mce/mce-provider-ragas",
     "norm",
     "workers/norm-worker",
+    "workers/rt-norm-worker",
     "workers/embedding-worker",
     "workers/hierarchical-grouping-worker",
     "workers/mce-worker",
@@ -59,6 +60,7 @@ oxp-mce-provider-opik = { workspace = true }
 oxp-mce-provider-ragas = { workspace = true }
 norm = { workspace = true }
 norm-worker = { workspace = true }
+rt-norm-worker = { workspace = true }
 hierarchical-grouping-worker = { workspace = true }
 mce-worker = { workspace = true }
 normal-behaviour-worker = { workspace = true }

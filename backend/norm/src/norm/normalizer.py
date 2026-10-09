@@ -1,11 +1,28 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
 import json
+from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 from typing import Any, cast
 
 from .ioa_observe import build_kg
+
+OnNormalizedCallback = Callable[
+    [list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]], None
+]
+
+_on_normalized: OnNormalizedCallback | None = None
+
+
+def configure(on_normalized: OnNormalizedCallback | None = None) -> None:
+    """Configure the library.
+
+    ``on_normalized(spans, nodes, edges)`` is invoked every time
+    :func:`normalize` finishes normalizing a trace. Pass ``None`` to clear it.
+    """
+    global _on_normalized
+    _on_normalized = on_normalized
 
 
 def dump_jsonld(
@@ -41,7 +58,10 @@ def normalize(
     ``norm.ioa_observe`` -- so there is no caller-supplied run_id/override
     plumbing here anymore.
     """
-    return build_kg(spans)
+    nodes, edges = build_kg(spans)
+    if _on_normalized is not None:
+        _on_normalized(spans, nodes, edges)
+    return nodes, edges
 
 
 def load_json(fn: str | PathLike[str]) -> list[dict[str, Any]]:
