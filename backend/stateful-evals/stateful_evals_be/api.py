@@ -15,7 +15,6 @@ from stateful_evals_be.evaluation.processor import (
 )
 from stateful_evals_be.models.requests import SessionResult, TemporalMetricOptions
 from stateful_evals_be.models.spans import SpanInput, SpanRecord as SpanRecord
-from stateful_evals_be.integrations.oxp import SessionSpanClient
 
 
 def evaluate_spans(
@@ -55,42 +54,6 @@ def evaluate_file(
     return evaluate_spans(
         spans,
         session_id=selected_id,
-        llm_config=llm_config,
-        options=options,
-        policy_override=policy_override,
-    )
-
-
-def evaluate_session(
-    session_id: str,
-    *,
-    llm_config: LLMJudgeConfig,
-    api_client: SessionSpanClient | None = None,
-    options: TemporalMetricOptions | None = None,
-    policy_override: str | None = None,
-) -> SessionResult:
-    """Query a completed session through the API library and evaluate its spans.
-
-    With no client, use the API package's database settings. An injected client
-    remains caller-owned. Results are returned, not persisted. Retrieval and
-    evaluation failures are reported in SessionResult.error, as in the processor.
-    """
-    from stateful_evals_be.integrations.oxp import (
-        fetch_session_spans,
-        local_api_client,
-    )
-
-    try:
-        if api_client is not None:
-            spans = fetch_session_spans(api_client, session_id)
-        else:
-            with local_api_client() as client:
-                spans = fetch_session_spans(client, session_id)
-    except Exception as exc:
-        return SessionResult(session_id=session_id, error=str(exc))
-    return evaluate_spans(
-        spans,
-        session_id=session_id,
         llm_config=llm_config,
         options=options,
         policy_override=policy_override,

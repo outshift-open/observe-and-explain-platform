@@ -6,9 +6,8 @@ import json
 import subprocess
 import sys
 from copy import deepcopy
-from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, call
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -17,16 +16,11 @@ from stateful_evals_be import (
     TemporalMetricOptions,
     TemporalMetricsProcessor,
     evaluate_file,
-    evaluate_session,
     evaluate_spans,
     session_result_payload,
 )
 from stateful_evals_be.evaluation.processor import CORE_METRICS
-from stateful_evals_be.integrations.oxp import (
-    oxp_span_to_otel,
-    fetch_session_spans,
-    local_api_client,
-)
+from stateful_evals_be.integrations.oxp import oxp_span_to_otel
 from stateful_evals_be.models.requests import FailureDetail
 
 
@@ -60,9 +54,6 @@ def offline_processor(monkeypatch, config):
     processor._run_unified_final_audit = Mock(
         side_effect=lambda **_: ([], [], [], [], {})
     )
-    processor.fetch_spans_for_session = Mock(
-        side_effect=AssertionError("must not fetch")
-    )
     return processor
 
 
@@ -83,7 +74,7 @@ def span(span_id="s1", timestamp="2026-01-01T00:00:00Z"):
 
 
 @pytest.mark.parametrize("expected_score", [0, 1])
-def test_direct_spans_match_legacy_session_payload(offline_processor, expected_score):
+def test_direct_spans_score_and_usage(offline_processor, expected_score):
     fatal = FailureDetail(
         metric="Groundedness",
         metric_score=0,
@@ -105,10 +96,6 @@ def test_direct_spans_match_legacy_session_payload(offline_processor, expected_s
     assert direct.total_spans == 1
     assert direct.trajectory_score == expected_score
     assert direct.token_usage.total_tokens == 30
-    offline_processor.fetch_spans_for_session.assert_not_called()
-    offline_processor.fetch_spans_for_session = Mock(return_value=raw)
-    legacy = offline_processor.evaluate_session("session")
-    assert session_result_payload(direct) == session_result_payload(legacy)
 
 
 def test_public_function_uses_fresh_processor_and_preserves_options(
@@ -243,7 +230,6 @@ def test_public_api_preserves_native_peer_context_and_final_answer(
         result = evaluate_file(path, session_id="peer-session", llm_config=config)
     assert result.error is None
     assert raw == before
-    offline_processor.fetch_spans_for_session.assert_not_called()
     context = offline_processor._run_unified_final_audit.call_args.kwargs["traj_ctx"]
     assert context.policy_text == policy
     assert any(
@@ -308,7 +294,6 @@ def test_file_evaluation_matches_direct_result_and_context(
     assert loaded.trajectory_score == expected_score
     assert session_result_payload(loaded) == session_result_payload(direct)
     assert file_context == direct_context
-    offline_processor.fetch_spans_for_session.assert_not_called()
 
 
 def test_empty_input_keeps_existing_error(offline_processor):
@@ -318,22 +303,13 @@ def test_empty_input_keeps_existing_error(offline_processor):
     offline_processor.compute_span_state_delta.assert_not_called()
 
 
-def test_rate_limit_does_not_refetch_or_restart_session(offline_processor):
+def test_rate_limit_does_not_restart_session(offline_processor):
     offline_processor._extract_system_message = Mock(
         side_effect=RuntimeError("429 rate_limit")
     )
     result = offline_processor.evaluate_spans([span()], session_id="limited")
     assert result.error == "429 rate_limit"
     offline_processor._extract_system_message.assert_called_once()
-    offline_processor.fetch_spans_for_session.assert_not_called()
-
-
-def test_legacy_fetch_failure_is_a_session_error(offline_processor):
-    offline_processor.fetch_spans_for_session = Mock(
-        side_effect=RuntimeError("retrieval failed")
-    )
-    result = offline_processor.evaluate_session("missing")
-    assert result.error == "retrieval failed"
 
 
 def test_library_and_span_normalization_need_no_api_namespace():
@@ -382,114 +358,6 @@ assert 'stateful_evals_be.evaluation.processor' not in sys.modules
     )
 
 
-def test_direct_client_normalizes_and_keeps_external_client_open():
-    client = Mock(spec=["get_session_spans", "close"])
-    source_span = {"span_id": "s1", "span_attributes": {"input": "complete payload"}}
-    client.get_session_spans.return_value.spans = [Mock(model_dump=lambda: source_span)]
-    spans = fetch_session_spans(client, "a/b")
-    client.get_session_spans.assert_called_once_with(
-        session_ids=["a/b"], limit=500, offset=0, order="asc"
-    )
-    assert spans == [oxp_span_to_otel(source_span)]
-    client.close.assert_not_called()
-
-
-@pytest.mark.parametrize("count", [0, 500, 501, 1000])
-def test_direct_client_reads_every_page(count):
-    records = [Mock(model_dump=lambda i=i: {"span_id": str(i)}) for i in range(count)]
-    client = Mock(spec=["get_session_spans", "close"])
-    client.get_session_spans.side_effect = lambda **kw: SimpleNamespace(
-        spans=records[kw["offset"] : kw["offset"] + kw["limit"]]
-    )
-    result = fetch_session_spans(client, "session")
-    assert [span["SpanId"] for span in result] == [str(i) for i in range(count)]
-    assert client.get_session_spans.call_args_list == [
-        call(session_ids=["session"], limit=500, offset=offset, order="asc")
-        for offset in range(0, count + 1, 500)
-    ]
-
-
-def test_database_failure_does_not_evaluate_partial_session(offline_processor):
-    del offline_processor.fetch_spans_for_session
-    client = Mock(spec=["get_session_spans", "close"])
-    client.get_session_spans.side_effect = [
-        SimpleNamespace(spans=[Mock(model_dump=lambda: {"span_id": "s1"})] * 500),
-        RuntimeError("database unavailable"),
-    ]
-    offline_processor.api_client = client
-    result = offline_processor.evaluate_session("session")
-    assert result.error == "database unavailable"
-    offline_processor.compute_span_state_delta.assert_not_called()
-    client.close.assert_not_called()
-
-
-def test_public_session_api_preserves_results_and_client_ownership(
-    monkeypatch, offline_processor, config
-):
-    del offline_processor.fetch_spans_for_session
-    recorded = span()
-    source = {
-        "span_id": recorded["SpanId"],
-        "trace_id": recorded["TraceId"],
-        "timestamp": recorded["Timestamp"],
-        "service_name": recorded["ServiceName"],
-        "span_name": recorded["SpanName"],
-        "span_attributes": recorded["SpanAttributes"],
-    }
-    client = Mock(spec=["get_session_spans", "close"])
-    client.get_session_spans.return_value.spans = [Mock(model_dump=lambda: source)]
-    offline_processor.api_client = client
-    options = TemporalMetricOptions()
-    constructor = Mock(return_value=offline_processor)
-    monkeypatch.setattr(
-        "stateful_evals_be.evaluation.engine.TemporalMetricsProcessor", constructor
-    )
-    actual = evaluate_session(
-        "session",
-        llm_config=config,
-        api_client=client,
-        options=options,
-        policy_override="A supplied policy.",
-    )
-    expected = offline_processor.evaluate_spans(
-        [oxp_span_to_otel(source)],
-        session_id="session",
-        policy_override="A supplied policy.",
-    )
-    assert actual.error is None
-    assert session_result_payload(actual) == session_result_payload(expected)
-    constructor.assert_called_once_with(llm_config=config, options=options)
-    client.close.assert_not_called()
-
-
-def test_default_session_retrieval_uses_local_client(offline_processor, monkeypatch):
-    del offline_processor.fetch_spans_for_session
-    client = Mock(spec=["get_session_spans", "close"])
-    client.get_session_spans.return_value.spans = []
-    closed = Mock()
-
-    @contextmanager
-    def connection():
-        try:
-            yield client
-        finally:
-            closed()
-
-    monkeypatch.setattr(
-        "stateful_evals_be.integrations.oxp.local_api_client", connection
-    )
-    assert offline_processor.fetch_spans_for_session("session") == []
-    closed.assert_called_once()
-
-
-@pytest.mark.parametrize("session_id,page_size", [("", 500), (" ", 500), ("s", 0)])
-def test_invalid_session_query_does_not_touch_database(session_id, page_size):
-    client = Mock(spec=["get_session_spans", "close"])
-    with pytest.raises(ValueError):
-        fetch_session_spans(client, session_id, page_size=page_size)
-    client.get_session_spans.assert_not_called()
-
-
 def test_oxp_adapter_preserves_typed_otel_links():
     source = {
         "span_id": "recipient",
@@ -500,40 +368,11 @@ def test_oxp_adapter_preserves_typed_otel_links():
         "links_attributes": [{"link.type": "peer_message"}],
     }
     normalized = oxp_span_to_otel(source)
-    assert normalized == TemporalMetricsProcessor._oxp_span_to_otel_format(source)
     assert normalized["Links.TraceId"] == ["trace-1"]
     assert normalized["Links.SpanId"] == ["sender"]
     assert normalized["Links.TraceState"] == [""]
     assert normalized["Links.Attributes"] == [{"link.type": "peer_message"}]
     assert oxp_span_to_otel({})["Links.SpanId"] == []
-
-
-@pytest.mark.parametrize("persist_metrics", [False, True])
-def test_local_client_delegates_connection_ownership_to_api(
-    monkeypatch, persist_metrics
-):
-    from unittest.mock import MagicMock
-
-    factory = Mock()
-    client = MagicMock()
-    client.__enter__.return_value = client
-    factory.from_settings.return_value = client
-    monkeypatch.setitem(
-        sys.modules, "oxp.client.local", SimpleNamespace(LocalClient=factory)
-    )
-    with pytest.raises(RuntimeError, match="query failed"):
-        with local_api_client(persist_metrics=persist_metrics) as actual:
-            assert actual is client
-            raise RuntimeError("query failed")
-    factory.from_settings.assert_called_once_with(persist_metrics=persist_metrics)
-    assert client.__exit__.call_args.args[0] is RuntimeError
-
-
-def test_local_client_missing_optional_dependency_has_actionable_error(monkeypatch):
-    monkeypatch.setitem(sys.modules, "oxp.client.local", None)
-    with pytest.raises(ImportError, match="requires the oxp-api package"):
-        with local_api_client():
-            pytest.fail("must not reach a database")
 
 
 @pytest.mark.parametrize("score", [0, 1])
@@ -649,82 +488,3 @@ def test_public_payload_is_json_serializable(offline_processor):
         json.loads(json.dumps(session_result_payload(result)))["session_id"]
         == "session"
     )
-
-
-def test_real_local_client_database_round_trip(monkeypatch, offline_processor, config):
-    """Optional API-package integration: real SQL queries, no server or model calls."""
-    api_module = pytest.importorskip("oxp.client.local")
-    from oxp.connectors.sqlalchemy import SQLAlchemyConnector
-    from sqlalchemy import Column, Integer, MetaData, String, Table
-
-    db = SQLAlchemyConnector("sqlite:///:memory:")
-    metadata = MetaData()
-    table = Table(
-        "otel_traces",
-        metadata,
-        *(
-            Column(name, String)
-            for name in (
-                "span_id",
-                "session_id",
-                "span_name",
-                "timestamp",
-                "status_code",
-                "parent_span_id",
-                "service_name",
-                "span_attributes",
-                "links_trace_id",
-                "links_span_id",
-                "links_trace_state",
-                "links_attributes",
-            )
-        ),
-        Column("duration", Integer),
-    )
-    try:
-        metadata.create_all(db.engine)
-        attributes = span()["SpanAttributes"]
-        row = dict(
-            span_id="s1",
-            session_id="small-session",
-            span_name="model.chat",
-            timestamp="2026-01-01T00:00:00Z",
-            status_code="OK",
-            duration=1,
-            parent_span_id="parent",
-            service_name="example",
-            span_attributes=json.dumps(attributes),
-            links_trace_id='["trace"]',
-            links_span_id='["peer"]',
-            links_trace_state='[""]',
-            links_attributes='[{"link.type":"peer_message"}]',
-        )
-        with db.engine.begin() as connection:
-            connection.execute(
-                table.insert(),
-                [row]
-                + [
-                    {**row, "session_id": "large-session", "span_id": f"s{i:04d}"}
-                    for i in reversed(range(1001))
-                ],
-            )
-        client = api_module.LocalClient(db=db)
-        loaded = fetch_session_spans(client, "large-session")
-        assert [item["SpanId"] for item in loaded] == [f"s{i:04d}" for i in range(1001)]
-        assert loaded[0]["SpanAttributes"] == attributes
-        assert loaded[0]["ParentSpanId"] == "parent"
-        assert loaded[0]["Links.SpanId"] == ["peer"]
-        assert loaded[0]["Links.Attributes"] == [{"link.type": "peer_message"}]
-        del offline_processor.fetch_spans_for_session
-        offline_processor.api_client = client
-        monkeypatch.setattr(
-            "stateful_evals_be.evaluation.engine.TemporalMetricsProcessor",
-            lambda **_: offline_processor,
-        )
-        result = evaluate_session("small-session", llm_config=config, api_client=client)
-        assert result.error is None
-        assert result.total_spans == 1
-        assert result.trajectory_score == 1
-        assert db.is_connected()
-    finally:
-        db.close()

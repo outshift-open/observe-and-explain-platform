@@ -12,7 +12,7 @@ Entry points:
   - `--policy-file` for a single fallback policy
 - Library (`stateful_evals_be.evaluate_spans`)
   - `policy_override` for the supplied session
-- Compatibility batch API (`TemporalMetricsProcessor.run_evaluation`)
+- Engine batch API (`EvaluationEngine.evaluate_sessions`)
   - `policy_overrides` for per-session overrides
 
 Future domains:

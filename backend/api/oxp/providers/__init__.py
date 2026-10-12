@@ -33,6 +33,7 @@ from oxp.interfaces import MetricsProvider
 from oxp.interfaces.models import MetricResult
 from oxp.providers.kg import OXPKGProvider, _resolve_connector
 from oxp.query_builders import metrics as metrics_qb
+from oxp.query_builders import trajectory as trajectory_qb
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,40 @@ class OXPMetricsProvider(MetricsProvider):
             except Exception as exc:
                 logger.error(
                     "save_span_metrics failed for %s/%s: %s", span_id, m.metric_id, exc
+                )
+                ok = False
+        return ok
+
+    def save_transition_metrics(
+        self,
+        session_id: str,
+        transition_id: str,
+        metrics: MetricResult | list[MetricResult],
+    ) -> bool:
+        """Persist metrics on a ``Transition`` (convenience beyond the ABC)."""
+        items = [metrics] if isinstance(metrics, MetricResult) else metrics
+        ok = True
+        for m in items:
+            if m.error or m.value is None:
+                continue
+            query, params = trajectory_qb.write_transition_metric_query(
+                session_id=session_id,
+                transition_id=transition_id,
+                metric_name=m.metric_id,
+                metric_value=m.value if isinstance(m.value, (int, float)) else None,
+                provider=m.provider,
+                metric_id=m.metadata.get("metric_id") or m.metric_id,
+                source=m.metadata.get("source"),
+                reasoning=_metric_property_value(m.reasoning),
+            )
+            try:
+                self._db.execute_command(query, params)
+            except Exception as exc:
+                logger.error(
+                    "save_transition_metrics failed for %s/%s: %s",
+                    transition_id,
+                    m.metric_id,
+                    exc,
                 )
                 ok = False
         return ok

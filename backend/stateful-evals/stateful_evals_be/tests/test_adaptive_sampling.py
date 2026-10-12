@@ -7,7 +7,6 @@ The MCE/LLM layer is mocked so we only validate the sampling logic.
 """
 
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
 
 
 from metrics_computation_engine.models.requests import LLMJudgeConfig
@@ -125,9 +124,14 @@ class TestBuildSamplingPlan:
         self.proc = _make_processor(self.cfg)
 
     def _plan(self, pattern: List[str]):
-        spans = _make_minimal_spans(pattern)
+        return self._plan_spans(_make_minimal_spans(pattern))
+
+    def _plan_spans(self, spans):
         spans_by_id = {str(s["SpanId"]): s for s in spans}
-        return self.proc._build_sampling_plan(spans, spans_by_id, self.cfg)
+        span_dicts = [
+            self.proc._otel_trace_to_span_dict(s, spans_by_id=spans_by_id) for s in spans
+        ]
+        return self.proc._build_sampling_plan_for(span_dicts, self.cfg)
 
     def test_first_and_last_are_anchors(self):
         anchors, pos_map = self._plan(["other", "llm", "other", "tool", "llm", "other"])
@@ -147,8 +151,7 @@ class TestBuildSamplingPlan:
         # mark index 2 as error
         spans[2]["StatusCode"] = "ERROR"
         spans[2]["SpanAttributes"]["error"] = "true"
-        spans_by_id = {str(s["SpanId"]): s for s in spans}
-        anchors, _ = self.proc._build_sampling_plan(spans, spans_by_id, self.cfg)
+        anchors, _ = self._plan_spans(spans)
         # evaluable: 1, 2, 3 → error at 2, neighbors 1 and 3 should be anchors
         assert 2 in anchors, "Error span itself must be anchor"
         assert 1 in anchors, "Span before error must be anchor"
@@ -162,8 +165,7 @@ class TestBuildSamplingPlan:
             _make_span("2", "llm", "azure/gpt-4o"),
             _make_span("3", "llm", "azure/gpt-4o"),
         ]
-        spans_by_id = {str(s["SpanId"]): s for s in spans}
-        anchors, _ = self.proc._build_sampling_plan(spans, spans_by_id, self.cfg)
+        anchors, _ = self._plan_spans(spans)
         assert 2 in anchors, "LLM after large tool output must be anchor"
         # span 3 is NOT a post-large-tool candidate (tool before it was not large)
         assert 3 not in anchors or 3 == sorted(anchors)[-1], (
@@ -248,7 +250,7 @@ class TestShouldEvaluateSpan:
 
 class TestSamplingReducesMceCalls:
     """
-    End-to-end test of evaluate_session with a mocked MCE and span fetcher.
+    End-to-end test of evaluate_spans with a mocked MCE.
     Verifies that tail_weighted sampling calls MCE fewer times than baseline.
     """
 
@@ -310,10 +312,9 @@ class TestSamplingReducesMceCalls:
                 },
             }
 
-        proc.fetch_spans_for_session = MagicMock(return_value=raw_spans)
         proc.compute_span_state_delta = mock_mce
 
-        result = proc.evaluate_session("test-session-123")
+        result = proc.evaluate_spans(raw_spans, session_id="test-session-123")
         return {
             "result": result,
             "mce_calls": mce_call_count,

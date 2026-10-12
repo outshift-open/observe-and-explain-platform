@@ -1,5 +1,7 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
+from types import SimpleNamespace
+
 import pytest
 from worker_base.queue_message import BaseQueueMessage
 
@@ -21,14 +23,13 @@ async def _fake_to_thread(fn, *args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def no_external_services(mocker):
-    original_fetch = StatefulEvalWorker._fetch_spans
-    mocker.patch.object(StatefulEvalWorker, "_fetch_spans", return_value=[{"SpanId": "span-1"}])
-    mocker.patch.object(
-        StatefulEvalWorker,
-        "_get_oxp_client",
-        return_value=mocker.Mock(spec=["get_session_spans", "write_span_metrics", "write_session_metrics", "close"]),
-    )
-    return original_fetch
+    kg = mocker.Mock(spec=["execute", "execute_command", "ensure_connected"])
+    mocker.patch.object(StatefulEvalWorker, "_get_kg", return_value=kg)
+    mocker.patch("oxp.client.dal.get_session_trajectory", return_value=TRAJECTORY)
+    return kg
+
+
+TRAJECTORY = {"session_id": "session-xyz", "app_name": "app", "steps": [{"transition_id": "transition:1"}]}
 
 
 def _make_worker(rabbit_url, **kwargs):
@@ -145,7 +146,7 @@ async def test_handle_message_returns_true_on_success(rabbit_url, session_messag
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -160,7 +161,7 @@ async def test_handle_message_produces_one_output_message(rabbit_url, session_me
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -176,7 +177,7 @@ async def test_handle_message_output_preserves_input_fields(rabbit_url, session_
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -190,20 +191,21 @@ async def test_handle_message_output_preserves_input_fields(rabbit_url, session_
 
 
 @pytest.mark.asyncio
-async def test_handle_message_passes_fetched_spans_with_correct_id(rabbit_url, session_message, mocker):
+async def test_handle_message_evaluates_the_kg_trajectory(rabbit_url, session_message, mocker, no_external_services):
     fake_result = make_session_result()
+    get_trajectory = mocker.patch("oxp.client.dal.get_session_trajectory", return_value=TRAJECTORY)
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
     worker = _make_worker(rabbit_url)
     await worker.handle_message(session_message)
 
-    worker._fetch_spans.assert_called_once_with(session_message.session_id)
-    mock_processor.evaluate_spans.assert_called_once_with([{"SpanId": "span-1"}], session_id=session_message.session_id)
-    mock_processor.evaluate_session.assert_not_called()
+    get_trajectory.assert_called_once_with(no_external_services, session_message.session_id)
+    mock_processor.evaluate_trajectory.assert_called_once_with(TRAJECTORY)
+    mock_processor.evaluate_spans.assert_not_called()
     mock_processor.close.assert_called_once()
 
 
@@ -213,7 +215,7 @@ async def test_handle_message_builds_processor_once_per_message(rabbit_url, sess
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mock_build = mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -230,7 +232,7 @@ async def test_handle_message_with_error_result_still_returns_true(rabbit_url, s
     fake_result = make_session_result(error="MCE unavailable")
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -246,7 +248,7 @@ async def test_handle_message_fatal_failures_included_in_metrics(rabbit_url, ses
     fake_result = make_session_result(trajectory_score=0, fatal_failures=[fail])
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -255,37 +257,83 @@ async def test_handle_message_fatal_failures_included_in_metrics(rabbit_url, ses
 
 
 @pytest.mark.asyncio
-async def test_worker_persists_legacy_result_without_changing_payload(rabbit_url, session_message, mocker):
-    result = make_session_result(trajectory_score=0, trajectory_reasoning="Unresolved requirement.")
+async def test_worker_persists_metrics_context_and_session_score(rabbit_url, session_message, mocker, no_external_services):
+    smr = SimpleNamespace(
+        transition_id="transition:abc",
+        span_id="llmcall:1",
+        metric_name="mdt.Relevancy",
+        score=1.0,
+        reasoning="ok",
+    )
+    result = make_session_result(
+        trajectory_score=0,
+        trajectory_reasoning="Unresolved requirement.",
+        span_metric_results=[smr],
+    )
+    result.transition_contexts = {"transition:abc": {"claims": [{"index": 0}]}}
     processor = mocker.Mock()
-    processor.evaluate_spans.return_value = result
+    processor.evaluate_trajectory.return_value = result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    save_transition = mocker.patch("oxp.providers.OXPMetricsProvider.save_transition_metrics", return_value=True)
+    save_session = mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    write_context = mocker.patch("oxp.client.dal.write_transition_context", return_value=True)
     worker = _make_worker(rabbit_url)
     worker.push_metrics = True
-    client = worker._get_oxp_client()
-    client.write_session_metrics.return_value = {"written": 1, "errors": []}
 
     await worker.handle_message(session_message)
 
-    client.write_session_metrics.assert_called_once_with(
-        session_message.session_id,
-        [
-            {
-                "name": "trajectory_score",
-                "value": 0,
-                "provider": "stateful_evals",
-                "metric_id": None,
-                "source": "StatefulEval",
-                "reasoning": "Unresolved requirement.",
-            }
-        ],
+    save_transition.assert_called_once()
+    session_id, transition_id, metrics = save_transition.call_args.args
+    assert (session_id, transition_id) == (session_message.session_id, "transition:abc")
+    assert [(m.metric_id, m.resource_id, m.provider, m.value, m.reasoning) for m in metrics] == [
+        ("mdt.Relevancy", "transition:abc", "stateful_evals", 1.0, "ok")
+    ]
+    assert metrics[0].metadata == {"metric_id": None, "source": "StatefulEval"}
+    write_context.assert_called_once_with(
+        no_external_services, session_message.session_id, "transition:abc", {"claims": [{"index": 0}]}
     )
+    (session_metrics,) = save_session.call_args.args
+    assert [(m.metric_id, m.resource_id, m.value, m.reasoning) for m in session_metrics] == [
+        ("trajectory_score", session_message.session_id, 0, "Unresolved requirement.")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_context_when_disabled(rabbit_url, session_message, mocker):
+    result = make_session_result()
+    result.transition_contexts = {"transition:abc": {"claims": []}}
+    processor = mocker.Mock()
+    processor.evaluate_trajectory.return_value = result
+    mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    write_context = mocker.patch("oxp.client.dal.write_transition_context")
+    mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    worker = _make_worker(rabbit_url)
+    worker.push_metrics = True
+    worker.push_context = False
+
+    await worker.handle_message(session_message)
+
+    write_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_write_when_push_metrics_is_off(rabbit_url, session_message, mocker):
+    processor = mocker.Mock()
+    processor.evaluate_trajectory.return_value = make_session_result()
+    mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    push = mocker.patch.object(StatefulEvalWorker, "_push_metrics_to_kg")
+    worker = _make_worker(rabbit_url)
+    worker.push_metrics = False
+
+    await worker.handle_message(session_message)
+
+    push.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_worker_does_not_persist_error_results(rabbit_url, session_message, mocker):
     processor = mocker.Mock()
-    processor.evaluate_spans.return_value = make_session_result(error="evaluation failed")
+    processor.evaluate_trajectory.return_value = make_session_result(error="evaluation failed")
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
     push = mocker.patch.object(StatefulEvalWorker, "_push_metrics_to_kg")
     worker = _make_worker(rabbit_url)
@@ -300,7 +348,7 @@ async def test_worker_does_not_persist_error_results(rabbit_url, session_message
 @pytest.mark.asyncio
 async def test_worker_releases_processor_on_unexpected_failure(rabbit_url, session_message, mocker):
     processor = mocker.Mock()
-    processor.evaluate_spans.side_effect = RuntimeError("unexpected failure")
+    processor.evaluate_trajectory.side_effect = RuntimeError("unexpected failure")
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
     worker = _make_worker(rabbit_url)
     with pytest.raises(RuntimeError, match="unexpected failure"):
@@ -308,31 +356,8 @@ async def test_worker_releases_processor_on_unexpected_failure(rabbit_url, sessi
     processor.close.assert_called_once()
 
 
-def test_worker_fetches_and_normalizes_spans(rabbit_url, mocker, no_external_services):
-    worker = _make_worker(rabbit_url)
-    client = worker._get_oxp_client()
-    raw_span = mocker.Mock()
-    raw_span.model_dump.return_value = {
-        "span_id": "span-1",
-        "span_attributes": {"ioa_observe.entity.input": "complete input"},
-        "links_trace_id": ["trace-1"],
-        "links_span_id": ["sender"],
-        "links_trace_state": [""],
-        "links_attributes": [{"link.type": "peer_message"}],
-    }
-    client.get_session_spans.return_value.spans = [raw_span]
-
-    spans = no_external_services(worker, "session-1")
-
-    client.get_session_spans.assert_called_once_with(session_ids=["session-1"], limit=500, offset=0, order="asc")
-    assert spans[0]["SpanId"] == "span-1"
-    assert spans[0]["SpanAttributes"] == raw_span.model_dump.return_value["span_attributes"]
-    assert spans[0]["Links.SpanId"] == ["sender"]
-    assert spans[0]["Links.Attributes"] == [{"link.type": "peer_message"}]
-
-
 def test_build_processor_never_fetches_data(rabbit_url, mocker):
     constructor = mocker.patch("stateful_evals_be.TemporalMetricsProcessor")
     worker = _make_worker(rabbit_url)
     assert worker._build_processor() is constructor.return_value
-    worker._get_oxp_client.assert_not_called()
+    worker._get_kg.assert_not_called()

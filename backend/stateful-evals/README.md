@@ -77,7 +77,6 @@ other trace formats; write one that produces the record shape above.
 | --- | --- |
 | `evaluate_spans(spans, ...)` | Spans already in memory |
 | `evaluate_file(path, ...)` | A JSON file with a `spans` array, a JSON array of spans, or span JSONL |
-| `evaluate_session(session_id, ...)` | A session stored in the OXP database, read through the API library |
 | `EvaluationEngine(llm_config=..., options=...)` | Reusing one configuration across many trajectories |
 | `available_metrics()` | Listing the registered trajectory metrics |
 
@@ -90,8 +89,9 @@ summary = engine.evaluate_sessions(sessions.keys(), span_loader=sessions.__getit
 ```
 
 Each trajectory gets fresh state, so runs never share context or token counts.
-`evaluate_session` needs the repository's API package (`./api`, Python 3.13+) and
-its `CLICKHOUSE_*` settings.
+The library does no database access. Database sessions are read by the
+Stateful Eval worker through the OXP API (`get_session_trajectory`) and evaluated
+with `TemporalMetricsProcessor.evaluate_trajectory`.
 
 ## Options
 
@@ -173,8 +173,7 @@ describes the format.
 
 ## Scripts and services
 
-- `python -m stateful_evals_be.scripts.run_session_eval` evaluates a database session (`SESSION_ID=...`)
-- The [Stateful Eval worker](../workers/stateful-eval-worker/README.md) fetches spans, calls `evaluate_spans`, and persists its metrics
+- The [Stateful Eval worker](../workers/stateful-eval-worker/README.md) reads the session trajectory from the KG, calls `evaluate_trajectory`, and persists its metrics
 
 The standalone FastAPI server is retired. Callers that used
 `POST /compute_temporal_metrics` should fetch spans themselves and call
