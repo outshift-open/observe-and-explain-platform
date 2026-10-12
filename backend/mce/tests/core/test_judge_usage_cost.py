@@ -29,13 +29,17 @@ class TestPricing:
         assert estimate_cost_usd("gpt-4o", 1000, 500) == pytest.approx(0.0075)
 
     def test_provider_prefix_is_ignored(self):
-        assert estimate_cost_usd("azure/gpt-4o", 1000, 500) == estimate_cost_usd("gpt-4o", 1000, 500)
+        assert estimate_cost_usd("azure/gpt-4o", 1000, 500) == estimate_cost_usd(
+            "gpt-4o", 1000, 500
+        )
 
     def test_lookup_is_case_insensitive(self):
         assert resolve_model_price("GPT-4o") == resolve_model_price("gpt-4o")
 
     def test_unknown_model_is_priced_like_gpt_4o(self):
-        assert estimate_cost_usd("not-a-real-model", 1000, 500) == estimate_cost_usd("gpt-4o", 1000, 500)
+        assert estimate_cost_usd("not-a-real-model", 1000, 500) == estimate_cost_usd(
+            "gpt-4o", 1000, 500
+        )
 
     def test_no_tokens_cost_nothing(self):
         assert estimate_cost_usd("gpt-4o", 0, 0) == 0.0
@@ -49,7 +53,12 @@ class TestUsageScope:
         with track_usage() as usage:
             record_usage("gpt-4o", 100, 20)
             record_usage("gpt-4o", 50, 10)
-        assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, usage.calls) == (150, 30, 180, 2)
+        assert (
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.total_tokens,
+            usage.calls,
+        ) == (150, 30, 180, 2)
 
     def test_calls_outside_a_scope_are_ignored(self):
         record_usage("gpt-4o", 100, 20)  # must not raise
@@ -80,12 +89,19 @@ class TestUsageScope:
 
     def test_concurrent_adds_are_exact(self):
         usage = JudgeUsage()
-        threads = [threading.Thread(target=lambda: [usage.add("m", 1, 1) for _ in range(500)]) for _ in range(8)]
+        threads = [
+            threading.Thread(target=lambda: [usage.add("m", 1, 1) for _ in range(500)])
+            for _ in range(8)
+        ]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        assert (usage.prompt_tokens, usage.completion_tokens, usage.calls) == (4000, 4000, 4000)
+        assert (usage.prompt_tokens, usage.completion_tokens, usage.calls) == (
+            4000,
+            4000,
+            4000,
+        )
 
     def test_metadata_has_tokens_model_and_cost(self):
         usage = JudgeUsage()
@@ -138,7 +154,12 @@ class TestComplete:
         with patch("mce.engine.llm._OpenAI") as client:
             client.return_value.chat.completions.create.return_value = _response()
             result = svc.complete("q", model="gpt-4o")
-        assert (result.text, result.model, result.prompt_tokens, result.completion_tokens) == ("answer", "gpt-4o", 11, 7)
+        assert (
+            result.text,
+            result.model,
+            result.prompt_tokens,
+            result.completion_tokens,
+        ) == ("answer", "gpt-4o", 11, 7)
         assert result.logprobs is None
 
     def test_usage_is_added_to_the_current_scope(self):
@@ -148,17 +169,30 @@ class TestComplete:
             with track_usage() as usage:
                 svc.get_completion("q", model="gpt-4o")
                 svc.complete("q2", model="gpt-4o")
-        assert (usage.prompt_tokens, usage.completion_tokens, usage.calls) == (22, 14, 2)
+        assert (usage.prompt_tokens, usage.completion_tokens, usage.calls) == (
+            22,
+            14,
+            2,
+        )
 
     def test_logprobs_are_normalized(self):
         svc = LLMService(mode="live", api_key="k")
-        response = _response(logprobs=[("Score", -0.1, []), ("4", -0.5, [("4", -0.5), ("5", -1.2)])])
+        response = _response(
+            logprobs=[("Score", -0.1, []), ("4", -0.5, [("4", -0.5), ("5", -1.2)])]
+        )
         with patch("mce.engine.llm._OpenAI") as client:
             client.return_value.chat.completions.create.return_value = response
             result = svc.complete("q", model="gpt-4o", logprobs=True, top_logprobs=5)
         assert result.logprobs == [
             {"token": "Score", "logprob": -0.1, "top": []},
-            {"token": "4", "logprob": -0.5, "top": [{"token": "4", "logprob": -0.5}, {"token": "5", "logprob": -1.2}]},
+            {
+                "token": "4",
+                "logprob": -0.5,
+                "top": [
+                    {"token": "4", "logprob": -0.5},
+                    {"token": "5", "logprob": -1.2},
+                ],
+            },
         ]
 
     def test_extra_arguments_reach_the_api_but_sample_does_not(self):
@@ -175,9 +209,17 @@ class TestComplete:
         svc = LLMService(mode="live", api_key="k")
         with patch("mce.engine.llm._OpenAI") as client:
             create = client.return_value.chat.completions.create
-            create.side_effect = [Exception("logprobs is not supported"), _response(), _response()]
-            first = svc.complete("q", model="gpt-4o", temperature=0.0, logprobs=True, top_logprobs=5)
-            second = svc.complete("q2", model="gpt-4o", temperature=0.0, logprobs=True, top_logprobs=5)
+            create.side_effect = [
+                Exception("logprobs is not supported"),
+                _response(),
+                _response(),
+            ]
+            first = svc.complete(
+                "q", model="gpt-4o", temperature=0.0, logprobs=True, top_logprobs=5
+            )
+            second = svc.complete(
+                "q2", model="gpt-4o", temperature=0.0, logprobs=True, top_logprobs=5
+            )
         assert first.text == second.text == "answer"
         assert create.call_count == 3  # fail + retry, then straight through
         for call in create.call_args_list[1:]:
@@ -203,8 +245,14 @@ class TestComplete:
         replayer = LLMService(mode="replay", cache_path=cache)
         with track_usage() as usage:
             result = replayer.complete("q", model="gpt-4o")
-        assert (result.text, result.prompt_tokens, result.completion_tokens) == ("answer", 11, 7)
-        assert result.logprobs == [{"token": "4", "logprob": -0.2, "top": [{"token": "4", "logprob": -0.2}]}]
+        assert (result.text, result.prompt_tokens, result.completion_tokens) == (
+            "answer",
+            11,
+            7,
+        )
+        assert result.logprobs == [
+            {"token": "4", "logprob": -0.2, "top": [{"token": "4", "logprob": -0.2}]}
+        ]
         assert (usage.prompt_tokens, usage.completion_tokens) == (11, 7)
 
     def test_replay_of_an_old_cache_entry_without_usage(self, tmp_path):
@@ -218,7 +266,10 @@ class TestComplete:
         cache = str(tmp_path / "c.json")
         recorder = LLMService(mode="record", cache_path=cache, api_key="k")
         with patch("mce.engine.llm._OpenAI") as client:
-            client.return_value.chat.completions.create.side_effect = [_response("a"), _response("b")]
+            client.return_value.chat.completions.create.side_effect = [
+                _response("a"),
+                _response("b"),
+            ]
             recorder.complete("q", model="gpt-4o")
             recorder.complete("q", model="gpt-4o", sample=1)
         replayer = LLMService(mode="replay", cache_path=cache)
@@ -232,7 +283,9 @@ class TestComplete:
 class _FakeService(LLMService):
     """Replies with a fixed text and reports fixed usage per call."""
 
-    def __init__(self, text="Reasoning: ok\nScore: 4", prompt=100, completion=20, model="gpt-4o"):
+    def __init__(
+        self, text="Reasoning: ok\nScore: 4", prompt=100, completion=20, model="gpt-4o"
+    ):
         super().__init__(mode="live", api_key="k", model=model)
         self.text, self.prompt, self.completion = text, prompt, completion
         self.calls = 0
@@ -240,7 +293,12 @@ class _FakeService(LLMService):
     def complete(self, prompt, model=None, system_prompt=None, *, sample=0, **kwargs):
         self.calls += 1
         record_usage(model or "gpt-4o", self.prompt, self.completion)
-        return CompletionResult(text=self.text, model=model or "gpt-4o", prompt_tokens=self.prompt, completion_tokens=self.completion)
+        return CompletionResult(
+            text=self.text,
+            model=model or "gpt-4o",
+            prompt_tokens=self.prompt,
+            completion_tokens=self.completion,
+        )
 
 
 _CONVERSATION = {"conversation_data": {"elements": "user: hi\nassistant: hello"}}
@@ -265,7 +323,9 @@ class TestMetricAccounting:
         assert result.metadata["evaluation_prompt_tokens"] == 100
         assert result.metadata["evaluation_completion_tokens"] == 20
         assert result.metadata["evaluation_total_tokens"] == 120
-        assert result.metadata["evaluation_cost_usd"] == pytest.approx(100 * 2.5e-6 + 20 * 1e-5)
+        assert result.metadata["evaluation_cost_usd"] == pytest.approx(
+            100 * 2.5e-6 + 20 * 1e-5
+        )
 
     def test_usage_is_summed_over_the_judge_samples(self, service, monkeypatch):
         from mce.providers.native.metrics.quality.groundedness import Groundedness
@@ -278,8 +338,14 @@ class TestMetricAccounting:
     def test_each_resource_is_accounted_separately(self, service):
         from mce.providers.native.metrics.quality.groundedness import Groundedness
 
-        first, second = Groundedness().compute_batch(["s1", "s2"], [_CONVERSATION, _CONVERSATION])
-        assert first.metadata["evaluation_total_tokens"] == second.metadata["evaluation_total_tokens"] == 120
+        first, second = Groundedness().compute_batch(
+            ["s1", "s2"], [_CONVERSATION, _CONVERSATION]
+        )
+        assert (
+            first.metadata["evaluation_total_tokens"]
+            == second.metadata["evaluation_total_tokens"]
+            == 120
+        )
 
     def test_a_metric_that_makes_no_llm_call_has_no_evaluation_keys(self):
         from mce.providers.native.metrics.safety.tool_error import ToolError
@@ -293,16 +359,27 @@ class TestMetricAccounting:
         service.text = "I cannot evaluate this."
         (result,) = Groundedness().compute_batch(["s1"], [_CONVERSATION])
         assert result.error and "Score" in result.error
-        assert result.metadata["evaluation_total_tokens"] == 120  # the call was paid for
+        assert (
+            result.metadata["evaluation_total_tokens"] == 120
+        )  # the call was paid for
 
     def test_tool_calls_scored_in_worker_threads_are_all_counted(self, service):
-        from mce.providers.native.metrics.quality.tool_utilization_accuracy import ToolUtilizationAccuracy
+        from mce.providers.native.metrics.quality.tool_utilization_accuracy import (
+            ToolUtilizationAccuracy,
+        )
 
         spans = [
-            {"executionId": f"tc{i}", "toolName": "search", "toolArguments": '{"q": "x"}', "outputContent": "result"}
+            {
+                "executionId": f"tc{i}",
+                "toolName": "search",
+                "toolArguments": '{"q": "x"}',
+                "outputContent": "result",
+            }
             for i in range(5)
         ]
-        (result,) = ToolUtilizationAccuracy().compute_batch(["s1"], [{"tool_spans": spans}])
+        (result,) = ToolUtilizationAccuracy().compute_batch(
+            ["s1"], [{"tool_spans": spans}]
+        )
 
         assert result.error is None
         assert service.calls == 5
@@ -323,7 +400,9 @@ class TestFailuresAreNotScores:
     def test_missing_input_is_an_error_result(self, service, module, name, context):
         import importlib
 
-        cls = getattr(importlib.import_module(f"mce.providers.native.metrics.{module}"), name)
+        cls = getattr(
+            importlib.import_module(f"mce.providers.native.metrics.{module}"), name
+        )
         (result,) = cls().compute_batch(["x"], [context])
         assert isinstance(result, MetricResult)
         assert result.error

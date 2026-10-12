@@ -1953,7 +1953,9 @@ class TrajectoryContext:
             # but must never alias a different recorded invocation.
             if call_id and fact.tool_call_id:
                 continue
-            if not result or _exact_text_key(result) not in self._tool_result_keys(fact):
+            if not result or _exact_text_key(result) not in self._tool_result_keys(
+                fact
+            ):
                 continue
             matches.append((index, fact))
         if call_id and len(matches) == 1:
@@ -2530,9 +2532,11 @@ class TrajectoryContext:
                     for index, claim in enumerate(self.claims)
                 ]
             elif role in {"tool", "function"}:
-                artifact_ids.extend(self._tool_input_artifact_ids(
-                    message.get("tool_call_id", ""), message["content"]
-                ))
+                artifact_ids.extend(
+                    self._tool_input_artifact_ids(
+                        message.get("tool_call_id", ""), message["content"]
+                    )
+                )
                 continue
             else:
                 candidates = [
@@ -4341,8 +4345,10 @@ def _normalise_message(message: Any) -> Optional[Dict[str, str]]:
         or attributes.get("tool_call_id")
         or ""
     ).strip()
-    if not content and not has_tool_calls and not (
-        role in {"tool", "function"} and tool_call_id
+    if (
+        not content
+        and not has_tool_calls
+        and not (role in {"tool", "function"} and tool_call_id)
     ):
         return None
     normalized = {"role": role, "content": content}
@@ -4426,9 +4432,8 @@ def _extract_flattened_messages(
             ),
         }
         for _, entry in sorted(indexed.items())
-        if entry.get("content") or (
-            entry.get("role") in {"tool", "function"} and entry.get("tool_call_id")
-        )
+        if entry.get("content")
+        or (entry.get("role") in {"tool", "function"} and entry.get("tool_call_id"))
     ]
 
 

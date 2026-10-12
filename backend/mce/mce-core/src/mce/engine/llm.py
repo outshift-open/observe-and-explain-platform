@@ -211,7 +211,9 @@ class LLMService:
                     completion_tokens=int(usage.get("completion_tokens", 0)),
                     logprobs=entry.get("logprobs"),
                 )
-                record_usage(result.model, result.prompt_tokens, result.completion_tokens)
+                record_usage(
+                    result.model, result.prompt_tokens, result.completion_tokens
+                )
                 return result
             raise KeyError(
                 f"Replay cache miss for model='{model}'. "
@@ -227,9 +229,7 @@ class LLMService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            kwargs = {
-                k: v for k, v in kwargs.items() if k not in self._dropped_params
-            }
+            kwargs = {k: v for k, v in kwargs.items() if k not in self._dropped_params}
             try:
                 response = client.chat.completions.create(
                     model=model, messages=messages, **kwargs

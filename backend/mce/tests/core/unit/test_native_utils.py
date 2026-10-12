@@ -100,9 +100,14 @@ class TestParseScore:
 
 def _logprobs(digit_probs, chosen):
     """Token log-probabilities of ``...Score: <chosen>`` with the given digit alternatives."""
-    tokens = [{"token": t, "logprob": 0.0, "top": []} for t in ("Reasoning", ":", " ok", "\n", "Score", ":", " ")]
+    tokens = [
+        {"token": t, "logprob": 0.0, "top": []}
+        for t in ("Reasoning", ":", " ok", "\n", "Score", ":", " ")
+    ]
     top = [{"token": d, "logprob": math.log(p)} for d, p in digit_probs.items()]
-    tokens.append({"token": chosen, "logprob": math.log(digit_probs[chosen]), "top": top})
+    tokens.append(
+        {"token": chosen, "logprob": math.log(digit_probs[chosen]), "top": top}
+    )
     return tokens
 
 
@@ -117,14 +122,19 @@ class TestExpectedScore:
         assert expected_score_from_logprobs(logprobs, 4.0, 5) == pytest.approx(4.5)
 
     def test_confident_judge_gives_the_digit_itself(self):
-        assert expected_score_from_logprobs(_logprobs({"5": 0.999}, "5"), 5.0, 5) == pytest.approx(5.0, abs=0.01)
+        assert expected_score_from_logprobs(
+            _logprobs({"5": 0.999}, "5"), 5.0, 5
+        ) == pytest.approx(5.0, abs=0.01)
 
     def test_none_when_the_score_token_is_not_found(self):
         assert expected_score_from_logprobs(_logprobs({"4": 0.9}, "4"), 2.0, 5) is None
         assert expected_score_from_logprobs([], 4.0, 5) is None
 
     def test_a_digit_not_after_a_score_label_is_not_the_score(self):
-        tokens = [{"token": "Step", "logprob": 0.0, "top": []}, {"token": "4", "logprob": -0.1, "top": [{"token": "4", "logprob": -0.1}]}]
+        tokens = [
+            {"token": "Step", "logprob": 0.0, "top": []},
+            {"token": "4", "logprob": -0.1, "top": [{"token": "4", "logprob": -0.1}]},
+        ]
         assert expected_score_from_logprobs(tokens, 4.0, 5) is None
 
 
@@ -153,13 +163,19 @@ class _JudgeMetric:
 class TestJudgeScoring:
     @pytest.fixture(autouse=True)
     def _clean_env(self, monkeypatch):
-        for name in ("MCE_JUDGE_SAMPLES", "MCE_JUDGE_TEMPERATURE", "MCE_JUDGE_LOGPROBS"):
+        for name in (
+            "MCE_JUDGE_SAMPLES",
+            "MCE_JUDGE_TEMPERATURE",
+            "MCE_JUDGE_LOGPROBS",
+        ):
             monkeypatch.delenv(name, raising=False)
 
     def test_defaults_are_deterministic_and_ask_for_logprobs(self):
         metric = _JudgeMetric(["Reasoning: ok\nScore: 4"])
         llm_g_eval_score(metric, "p")
-        assert metric.calls == [{"temperature": 0.0, "logprobs": True, "top_logprobs": 5}]
+        assert metric.calls == [
+            {"temperature": 0.0, "logprobs": True, "top_logprobs": 5}
+        ]
 
     def test_score_is_continuous_when_the_endpoint_returns_logprobs(self):
         logprobs = _logprobs({"4": 0.6, "5": 0.3, "3": 0.1}, "4")
@@ -201,7 +217,11 @@ class TestJudgeScoring:
         monkeypatch.setenv("MCE_JUDGE_TEMPERATURE", "0.2")
         monkeypatch.setenv("MCE_JUDGE_LOGPROBS", "false")
         settings = judge_settings()
-        assert (settings.samples, settings.temperature, settings.logprobs) == (5, 0.2, False)
+        assert (settings.samples, settings.temperature, settings.logprobs) == (
+            5,
+            0.2,
+            False,
+        )
         metric = _JudgeMetric(["Score: 3"] * 5)
         llm_g_eval_score(metric, "p")
         assert all("logprobs" not in c for c in metric.calls)

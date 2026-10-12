@@ -70,7 +70,9 @@ def _catalog_unit(metric_name: str) -> tuple[str, str]:
 
     for category in (getattr(settings, "METRIC_CATEGORIES", None) or {}).values():
         for key, definition in category.items():
-            if metric_name in (key, key.rsplit(".", 1)[-1]) and isinstance(definition, dict):
+            if metric_name in (key, key.rsplit(".", 1)[-1]) and isinstance(
+                definition, dict
+            ):
                 return _UNITS.get(str(definition.get("unit") or ""), ("", ""))
     return "", ""
 
