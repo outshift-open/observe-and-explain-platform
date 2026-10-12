@@ -5,6 +5,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
+import norm
 from oxp.client.dal import ingest_normalized_kg as oxp_api_ingest_normalized_kg
 from oxp.connectors.base import Connector
 from oxp.dependencies import get_neo4j_connector
@@ -14,6 +15,23 @@ from worker_base.base_worker import BaseWorker
 from norm_worker.wrapper.norm_wrapper import NormWrapper
 
 logger = logging.getLogger(__name__)
+
+
+def on_trace_normalized(
+    spans: List[Dict[str, Any]],
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+) -> None:
+    print(
+        f"Normalized {len(spans)} spans into {len(nodes)} nodes and {len(edges)} edges"
+    )
+    for node in nodes:
+        print(f"  node {node.get('node_type')}: {node.get('id')}")
+    for edge in edges:
+        print(
+            f"  edge {edge.get('edge_type')}: "
+            f"{edge.get('from_id')} -> {edge.get('to_id')}"
+        )
 
 
 class OXPApiNormDALAdapter:
@@ -63,6 +81,8 @@ class NormWorker(BaseWorker):
             max_inflight_messages=max_inflight_messages,
         )
         self.name = "NormWorker"
+
+        norm.configure(on_normalized=on_trace_normalized)
 
         self.input_message_class = queue_message.BaseQueueMessage
         self.debug = debug
