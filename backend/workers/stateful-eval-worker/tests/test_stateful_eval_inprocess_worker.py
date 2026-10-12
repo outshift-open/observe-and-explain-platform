@@ -273,7 +273,7 @@ async def test_worker_persists_legacy_result_without_changing_payload(rabbit_url
         session_message.session_id,
         [
             {
-                "name": "trajectory_score",
+                "name": "TrajectoryScore",
                 "value": 0,
                 "provider": "stateful_evals",
                 "reasoning": "Unresolved requirement.",

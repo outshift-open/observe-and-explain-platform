@@ -310,7 +310,7 @@ class CollectSessionItem(BaseModel):
     cost: float = 0.0
     duration: float = 0.0
     session_metrics: list[dict[str, Any]] = []
-    # Optional stateful evaluation metric (e.g. trajectory_score)
+    # Optional stateful evaluation metric (e.g. TrajectoryScore)
     statefulEval: dict | None = None
 
 

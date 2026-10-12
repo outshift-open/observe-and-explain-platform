@@ -768,7 +768,7 @@ class SymbolicClient:
         score_query = (
             "MATCH (r:MetricResult)-[:measures]->(s:Session {sessionId: $session_id}), "
             "  (r)-[:ofMetricType]->(d:Metric) "
-            "WHERE d.name = 'trajectory_score' "
+            "WHERE d.name = 'TrajectoryScore' "
             "  AND d.metricProvider = 'symbolic_discovery' "
             "RETURN r.result AS value, d.metricProvider AS source "
             "LIMIT 1"
@@ -1150,7 +1150,7 @@ class SymbolicClient:
             "MATCH (mas:MAS {id: $mas_name})<-[:executesSession]-(s:Session) "
             "MATCH (r:MetricResult)-[:measures]->(s), "
             "  (r)-[:ofMetricType]->(d:Metric) "
-            "WHERE d.name = 'trajectory_score' "
+            "WHERE d.name = 'TrajectoryScore' "
             "  AND d.metricProvider = 'symbolic_discovery' "
             "RETURN s.sessionId AS sessionId, r.result AS score"
         )
@@ -1314,7 +1314,7 @@ class SymbolicClient:
             "WITH DISTINCT s, ma "
             "MATCH (r:MetricResult)-[:measures]->(s), "
             "  (r)-[:ofMetricType]->(d:Metric) "
-            "WHERE d.name IN ['trajectory_score', 'statefulEval'] "
+            "WHERE d.name IN ['TrajectoryScore', 'statefulEval'] "
             "  AND r.reasoning IS NOT NULL "
             "RETURN ma.id AS applicationName, "
             "  collect(r.reasoning) AS reasonings"

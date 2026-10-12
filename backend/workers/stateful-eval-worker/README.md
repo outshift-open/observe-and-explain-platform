@@ -6,7 +6,7 @@ from a RabbitMQ queue, loads the session's spans from ClickHouse through the
 OXP API library (`oxp.client.local.LocalClient`), and evaluates them in process
 with `stateful_evals_be.TemporalMetricsProcessor`. It writes per-span
 Groundedness, IntentRecognition, and Relevancy scores and a session
-`trajectory_score` to the Neo4j knowledge graph, then forwards the message.
+`TrajectoryScore` to the Neo4j knowledge graph, then forwards the message.
 Evaluation makes model calls, which can cost money. The worker is built on the
 [worker-base](../../worker-base/README.md) framework.
 
@@ -18,11 +18,11 @@ flowchart LR
     B -->|read spans| C[(ClickHouse otel_traces)]
     B -->|evaluate_spans| D[TemporalMetricsProcessor]
     B -->|write metrics| E[(Neo4j Metric nodes)]
-    E -->|trajectory_score| F[OXP API quality category]
+    E -->|TrajectoryScore| F[OXP API quality category]
     B -.->|optional| G[output and feedback queues]
 ```
 
-The OXP API's `quality` category reads `trajectory_score` as a source of `MDT` (`trajectoryQuality`) in [`config.py`](../../api/oxp/core/config.py); no default
+The OXP API's `quality` category reads `TrajectoryScore` as a source of `MDT` (`trajectoryQuality`) in [`config.py`](../../api/oxp/core/config.py); no default
 category lists the `mdt.*` span metrics.
 
 ## How it works
@@ -63,7 +63,7 @@ The worker only reads ClickHouse. It writes to Neo4j with
 | Metric | Attached to | Value |
 | --- | --- | --- |
 | `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `LLM/tool call with that `spanId` (`(:MetricResult)-[:measures]->(:LLMCall|:ToolCall)`); written only if the call exists | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
-| `trajectory_score` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `TrajectoryScore` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
 
 Each value is a `MetricResult` node (`result`, `reasoning`, `timestamp`) linked by `ofMetricType` to a
 `Metric` definition (one per name and provider, here `metricProvider` `stateful_evals`) and by `measures` to what it

@@ -296,7 +296,7 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
     db = _Db()
     payload = [
         {
-            "name": "trajectory_score",
+            "name": "TrajectoryScore",
             "value": 1,
             "provider": "stateful_evals",
             "source": "StatefulEval",

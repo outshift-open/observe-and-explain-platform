@@ -21,7 +21,7 @@ def test_session_cli_writes_legacy_metric_via_library(monkeypatch):
         "session",
         [
             {
-                "name": "trajectory_score",
+                "name": "TrajectoryScore",
                 "value": 0,
                 "provider": "stateful_evals",
                 "reasoning": None,
@@ -36,7 +36,7 @@ def test_saved_metric_cli_writes_through_client(tmp_path):
         {
             "aggregation_level": "session",
             "session_id": ["session"],
-            "metric_name": "trajectory_score",
+            "metric_name": "TrajectoryScore",
             "value": 1,
             "reasoning": "Complete.",
         },

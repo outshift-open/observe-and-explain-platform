@@ -57,7 +57,7 @@ _QUALITY_CATEGORY: Dict[str, dict] = {
         "description": "Trajectory quality score.",
         "operation": "average",
         "response_key": "trajectoryQuality",
-        "source_metrics": ["MDT", "trajectory_score"],
+        "source_metrics": ["MDT", "TrajectoryScore"],
         "unit": "PERCENTAGE",
     },
     "NeuroSymbolicEvaluation": {

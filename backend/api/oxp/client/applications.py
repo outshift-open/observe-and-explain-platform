@@ -1560,11 +1560,11 @@ def _get_application_sessions_with_stateful_eval_multiquery(
     get_session_metrics_fn: Callable | None = None,
 ) -> CollectByApplicationResponse:
     """Return collect-by-application data for an application, including a
-    session-attached stateful evaluation metric (e.g. `trajectory_score`).
+    session-attached stateful evaluation metric (e.g. `TrajectoryScore`).
 
     For Neo4j this performs a single Cypher query that returns both the
     session aggregates and any attached Metric nodes matching
-    `trajectory_score` / `statefulEval`.
+    `TrajectoryScore` / `statefulEval`.
     """
     start_epoch, end_epoch = parse_epoch_range(start_time, end_time)
 

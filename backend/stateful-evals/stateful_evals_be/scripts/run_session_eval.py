@@ -51,7 +51,7 @@ def _push_trajectory_score(
     payload = {
         "metrics": [
             {
-                "name": "trajectory_score",
+                "name": "TrajectoryScore",
                 "value": trajectory_score,
                 "provider": "stateful_evals",
                 "reasoning": None,

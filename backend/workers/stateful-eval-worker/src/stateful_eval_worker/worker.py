@@ -208,7 +208,7 @@ class StatefulEvalWorker(BaseWorker):
                 result.session_id,
                 [
                     {
-                        "name": "trajectory_score",
+                        "name": "TrajectoryScore",
                         "value": result.trajectory_score,
                         "provider": "stateful_evals",
                         "reasoning": result.trajectory_reasoning,
@@ -221,7 +221,7 @@ class StatefulEvalWorker(BaseWorker):
                 logger.error("write_session_metrics errors for session %s: %s", result.session_id, errs)
             else:
                 logger.info(
-                    "Wrote trajectory_score=%s for session %s",
+                    "Wrote TrajectoryScore=%s for session %s",
                     result.trajectory_score,
                     result.session_id,
                 )
