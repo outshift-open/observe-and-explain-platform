@@ -192,7 +192,7 @@ without a price is priced like `gpt-4o`). That table is a trimmed copy of LiteLL
 downloads the latest table into its build context (a LiteLLM outage falls back to the committed copy),
 and the *Update Model Prices* workflow, run on demand, opens a pull request to sync the committed copy.
 
-The API stores every metric result as the ontology's `MetricResult`: each write is validated against
+The API stores metrics natively as the ontology's `Metric` (the definition, one per metric name and provider) and `MetricResult` (one observation), linked by `ofMetricType`; a result `measures` the session or the call (by span id) it was computed for. Each write is validated against
 the model generated from the ontology (`oxp_ontology.models.nodes.MetricResult`) and a result that does
 not fit it (a non-numeric value or cost, say) is logged and not saved. All metrics carry the same fields
 (`id`, `name`, `result`, `reasoning`, `evaluationModel`, `evaluationPromptTokenCount`,

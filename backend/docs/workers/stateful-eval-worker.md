@@ -48,8 +48,8 @@ The worker only reads ClickHouse; it writes to Neo4j via `LocalClient.write_span
 
 | Metric | Attached to | Value |
 |---|---|---|
-| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `(:Session {sessionId})-[:hasSpan]->(:Span {spanId})`, created if missing | `0`, `0.25`, `0.5`, `0.75` or `1` per judged `llm` or `tool` span (1-5 rubric normalized to `(score-1)/4`; passes at or above `span_pass_threshold`, default `0.5`); `tool` spans get no Groundedness |
-| `trajectory_score` | An existing `Session` node with that `sessionId`; nothing is written if there is none | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `(:MetricResult)-[:measures]->(:LLMCall\|:ToolCall {spanId})`; written only if that call exists | `0`, `0.25`, `0.5`, `0.75` or `1` per judged `llm` or `tool` span (1-5 rubric normalized to `(score-1)/4`; passes at or above `span_pass_threshold`, default `0.5`); `tool` spans get no Groundedness |
+| `trajectory_score` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
 
 Each metric also carries the evaluation cost when measured, as `evaluation_model`,
 `evaluation_prompt_tokens`, `evaluation_completion_tokens`, `evaluation_total_tokens` and
@@ -59,9 +59,10 @@ the first metrics, so the shares sum to the call's usage). For `trajectory_score
 across all phases and its estimated cost. A key is omitted when it was not measured, and auto-failed `ERROR` spans
 carry none.
 
-Each metric is a `Metric` node linked by `hasMetric`, with `provider` `stateful_evals`, `source`
-`StatefulEval`, `metricId` equal to the name, and `reasoning`. It's matched on `metricName` and
-`resourceId`, so a re-run overwrites it. The OXP API's `quality` category reads `trajectory_score`
+Each value is a `MetricResult` node (`result`, `reasoning`, `timestamp`) linked by `ofMetricType` to a `Metric`
+definition (one per name and provider, here `metricProvider` `stateful_evals`) and by `measures` to its target: the
+LLM or tool call with that `spanId` for span metrics, the `Session` for `trajectory_score`. A result is keyed by
+definition and measured resource, so a re-run overwrites it. The OXP API's `quality` category reads `trajectory_score`
 as a source of `MDT` (`trajectoryQuality`) in [`api/oxp/core/config.py`](../../api/oxp/core/config.py).
 
 ## Usage

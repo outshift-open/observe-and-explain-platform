@@ -276,8 +276,6 @@ async def test_worker_persists_legacy_result_without_changing_payload(rabbit_url
                 "name": "trajectory_score",
                 "value": 0,
                 "provider": "stateful_evals",
-                "metric_id": None,
-                "source": "StatefulEval",
                 "reasoning": "Unresolved requirement.",
                 "evaluation_model": "gpt-4o",
             }

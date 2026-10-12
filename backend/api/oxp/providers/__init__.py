@@ -24,8 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
-from numbers import Real
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -34,40 +33,10 @@ from oxp.connectors.base import Connector
 from oxp.interfaces import MetricsProvider
 from oxp.interfaces.models import MetricResult
 from oxp.providers.kg import OXPKGProvider, _resolve_connector
+from oxp.query_builders import metric_graph
 from oxp.query_builders import metrics as metrics_qb
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_stored_metric_result(
-    raw_result: Any,
-) -> tuple[Any, str | None, str | None, str | None]:
-    """Parse both legacy JSON payloads and the new scalar metricResult shape."""
-    if raw_result is None:
-        return None, None, None, None
-
-    if isinstance(raw_result, Real) and not isinstance(raw_result, bool):
-        return float(raw_result), None, None, None
-
-    parsed = raw_result
-    if isinstance(raw_result, str):
-        try:
-            parsed = json.loads(raw_result)
-        except (json.JSONDecodeError, TypeError):
-            return None, None, None, None
-
-    if isinstance(parsed, Real) and not isinstance(parsed, bool):
-        return float(parsed), None, None, None
-
-    if not isinstance(parsed, dict):
-        return None, None, None, None
-
-    return (
-        parsed.get("value"),
-        parsed.get("metric_id"),
-        parsed.get("source"),
-        parsed.get("reasoning"),
-    )
 
 
 def _metric_property_value(value: Any) -> str:
@@ -79,21 +48,32 @@ def _metric_property_value(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _ontology_properties(
+def _graph_properties(
     metric: MetricResult, resource_id: str
-) -> dict[str, Any] | None:
-    """The metric as the ontology's ``MetricResult``; ``None`` (logged) if it does not fit."""
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """The metric as the ontology's ``Metric`` and ``MetricResult``; ``None`` (logged) if it does not fit."""
+    provider = metric.provider or "API"
+    timestamp = getattr(metric, "timestamp", None)
+    if isinstance(timestamp, datetime):
+        timestamp = timestamp.astimezone(timezone.utc)
+    else:
+        timestamp = None
     try:
-        return metrics_qb.metric_result_properties(
-            metric_name=metric.metric_id,
-            resource_id=resource_id,
-            value=metric.value,
-            reasoning=_metric_property_value(metric.reasoning),
-            metadata=metric.metadata,
+        return (
+            metric_graph.metric_definition_properties(metric.metric_id, provider),
+            metric_graph.metric_result_properties(
+                metric_name=metric.metric_id,
+                provider=provider,
+                resource_id=resource_id,
+                value=metric.value,
+                reasoning=_metric_property_value(metric.reasoning),
+                metadata=metric.metadata,
+                timestamp=timestamp,
+            ),
         )
     except ValidationError as exc:
         logger.error(
-            "Not saving %s for %s: it does not match the ontology MetricResult: %s",
+            "Not saving %s for %s: it does not match the ontology Metric/MetricResult: %s",
             metric.metric_id,
             resource_id,
             exc,
@@ -145,9 +125,17 @@ class OXPMetricsProvider(MetricsProvider):
 
         results: list[MetricResult] = []
         for rid in rids:
-            query, params = metrics_qb.session_metrics_query(rid, hops=hops)
+            # A resource id is a session id or, failing that, the span id of
+            # an execution element (call): the results measure either.
+            rows: list[dict[str, Any]] = []
             try:
+                query, params = metrics_qb.session_metrics_query(rid, hops=hops)
                 rows = self._db.execute(query, params)
+                if not rows:
+                    query, params = metrics_qb.span_metrics_query(
+                        rid, session_id=session_id, hops=hops
+                    )
+                    rows = self._db.execute(query, params)
             except Exception as exc:
                 logger.warning("get_metrics query failed for %s: %s", rid, exc)
                 continue
@@ -164,31 +152,16 @@ class OXPMetricsProvider(MetricsProvider):
                 if mids and name not in mids:
                     continue
 
-                value, metric_id, source, reasoning = _parse_stored_metric_result(
-                    m.get("result")
-                )
-                if value is None:
-                    value = m.get("value")
-                if metric_id is None:
-                    metric_id = m.get("metric_id") or name
-                if source is None:
-                    source = m.get("source")
-                if reasoning is None:
-                    reasoning = m.get("reasoning")
-                provider = m.get("provider") or source or "oxp"
+                provider = m.get("provider") or "oxp"
 
                 results.append(
                     MetricResult(
                         metric_id=name,
                         resource_id=rid,
                         provider=provider,
-                        value=value,
-                        reasoning=reasoning,
-                        metadata={
-                            "metric_id": metric_id,
-                            "source": source,
-                            "subgraph": row.get("subgraph"),
-                        },
+                        value=m.get("result"),
+                        reasoning=m.get("reasoning"),
+                        metadata={"subgraph": row.get("subgraph")},
                     )
                 )
 
@@ -197,7 +170,11 @@ class OXPMetricsProvider(MetricsProvider):
     # ── MetricsProvider: save_metrics ─────────────────────────────────────
 
     def save_metrics(self, metrics: MetricResult | list[MetricResult]) -> bool:
-        """Persist metrics using the existing write query builders."""
+        """Persist metrics as ontology ``MetricResult`` nodes of a ``Metric`` definition.
+
+        Each result measures the resource named by its ``resource_id``: a
+        session, or an execution element (call) by span id.
+        """
         items = [metrics] if isinstance(metrics, MetricResult) else metrics
         if not items:
             return True
@@ -206,19 +183,12 @@ class OXPMetricsProvider(MetricsProvider):
         for m in items:
             if m.error or m.value is None:
                 continue
-            properties = _ontology_properties(m, m.resource_id)
-            if properties is None:
+            graph = _graph_properties(m, m.resource_id)
+            if graph is None:
                 ok = False
                 continue
-            query, params = metrics_qb.write_generic_metric_query(
-                resource_id=m.resource_id,
-                metric_name=m.metric_id,
-                metric_value=properties["result"],
-                provider=m.provider,
-                metric_id=m.metadata.get("metric_id") or m.metric_id,
-                source=m.metadata.get("source"),
-                reasoning=properties["reasoning"],
-                ontology=properties,
+            query, params = metric_graph.write_metric_result_query(
+                "any", m.resource_id, *graph
             )
             try:
                 self._db.execute_command(query, params)
@@ -235,26 +205,18 @@ class OXPMetricsProvider(MetricsProvider):
         span_id: str,
         metrics: MetricResult | list[MetricResult],
     ) -> bool:
-        """Persist span-level metrics (convenience beyond the ABC)."""
+        """Persist metrics measuring the execution element (call) with ``span_id``."""
         items = [metrics] if isinstance(metrics, MetricResult) else metrics
         ok = True
         for m in items:
             if m.error or m.value is None:
                 continue
-            properties = _ontology_properties(m, span_id)
-            if properties is None:
+            graph = _graph_properties(m, span_id)
+            if graph is None:
                 ok = False
                 continue
-            query, params = metrics_qb.write_span_metric_query(
-                session_id=session_id,
-                span_id=span_id,
-                metric_name=m.metric_id,
-                metric_value=properties["result"],
-                provider=m.provider,
-                metric_id=m.metadata.get("metric_id") or m.metric_id,
-                source=m.metadata.get("source"),
-                reasoning=properties["reasoning"],
-                ontology=properties,
+            query, params = metric_graph.write_metric_result_query(
+                "execution", span_id, *graph, session_id=session_id
             )
             try:
                 self._db.execute_command(query, params)
@@ -268,7 +230,7 @@ class OXPMetricsProvider(MetricsProvider):
     # ── MetricsProvider: clean_metrics ────────────────────────────────────
 
     def clean_metrics(self, session_id: str | None = None) -> int:
-        query, params = metrics_qb.clean_metrics_query(session_id)
+        query, params = metric_graph.clean_metrics_query(session_id)
         try:
             rows = self._db.execute(query, params)
             return rows[0]["deleted"] if rows else 0

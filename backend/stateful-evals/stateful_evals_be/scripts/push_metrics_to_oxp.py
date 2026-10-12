@@ -29,7 +29,6 @@ import argparse
 import json
 import logging
 import sys
-import uuid
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -133,7 +132,7 @@ def write_span_metrics(
     return client.write_span_metrics(session_id, span_id, metrics)
 
 
-def to_write_metric(metric: dict[str, Any], *, run_id: str) -> dict[str, Any]:
+def to_write_metric(metric: dict[str, Any]) -> dict[str, Any]:
     """Map a MetricResult dict to a WriteMetricItem dict for oxp-api."""
     value = metric.get("value")
     numeric_value = float(value) if isinstance(value, (int, float)) else None
@@ -142,8 +141,6 @@ def to_write_metric(metric: dict[str, Any], *, run_id: str) -> dict[str, Any]:
         "name": metric["metric_name"],
         "value": numeric_value,
         "provider": PROVIDER,
-        "metric_id": run_id,
-        "source": "StatefulEval",
         "reasoning": metric.get("reasoning") or "",
     }
 
@@ -165,9 +162,6 @@ def push_file(
         logger.warning("  Empty file, skipping.")
         return {"session_posted": 0, "span_posted": 0, "skipped": 0, "errors": 0}
 
-    run_id = str(uuid.uuid4())
-    logger.info(f"  metric_id (run): {run_id}")
-
     session_batch: dict[str, list[dict[str, Any]]] = {}
     span_batch: dict[tuple[str, str], list[dict[str, Any]]] = {}
     skipped = 0
@@ -185,7 +179,7 @@ def push_file(
             skipped += 1
             continue
 
-        wm = to_write_metric(rec, run_id=run_id)
+        wm = to_write_metric(rec)
 
         if level == "session":
             session_batch.setdefault(sid, []).append(wm)

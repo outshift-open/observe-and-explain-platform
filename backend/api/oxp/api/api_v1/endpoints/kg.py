@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import redis as redis_lib
@@ -91,23 +90,9 @@ def get_neighbors(
         for m in raw_metrics:
             if not m or "metricName" not in m:
                 continue
-            value = None
-            result_str = m.get("metricResult")
-            if isinstance(result_str, (int, float)) and not isinstance(
-                result_str, bool
-            ):
-                value = result_str
-            elif result_str:
-                try:
-                    parsed = json.loads(result_str)
-                    if isinstance(parsed, dict):
-                        value = parsed.get("value")
-                    elif isinstance(parsed, (int, float)) and not isinstance(
-                        parsed, bool
-                    ):
-                        value = parsed
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            value = m.get("metricResult")
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                value = None
             metrics_dict[m["metricName"]] = value
 
         neighbors.append(

@@ -24,8 +24,6 @@ def test_session_cli_writes_legacy_metric_via_library(monkeypatch):
                 "name": "trajectory_score",
                 "value": 0,
                 "provider": "stateful_evals",
-                "metric_id": None,
-                "source": "StatefulEval",
                 "reasoning": None,
             }
         ],
@@ -68,7 +66,7 @@ def test_saved_metric_cli_writes_through_client(tmp_path):
     sid, span_id, span_metrics = client.write_span_metrics.call_args.args
     assert (sid, span_id) == ("session", "span")
     assert span_metrics[0]["reasoning"] == "Unsupported."
-    assert span_metrics[0]["metric_id"] == metrics[0]["metric_id"]
+    assert "metric_id" not in span_metrics[0] and "source" not in span_metrics[0]
     client.close.assert_not_called()
 
     client.reset_mock()

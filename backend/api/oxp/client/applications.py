@@ -1662,43 +1662,6 @@ def _get_application_sessions_with_stateful_eval_multiquery(
     )
 
 
-def _parse_metric_result_single_query(
-    raw_result: object,
-) -> tuple[float | None, str | None, str | None, str | None]:
-    """Parse stored metric payload for single-query session metric mapping."""
-    if raw_result is None:
-        return None, None, None, None
-
-    if isinstance(raw_result, Real) and not isinstance(raw_result, bool):
-        return float(raw_result), None, None, None
-
-    parsed = raw_result
-    if isinstance(raw_result, str):
-        try:
-            parsed = json.loads(raw_result)
-        except (json.JSONDecodeError, TypeError):
-            return None, None, None, None
-
-    if isinstance(parsed, Real) and not isinstance(parsed, bool):
-        return float(parsed), None, None, None
-
-    if not isinstance(parsed, dict):
-        return None, None, None, None
-
-    value = parsed.get("value")
-    parsed_value = (
-        float(value)
-        if isinstance(value, Real) and not isinstance(value, bool)
-        else None
-    )
-    return (
-        parsed_value,
-        parsed.get("metric_id"),
-        parsed.get("source"),
-        parsed.get("reasoning"),
-    )
-
-
 def _build_session_metrics_single_query(
     raw_metrics: object,
 ) -> list[dict[str, object]]:
@@ -1715,30 +1678,21 @@ def _build_session_metrics_single_query(
         if not name:
             continue
 
-        value, metric_id, source, reasoning = _parse_metric_result_single_query(
-            metric.get("result")
+        value = metric.get("result")
+        value = (
+            float(value)
+            if isinstance(value, Real) and not isinstance(value, bool)
+            else None
         )
-        if value is None:
-            raw_value = metric.get("value")
-            if isinstance(raw_value, Real) and not isinstance(raw_value, bool):
-                value = float(raw_value)
-
-        if metric_id is None:
-            metric_id = metric.get("metric_id") or name
-        if source is None:
-            source = metric.get("source")
-        if reasoning is None:
-            reasoning = metric.get("reasoning")
-
-        provider = metric.get("provider") or source or "oxp"
+        provider = metric.get("provider") or "oxp"
 
         session_metrics.append(
             {
                 "name": name,
                 "value": value,
-                "metric_id": metric_id,
-                "source": source or provider,
-                "reasoning": reasoning,
+                "metric_id": name,
+                "source": provider,
+                "reasoning": metric.get("reasoning"),
                 "error": None,
             }
         )

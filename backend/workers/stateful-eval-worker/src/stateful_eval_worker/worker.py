@@ -187,8 +187,6 @@ class StatefulEvalWorker(BaseWorker):
                         "name": smr.metric_name,
                         "value": smr.score,
                         "provider": "stateful_evals",
-                        "metric_id": None,
-                        "source": "StatefulEval",
                         "reasoning": smr.reasoning,
                         **{
                             field: getattr(smr, field)
@@ -213,8 +211,6 @@ class StatefulEvalWorker(BaseWorker):
                         "name": "trajectory_score",
                         "value": result.trajectory_score,
                         "provider": "stateful_evals",
-                        "metric_id": None,
-                        "source": "StatefulEval",
                         "reasoning": result.trajectory_reasoning,
                         **self._session_evaluation_fields(result),
                     }

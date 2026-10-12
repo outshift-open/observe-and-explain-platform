@@ -5,6 +5,23 @@ All notable changes to the OXP backend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: metrics are stored as the ontology's `Metric` + `MetricResult`.** A `MetricResult`
+  (`result`, `reasoning`, `timestamp`, `evaluation*` cost fields) is linked to its `Metric` definition
+  (one per metric name and provider, with `metricProvider`, `unit`, `valueRange`) by `ofMetricType`, and
+  `measures` the `Session`, or the call (by span id), it was computed for. This replaces the
+  `(:Session|:Span)-[:hasMetric]->(:Metric {metricName, metricResult, value, provider, source,
+  metricId, ...})` nodes: there is no `hasMetric` edge and no `Span` node for metrics, and `source` and
+  `metricId` are gone (the provider identifies the producer). Every reader (API queries, group-worker
+  data, UI rollups, insight templates) and the writers (MCE, stateful-eval worker) use the new model;
+  there is no backward compatibility, so existing metric nodes must be deleted and recomputed.
+- `aboutMetric` links from consistency, anomaly and normal-behaviour reports now point at the `Metric`
+  definition(s) of the metric name (they never matched anything before).
+- Requires `oxp-ontology` with `MetricResult.timestamp`.
+
 ## [1.0.0] - 2026-09-30
 
 ### Added

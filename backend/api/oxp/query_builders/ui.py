@@ -600,13 +600,14 @@ def neo4j_applications_with_metrics_optimized_query(
         }
         CALL {
             WITH session_ids
-            MATCH (sm:Session)-[:hasMetric]->(m:Metric)
+            MATCH (mr:MetricResult)-[:measures]->(sm:Session),
+                  (mr)-[:ofMetricType]->(m:Metric)
             WHERE sm.sessionId IN session_ids
-                AND m.metricName IN $metric_names
+                AND m.name IN $metric_names
             RETURN collect({
                 sid: sm.sessionId,
-                metric_name: m.metricName,
-                metric_result: m.metricResult
+                metric_name: m.name,
+                metric_result: mr.result
             }) AS metric_rows
         }
         RETURN
@@ -1051,8 +1052,8 @@ def semantic_groups_table_query(
     // Collect sessions attached to the semantic groups
     OPTIONAL MATCH (sg)-[:containsSession]->(s:Session)
     // Collect Metrics associated to the sessions
-    OPTIONAL MATCH (s)-[]-(m:Metric)
-    WHERE m.metricName IN ["LLMErrorRate",
+    OPTIONAL MATCH (r:MetricResult)-[:measures]->(s), (r)-[:ofMetricType]->(m:Metric)
+    WHERE m.name IN ["LLMErrorRate",
                     "ToolErrorRate",
                     "IntentRecognitionAccuracy",
                     "Groundedness",
@@ -1064,12 +1065,12 @@ def semantic_groups_table_query(
                    ]
     // Metrics manipulation, to compute the 3 overall scores
     WITH sg,
-      avg(CASE WHEN m.metricName IN ["IntentRecognitionAccuracy", "Groundedness", "ToolUtilizationAccuracy", "AnswerRelevancy", "ResponseCompleteness"] THEN m.metricResult END) AS overallQuality,
-      1 - avg(CASE WHEN m.metricName IN ["LLMErrorRate", "ToolErrorRate"] THEN m.metricResult END) AS completionRate,
-      (1 / (1 + avg(CASE WHEN m.metricName = "CyclesCount" THEN m.metricResult END))) AS cycles,
-      1 - avg(CASE WHEN m.metricName = "LLMErrorRate" THEN m.metricResult END) AS successLLM,
-      1 - avg(CASE WHEN m.metricName = "ToolErrorRate" THEN m.metricResult END) AS successTool,
-      avg(CASE WHEN m.metricName = "WorkflowEfficiency" THEN m.metricResult END) AS avgWflwEff, consistency
+      avg(CASE WHEN m.name IN ["IntentRecognitionAccuracy", "Groundedness", "ToolUtilizationAccuracy", "AnswerRelevancy", "ResponseCompleteness"] THEN r.result END) AS overallQuality,
+      1 - avg(CASE WHEN m.name IN ["LLMErrorRate", "ToolErrorRate"] THEN r.result END) AS completionRate,
+      (1 / (1 + avg(CASE WHEN m.name = "CyclesCount" THEN r.result END))) AS cycles,
+      1 - avg(CASE WHEN m.name = "LLMErrorRate" THEN r.result END) AS successLLM,
+      1 - avg(CASE WHEN m.name = "ToolErrorRate" THEN r.result END) AS successTool,
+      avg(CASE WHEN m.name = "WorkflowEfficiency" THEN r.result END) AS avgWflwEff, consistency
     // Opening the consistency json
     UNWIND consistency as c
     WITH sg, overallQuality,
@@ -1113,8 +1114,8 @@ def semantic_groups_query(
     // Collect sessions attached to the semantic groups
     OPTIONAL MATCH (sg)-[:containsSession*1..]->(s:Session)
     // Collect Metrics associated to the sessions
-    OPTIONAL MATCH (s)-[]-(m:Metric)
-    WHERE m.metricName IN ["LLMErrorRate",
+    OPTIONAL MATCH (r:MetricResult)-[:measures]->(s), (r)-[:ofMetricType]->(m:Metric)
+    WHERE m.name IN ["LLMErrorRate",
                     "ToolErrorRate",
                     "IntentRecognitionAccuracy",
                     "Groundedness",
@@ -1126,12 +1127,12 @@ def semantic_groups_query(
                    ]
     // Metrics manipulation, to compute the 3 overall scores
     WITH sg,
-      avg(CASE WHEN m.metricName IN ["IntentRecognitionAccuracy", "Groundedness", "ToolUtilizationAccuracy", "AnswerRelevancy", "ResponseCompleteness"] THEN m.metricResult END) AS overallQuality,
-      1 - avg(CASE WHEN m.metricName IN ["LLMErrorRate", "ToolErrorRate"] THEN m.metricResult END) AS completionRate,
-      (1 / (1 + avg(CASE WHEN m.metricName = "CyclesCount" THEN m.metricResult END))) AS cycles,
-      1 - avg(CASE WHEN m.metricName = "LLMErrorRate" THEN m.metricResult END) AS successLLM,
-      1 - avg(CASE WHEN m.metricName = "ToolErrorRate" THEN m.metricResult END) AS successTool,
-      avg(CASE WHEN m.metricName = "WorkflowEfficiency" THEN m.metricResult END) AS avgWflwEff, consistency
+      avg(CASE WHEN m.name IN ["IntentRecognitionAccuracy", "Groundedness", "ToolUtilizationAccuracy", "AnswerRelevancy", "ResponseCompleteness"] THEN r.result END) AS overallQuality,
+      1 - avg(CASE WHEN m.name IN ["LLMErrorRate", "ToolErrorRate"] THEN r.result END) AS completionRate,
+      (1 / (1 + avg(CASE WHEN m.name = "CyclesCount" THEN r.result END))) AS cycles,
+      1 - avg(CASE WHEN m.name = "LLMErrorRate" THEN r.result END) AS successLLM,
+      1 - avg(CASE WHEN m.name = "ToolErrorRate" THEN r.result END) AS successTool,
+      avg(CASE WHEN m.name = "WorkflowEfficiency" THEN r.result END) AS avgWflwEff, consistency
     // Opening the consistency json
     UNWIND consistency as c
     WITH sg, overallQuality,
@@ -1619,7 +1620,8 @@ def collect_page_sessions_query(
     if dialect is Dialect.NEO4J:
         stmt = """
         MATCH (s:Session)-[:executesSession]->(ma:MAS) WHERE ma.id = $application_id
-        OPTIONAL MATCH (s) - [] - (m:Metric) WHERE m.metricName = 'Cost'
+        OPTIONAL MATCH (mr:MetricResult)-[:measures]->(s), (mr)-[:ofMetricType]->(m:Metric)
+            WHERE m.name = 'Cost'
         OPTIONAL MATCH (s)-[:hasMASCall]->(:MASCall)-[:hasAgentCall]->(ac:AgentCall)
         OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
         OPTIONAL MATCH (ac)-[:hasLLMCall]->(l:LLMCall)
@@ -1627,7 +1629,7 @@ def collect_page_sessions_query(
             s.sessionId AS sessionId,
             s.startTime as startTime,
             s.duration as duration,
-            m.metricResult as cost,
+            mr.result as cost,
             collect(DISTINCT agentNode.name) As agents,
             sum(l.completionTokenCount + l.promptTokenCount) as tokens
         """
@@ -1650,27 +1652,28 @@ def collect_page_sessions_with_stateful_eval_query_multi_query(
     if dialect is Dialect.NEO4J:
         stmt = """
         MATCH (s:Session)-[:executesSession]->(ma:MAS) WHERE ma.id = $application_id
-        OPTIONAL MATCH (s) - [] - (m:Metric) WHERE m.metricName = 'Cost'
+        OPTIONAL MATCH (mr:MetricResult)-[:measures]->(s), (mr)-[:ofMetricType]->(m:Metric)
+            WHERE m.name = 'Cost'
         OPTIONAL MATCH (s)-[:hasMASCall]->(:MASCall)-[:hasAgentCall]->(ac:AgentCall)
         OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
         OPTIONAL MATCH (ac)-[:hasLLMCall]->(l:LLMCall)
-        OPTIONAL MATCH (s)-[:hasMetric]->(se:Metric)
-            WHERE se.metricName IN ['trajectory_score','statefulEval']
+        OPTIONAL MATCH (rse:MetricResult)-[:measures]->(s), (rse)-[:ofMetricType]->(se:Metric)
+            WHERE se.name IN ['trajectory_score','statefulEval']
         RETURN
             s.sessionId AS sessionId,
             s.startTime as startTime,
             s.duration as duration,
-            m.metricResult as cost,
+            mr.result as cost,
             collect(DISTINCT agentNode.name) As agents,
             sum(l.completionTokenCount + l.promptTokenCount) as tokens,
             collect(DISTINCT {
-                name: se.metricName,
-                result: se.metricResult,
-                value: se.value,
-                provider: se.provider,
-                metric_id: coalesce(se.metricId, se.metricName),
-                source: se.source,
-                reasoning: se.reasoning
+                name: se.name,
+                result: rse.result,
+                value: rse.result,
+                provider: se.metricProvider,
+                metric_id: se.name,
+                source: se.metricProvider,
+                reasoning: rse.reasoning
             }) AS statefulEvals
         """
         return stmt, {"application_id": application_id}
@@ -1728,10 +1731,12 @@ def collect_page_sessions_with_stateful_eval_query(
           AND ($semantic_group_id IS NULL OR EXISTS {
                 MATCH (sg:SemanticGroup {id: $semantic_group_id})-[:containsSession*1..]->(s)
           })
-        OPTIONAL MATCH (s) - [] - (mCost:Metric) WHERE mCost.metricName = 'Cost'
-        WITH s, head(collect(DISTINCT mCost.metricResult)) AS cost
-        OPTIONAL MATCH (s) - [] - (mDuration:Metric) WHERE mDuration.metricName = 'Duration'
-        WITH s, cost, head(collect(DISTINCT mDuration.metricResult)) AS duration
+        OPTIONAL MATCH (rCost:MetricResult)-[:measures]->(s), (rCost)-[:ofMetricType]->(mCost:Metric)
+            WHERE mCost.name = 'Cost'
+        WITH s, head(collect(DISTINCT rCost.result)) AS cost
+        OPTIONAL MATCH (rDuration:MetricResult)-[:measures]->(s), (rDuration)-[:ofMetricType]->(mDuration:Metric)
+            WHERE mDuration.name = 'Duration'
+        WITH s, cost, head(collect(DISTINCT rDuration.result)) AS duration
         OPTIONAL MATCH (s)-[:hasMASCall]->(:MASCall)-[:hasAgentCall]->(ac:AgentCall)
         OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
         OPTIONAL MATCH (ac)-[:hasLLMCall]->(l:LLMCall)
@@ -1741,8 +1746,8 @@ def collect_page_sessions_with_stateful_eval_query(
             duration,
             [a IN collect(DISTINCT agentNode.name) WHERE a IS NOT NULL] AS agents,
             coalesce(sum(coalesce(l.completionTokenCount, 0) + coalesce(l.promptTokenCount, 0)), 0) AS tokens
-        OPTIONAL MATCH (s)-[:hasMetric]->(se:Metric)
-            WHERE se.metricName IN ['trajectory_score','statefulEval']
+        OPTIONAL MATCH (rse:MetricResult)-[:measures]->(s), (rse)-[:ofMetricType]->(se:Metric)
+            WHERE se.name IN ['trajectory_score','statefulEval']
         WITH
             s,
             cost,
@@ -1750,15 +1755,15 @@ def collect_page_sessions_with_stateful_eval_query(
             agents,
             tokens,
             [x IN collect(DISTINCT {
-                name: se.metricName,
-                result: se.metricResult,
-                value: se.value,
-                provider: se.provider,
-                metric_id: coalesce(se.metricId, se.metricName),
-                source: se.source,
-                reasoning: se.reasoning
+                name: se.name,
+                result: rse.result,
+                value: rse.result,
+                provider: se.metricProvider,
+                metric_id: se.name,
+                source: se.metricProvider,
+                reasoning: rse.reasoning
             }) WHERE x.name IS NOT NULL] AS statefulEvals
-        OPTIONAL MATCH (s)-[:hasMetric]->(sm:Metric)
+        OPTIONAL MATCH (rsm:MetricResult)-[:measures]->(s), (rsm)-[:ofMetricType]->(sm:Metric)
         WITH
             s,
             cost,
@@ -1767,13 +1772,13 @@ def collect_page_sessions_with_stateful_eval_query(
             tokens,
             statefulEvals,
             [x IN collect(DISTINCT {
-                name: sm.metricName,
-                result: sm.metricResult,
-                value: sm.value,
-                provider: sm.provider,
-                metric_id: coalesce(sm.metricId, sm.metricName),
-                source: sm.source,
-                reasoning: sm.reasoning
+                name: sm.name,
+                result: rsm.result,
+                value: rsm.result,
+                provider: sm.metricProvider,
+                metric_id: sm.name,
+                source: sm.metricProvider,
+                reasoning: rsm.reasoning
             }) WHERE x.name IS NOT NULL] AS sessionMetrics
         RETURN
             s.sessionId AS sessionId,
@@ -2533,10 +2538,10 @@ def session_metrics_by_name_query(
     session_ids: list[str],
     metric_names: list[str],
 ):
-    """Build a Neo4j Cypher query for per-session ``Metric`` nodes by name.
+    """Build a Neo4j Cypher query for per-session ``MetricResult`` nodes by name.
 
-    Matches ``Session`` nodes that have ``hasMetric`` relationships to
-    ``Metric`` nodes whose ``metricName`` is in *metric_names*.
+    Matches ``MetricResult`` nodes that ``measures`` a ``Session`` and are
+    ``ofMetricType`` a ``Metric`` definition whose ``name`` is in *metric_names*.
 
     Returns a ``(cypher_string, params_dict)`` tuple.  Each result row
     has columns: ``sid, metric_name, metric_results``.
@@ -2546,11 +2551,11 @@ def session_metrics_by_name_query(
             f"session_metrics_by_name_query: dialect {dialect!r} not supported"
         )
     stmt = """
-    MATCH (s:Session)-[:hasMetric]->(m:Metric)
+    MATCH (r:MetricResult)-[:measures]->(s:Session), (r)-[:ofMetricType]->(m:Metric)
     WHERE s.sessionId IN $session_ids
-      AND m.metricName IN $metric_names
-    WITH s.sessionId AS sid, m.metricName AS metric_name,
-         collect(m.metricResult) AS metric_results
+      AND m.name IN $metric_names
+    WITH s.sessionId AS sid, m.name AS metric_name,
+         collect(r.result) AS metric_results
     RETURN sid, metric_name, metric_results
     """
     return stmt, {"session_ids": session_ids, "metric_names": metric_names}

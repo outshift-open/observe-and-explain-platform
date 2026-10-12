@@ -77,7 +77,7 @@ def neighbors_query(
     max_neighbors:
         Maximum number of neighbor sessions to return.
     metric_names:
-        If provided, only include metrics whose ``metricName`` is in this
+        If provided, only include metrics whose definition ``name`` is in this
         list.  *None* or an empty list means "return all metrics".
     distance_metric:
         Which vector similarity function to use (``cosine`` | ``euclidean``).
@@ -92,15 +92,19 @@ def neighbors_query(
     WITH emb, (1 - similarity) AS distance
     WHERE distance <= $max_distance
     MATCH (emb)-[:represents]->(state:State)<-[:hasInitialState]-(session:Session)
-    OPTIONAL MATCH (session)-[:hasMetric]->(metric:Metric)
+    OPTIONAL MATCH (mres:MetricResult)-[:measures]->(session),
+                   (mres)-[:ofMetricType]->(metric:Metric)
     WHERE $metric_names IS NULL
         OR size($metric_names) = 0
-        OR metric.metricName IN $metric_names
+        OR metric.name IN $metric_names
     RETURN
         session.sessionId AS sessionId,
         distance,
         emb.embeddingVector AS embedding,
-        collect(DISTINCT metric {{.*}}) AS metrics
+        collect(DISTINCT CASE WHEN metric IS NULL THEN NULL ELSE {{
+            metricName: metric.name,
+            metricResult: mres.result
+        }} END) AS metrics
     ORDER BY distance ASC
     LIMIT $max_neighbors
     """

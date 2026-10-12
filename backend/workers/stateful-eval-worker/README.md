@@ -62,13 +62,12 @@ The worker only reads ClickHouse. It writes to Neo4j with
 
 | Metric | Attached to | Value |
 | --- | --- | --- |
-| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `(:Session {sessionId})-[:hasSpan]->(:Span {spanId})`, created if missing | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
-| `trajectory_score` | An existing `Session` node with that `sessionId`; nothing is written if there is none | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `LLM/tool call with that `spanId` (`(:MetricResult)-[:measures]->(:LLMCall|:ToolCall)`); written only if the call exists | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
+| `trajectory_score` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
 
-Each metric is a `Metric` node linked by `hasMetric`, with `provider`
-`stateful_evals`, `source` `StatefulEval`, `metricId` equal to the name, and
-`reasoning`. It is matched on `metricName` and `resourceId`, so a re-run
-overwrites it.
+Each value is a `MetricResult` node (`result`, `reasoning`, `timestamp`) linked by `ofMetricType` to a
+`Metric` definition (one per name and provider, here `metricProvider` `stateful_evals`) and by `measures` to what it
+measures. A result is keyed by definition and measured resource, so a re-run overwrites it.
 
 ## Configuration
 

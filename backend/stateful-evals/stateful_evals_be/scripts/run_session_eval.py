@@ -54,8 +54,6 @@ def _push_trajectory_score(
                 "name": "trajectory_score",
                 "value": trajectory_score,
                 "provider": "stateful_evals",
-                "metric_id": None,
-                "source": "StatefulEval",
                 "reasoning": None,
             }
         ]

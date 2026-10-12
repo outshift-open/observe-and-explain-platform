@@ -79,7 +79,7 @@ const SessionDetails = ({
 
     if (
       neurosymbolicEnabled &&
-      currentSession?.statefulEval?.source === 'SymbolicDiscovery'
+      currentSession?.statefulEval?.source === 'symbolic_discovery'
     ) {
       setIsReasoningPathTabVisible(true);
     } else {

@@ -1,15 +1,16 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-"""Metric results are stored as the ontology's MetricResult, with the evaluation cost."""
+"""Metric results are stored as the ontology's Metric + MetricResult, with the evaluation cost."""
 
 import pytest
+from oxp_ontology.models.nodes import Metric as OntologyMetric
 from oxp_ontology.models.nodes import MetricResult as OntologyMetricResult
 from pydantic import ValidationError
 
 from oxp.client.local import LocalClient
 from oxp.interfaces.models import MetricResult
 from oxp.providers import OXPMetricsProvider
-from oxp.query_builders import metrics as metrics_qb
+from oxp.query_builders import metric_graph
 
 COST_METADATA = {
     "evaluation_model": "gpt-4o",
@@ -26,6 +27,7 @@ COST_FIELDS = {
     "evaluationCost": 0.0075,
 }
 MODEL_FIELDS = set(OntologyMetricResult.model_fields)
+DEFINITION_FIELDS = set(OntologyMetric.model_fields)
 
 
 class _Db:
@@ -46,23 +48,23 @@ def _result(**kwargs):
     return MetricResult(**{**defaults, **kwargs})
 
 
+def _props(name, resource_id, value, reasoning="", metadata=None, provider="Native"):
+    return metric_graph.metric_result_properties(
+        name, provider, resource_id, value, reasoning, metadata
+    )
+
+
 # ---------------------------------------------------------------- the unified model
 
 
 def test_every_metric_has_the_same_fields_as_the_ontology_model():
-    judged = metrics_qb.metric_result_properties(
-        "Groundedness", "s1", 0.75, "ok", dict(COST_METADATA)
-    )
-    deterministic = metrics_qb.metric_result_properties(
-        "ToolErrorRate", "s1", 0.0, "0/4 failed", {"raw": 1}
-    )
+    judged = _props("Groundedness", "s1", 0.75, "ok", dict(COST_METADATA))
+    deterministic = _props("ToolErrorRate", "s1", 0.0, "0/4 failed", {"raw": 1})
     assert set(judged) == set(deterministic) == MODEL_FIELDS
 
 
 def test_a_judged_metric_carries_its_evaluation_cost():
-    props = metrics_qb.metric_result_properties(
-        "Groundedness", "s1", 0.75, "ok", dict(COST_METADATA)
-    )
+    props = _props("Groundedness", "s1", 0.75, "ok", dict(COST_METADATA))
     assert {k: props[k] for k in COST_FIELDS} == COST_FIELDS
     assert (props["name"], props["result"], props["reasoning"]) == (
         "Groundedness",
@@ -72,7 +74,7 @@ def test_a_judged_metric_carries_its_evaluation_cost():
 
 
 def test_a_metric_without_llm_calls_carries_the_model_defaults():
-    props = metrics_qb.metric_result_properties("ToolErrorRate", "s1", 0.0, "", None)
+    props = _props("ToolErrorRate", "s1", 0.0, "", None)
     assert props["evaluationModel"] == ""
     assert (
         props["evaluationPromptTokenCount"],
@@ -83,7 +85,7 @@ def test_a_metric_without_llm_calls_carries_the_model_defaults():
 
 
 def test_partial_cost_metadata_fills_the_rest_with_defaults():
-    props = metrics_qb.metric_result_properties(
+    props = _props(
         "X", "s1", 1.0, "", {"evaluation_total_tokens": 5, "evaluation_cost_usd": None}
     )
     assert props["evaluationTotalTokenCount"] == 5
@@ -91,7 +93,7 @@ def test_partial_cost_metadata_fills_the_rest_with_defaults():
 
 
 def test_values_are_validated_and_coerced_by_the_model():
-    props = metrics_qb.metric_result_properties(
+    props = _props(
         "X",
         "s1",
         "0.5",
@@ -117,59 +119,84 @@ def test_values_are_validated_and_coerced_by_the_model():
 )
 def test_observations_that_do_not_fit_the_model_are_rejected(value, metadata):
     with pytest.raises(ValidationError):
-        metrics_qb.metric_result_properties("X", "s1", value, "", metadata)
+        _props("X", "s1", value, "", metadata)
 
 
 def test_unrelated_metadata_is_not_stored():
-    props = metrics_qb.metric_result_properties(
+    props = _props(
         "X", "s1", 1.0, "", {"raw_score": 4.0, "scale": "1-5", "scores": [1, 2]}
     )
     assert set(props) == MODEL_FIELDS
 
 
 def test_ids_are_stable_per_metric_and_resource():
-    first = metrics_qb.metric_result_properties("Groundedness", "s1", 0.1, "", None)[
-        "id"
-    ]
-    again = metrics_qb.metric_result_properties("Groundedness", "s1", 0.9, "", None)[
-        "id"
-    ]
-    other_resource = metrics_qb.metric_result_properties(
-        "Groundedness", "s2", 0.1, "", None
-    )["id"]
-    other_metric = metrics_qb.metric_result_properties(
-        "Relevancy", "s1", 0.1, "", None
-    )["id"]
+    first = _props("Groundedness", "s1", 0.1, "", None)["id"]
+    again = _props("Groundedness", "s1", 0.9, "", None)["id"]
+    other_resource = _props("Groundedness", "s2", 0.1, "", None)["id"]
+    other_metric = _props("Relevancy", "s1", 0.1, "", None)["id"]
     assert first == again
     assert len({first, other_resource, other_metric}) == 3
     assert first.startswith("metricresult:")
 
 
+def test_result_id_depends_on_the_provider_and_the_definition_is_per_provider():
+    native = _props("Groundedness", "s1", 0.1, provider="Native")["id"]
+    deepeval = _props("Groundedness", "s1", 0.1, provider="DeepEval")["id"]
+    assert native != deepeval
+    d_native = metric_graph.metric_definition_properties("Groundedness", "Native")
+    d_deepeval = metric_graph.metric_definition_properties("Groundedness", "DeepEval")
+    d_again = metric_graph.metric_definition_properties("Groundedness", "Native")
+    assert set(d_native) == DEFINITION_FIELDS
+    assert d_native["id"] == d_again["id"] != d_deepeval["id"]
+    assert (d_native["name"], d_native["metricProvider"]) == ("Groundedness", "Native")
+
+
 # ---------------------------------------------------------------- queries
 
 
-def test_every_write_query_sets_the_ontology_properties():
-    props = metrics_qb.metric_result_properties(
-        "Groundedness", "s1", 0.75, "ok", dict(COST_METADATA)
+@pytest.mark.parametrize(
+    ("target", "resource_id", "session_id"),
+    [
+        ("session", "s1", None),
+        ("execution", "sp1", "s1"),
+        ("execution", "sp1", None),
+        ("any", "sp1", None),
+    ],
+)
+def test_every_write_query_merges_the_result_and_its_definition(
+    target, resource_id, session_id
+):
+    definition = metric_graph.metric_definition_properties("Groundedness", "Native")
+    result = _props("Groundedness", resource_id, 0.75, "ok", dict(COST_METADATA))
+    query, params = metric_graph.write_metric_result_query(
+        target, resource_id, definition, result, session_id=session_id
     )
-    for query, params in (
-        metrics_qb.write_generic_metric_query(
-            "s1", "Groundedness", 0.75, ontology=props
-        ),
-        metrics_qb.write_span_metric_query(
-            "s1", "sp1", "Groundedness", 0.75, ontology=props
-        ),
-        metrics_qb.write_session_metric_query(
-            "s1", "Groundedness", 0.75, ontology=props
-        ),
-    ):
-        assert "SET m += $ontology" in query
-        assert params["ontology"] == props
+    assert "MERGE (r:MetricResult {id: $result.id})" in query
+    assert "SET r += $result" in query
+    assert "MERGE (d:Metric {id: $definition.id})" in query
+    assert "MERGE (r)-[:ofMetricType]->(d)" in query
+    assert "MERGE (r)-[:measures]->(t)" in query
+    for legacy in ("hasMetric", ":Span", "hasSpan", "measuresCall"):
+        assert legacy not in query
+    assert params == {
+        "resource_id": resource_id,
+        "session_id": session_id,
+        "definition": definition,
+        "result": result,
+    }
 
 
-def test_queries_without_ontology_properties_pass_an_empty_map():
-    _, params = metrics_qb.write_generic_metric_query("s1", "Groundedness", 0.75)
-    assert params["ontology"] == {}
+def test_the_target_decides_what_is_measured():
+    d = metric_graph.metric_definition_properties("X", "Native")
+    r = _props("X", "id", 1.0)
+    session, _ = metric_graph.write_metric_result_query("session", "id", d, r)
+    execution, _ = metric_graph.write_metric_result_query("execution", "id", d, r)
+    anything, _ = metric_graph.write_metric_result_query("any", "id", d, r)
+    assert "Session {sessionId: $resource_id}" in session
+    assert "spanId: $resource_id" not in session
+    assert "LLMCall|ToolCall" in execution and "t.sessionId = $session_id" in execution
+    assert "Session {sessionId: $resource_id}" in anything
+    assert "spanId: $resource_id" in anything
 
 
 # ---------------------------------------------------------------- provider
@@ -183,11 +210,16 @@ def test_save_metrics_stores_the_model_with_the_evaluation_cost():
         )
         is True
     )
-    ((_, params),) = db.commands
-    assert set(params["ontology"]) == MODEL_FIELDS
-    assert {k: params["ontology"][k] for k in COST_FIELDS} == COST_FIELDS
-    assert params["metric_value"] == params["ontology"]["result"] == 0.75
-    assert params["reasoning"] == "ok"
+    ((query, params),) = db.commands
+    assert "MERGE (r)-[:measures]->(t)" in query
+    assert set(params["result"]) == MODEL_FIELDS
+    assert set(params["definition"]) == DEFINITION_FIELDS
+    assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
+    assert params["result"]["result"] == 0.75
+    assert params["result"]["reasoning"] == "ok"
+    assert params["resource_id"] == "s1"
+    assert params["definition"]["metricProvider"] == "Native"
+    assert params["definition"]["name"] == "Groundedness"
 
 
 def test_save_metrics_without_cost_metadata_stores_the_defaults():
@@ -195,22 +227,20 @@ def test_save_metrics_without_cost_metadata_stores_the_defaults():
     OXPMetricsProvider(db=db).save_metrics(
         [_result(metadata={"raw_score": 4.0, "scale": "1-5"})]
     )
-    assert set(db.commands[0][1]["ontology"]) == MODEL_FIELDS
-    assert db.commands[0][1]["ontology"]["evaluationCost"] == 0.0
+    assert set(db.commands[0][1]["result"]) == MODEL_FIELDS
+    assert db.commands[0][1]["result"]["evaluationCost"] == 0.0
 
 
-def test_save_span_metrics_stores_the_same_model():
+def test_save_span_metrics_measures_the_execution_element_of_the_session():
     db = _Db()
     OXPMetricsProvider(db=db).save_span_metrics(
         "s1", "sp1", [_result(metadata=dict(COST_METADATA))]
     )
-    assert {k: db.commands[0][1]["ontology"][k] for k in COST_FIELDS} == COST_FIELDS
-    assert (
-        db.commands[0][1]["ontology"]["id"]
-        != metrics_qb.metric_result_properties("Groundedness", "s1", 0.75, "", None)[
-            "id"
-        ]
-    )
+    query, params = db.commands[0]
+    assert "spanId: $resource_id" in query
+    assert (params["resource_id"], params["session_id"]) == ("sp1", "s1")
+    assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
+    assert params["result"]["id"] != _props("Groundedness", "s1", 0.75)["id"]
 
 
 def test_a_result_that_does_not_fit_the_model_is_not_saved_and_the_rest_still_are():
@@ -218,7 +248,7 @@ def test_a_result_that_does_not_fit_the_model_is_not_saved_and_the_rest_still_ar
     bad = _result(metric_id="Bad", metadata={"evaluation_cost_usd": "free"})
     good = _result(metric_id="Good", metadata=dict(COST_METADATA))
     assert OXPMetricsProvider(db=db).save_metrics([bad, good]) is False
-    assert [params["metric_name"] for _, params in db.commands] == ["Good"]
+    assert [params["result"]["name"] for _, params in db.commands] == ["Good"]
 
 
 def test_a_non_numeric_value_is_not_saved():
@@ -257,7 +287,9 @@ def test_write_span_metrics_forwards_the_cost_from_the_payload():
     ]
     result = _client(db).write_span_metrics("s1", "sp1", payload)
     assert result == {"written": 1, "errors": []}
-    assert {k: db.commands[0][1]["ontology"][k] for k in COST_FIELDS} == COST_FIELDS
+    params = db.commands[0][1]
+    assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
+    assert params["definition"]["metricProvider"] == "stateful_evals"
 
 
 def test_write_session_metrics_forwards_the_cost_from_the_payload():
@@ -272,7 +304,9 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
         }
     ]
     _client(db).write_session_metrics("s1", payload)
-    assert {k: db.commands[0][1]["ontology"][k] for k in COST_FIELDS} == COST_FIELDS
+    params = db.commands[0][1]
+    assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
+    assert params["definition"]["metricProvider"] == "stateful_evals"
 
 
 def test_payloads_without_cost_still_write_the_full_model():
@@ -280,4 +314,4 @@ def test_payloads_without_cost_still_write_the_full_model():
     _client(db).write_span_metrics(
         "s1", "sp1", [{"name": "mdt.Relevancy", "value": 1.0}]
     )
-    assert set(db.commands[0][1]["ontology"]) == MODEL_FIELDS
+    assert set(db.commands[0][1]["result"]) == MODEL_FIELDS
