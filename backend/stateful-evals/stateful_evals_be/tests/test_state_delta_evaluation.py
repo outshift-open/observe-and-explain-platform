@@ -454,7 +454,9 @@ def test_configured_trajectory_metric_failure_is_additive_to_correctness() -> No
 
     processor._run_configured_trajectory_metrics = configured_metrics
 
-    result = processor.evaluate_spans([raw_span], session_id="session-configured-metrics")
+    result = processor.evaluate_spans(
+        [raw_span], session_id="session-configured-metrics"
+    )
 
     assert len(configured_calls) == 1
     assert configured_calls[0]["trajectory_score"] == 1

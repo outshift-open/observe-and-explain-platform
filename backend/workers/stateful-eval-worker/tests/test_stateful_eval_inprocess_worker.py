@@ -257,7 +257,9 @@ async def test_handle_message_fatal_failures_included_in_metrics(rabbit_url, ses
 
 
 @pytest.mark.asyncio
-async def test_worker_persists_metrics_context_and_session_score(rabbit_url, session_message, mocker, no_external_services):
+async def test_worker_persists_metrics_context_and_session_score(
+    rabbit_url, session_message, mocker, no_external_services
+):
     smr = SimpleNamespace(
         transition_id="transition:abc",
         span_id="llmcall:1",
@@ -294,7 +296,7 @@ async def test_worker_persists_metrics_context_and_session_score(rabbit_url, ses
     )
     (session_metrics,) = save_session.call_args.args
     assert [(m.metric_id, m.resource_id, m.value, m.reasoning) for m in session_metrics] == [
-        ("trajectory_score", session_message.session_id, 0, "Unresolved requirement.")
+        ("TrajectoryScore", session_message.session_id, 0, "Unresolved requirement.")
     ]
 
 

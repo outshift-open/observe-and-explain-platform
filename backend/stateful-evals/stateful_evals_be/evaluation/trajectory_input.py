@@ -163,7 +163,9 @@ def build_span_dicts(trajectory: Trajectory) -> list[dict[str, Any]]:
                     "name": step["name"],
                     "description": step["description"],
                 }
-            call_id = _claim_tool_call_id(pending[step.get("agent_id") or ""], step["name"])
+            call_id = _claim_tool_call_id(
+                pending[step.get("agent_id") or ""], step["name"]
+            )
             if call_id:
                 attributes["gen_ai.tool.call.id"] = call_id
         else:
@@ -201,9 +203,7 @@ def _claim_tool_call_id(queue: deque[tuple[str, str]], tool_name: str) -> str:
     if not queue:
         return ""
     for index, (call_id, requested) in enumerate(queue):
-        if requested and (
-            requested == tool_name or tool_name.startswith(requested)
-        ):
+        if requested and (requested == tool_name or tool_name.startswith(requested)):
             del queue[index]
             return call_id
     return queue.popleft()[0]

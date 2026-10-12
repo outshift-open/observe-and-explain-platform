@@ -7,7 +7,7 @@ LLM, tool, and agent calls, with their `Transition` and `State` nodes)
 from the Neo4j knowledge graph, and evaluates it in process with
 `stateful_evals_be.TemporalMetricsProcessor`. It writes per-step Groundedness,
 IntentRecognition, and Relevancy scores, the trajectory context each step
-contributed, and a session `trajectory_score` back to the knowledge graph, then
+contributed, and a session `TrajectoryScore` back to the knowledge graph, then
 forwards the message. No OTel store is read.
 Evaluation makes model calls, which can cost money. The worker is built on the
 [worker-base](../../worker-base/README.md) framework.
@@ -20,11 +20,11 @@ flowchart LR
     B -->|read trajectory| C[(Neo4j trajectory)]
     B -->|evaluate_trajectory| D[TemporalMetricsProcessor]
     B -->|write metrics and context| E[(Neo4j Transition and Metric nodes)]
-    E -->|trajectory_score| F[OXP API quality category]
+    E -->|TrajectoryScore| F[OXP API quality category]
     B -.->|optional| G[output and feedback queues]
 ```
 
-The OXP API's `quality` category reads `trajectory_score` as a source of `MDT` (`trajectoryQuality`) in [`config.py`](../../api/oxp/core/config.py); no default
+The OXP API's `quality` category reads `TrajectoryScore` as a source of `MDT` (`trajectoryQuality`) in [`config.py`](../../api/oxp/core/config.py); no default
 category lists the `mdt.*` step metrics.
 
 ## How it works
@@ -67,7 +67,7 @@ The worker reads and writes Neo4j only, through the shared connector
 | --- | --- | --- |
 | `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `(:Transition {id, sessionId})-[:hasMetric]->(:Metric)`; the transition must exist | `0` or `1` per judged LLM or tool step; tool steps get no Groundedness |
 | `TrajectoryContext` node | `(:Transition)-[:hasContext]->(:TrajectoryContext {id, evidence, claims, ...})`, one per step (`PUSH_TRANSITION_CONTEXT`) | one JSON property per constituent: what the step added to the trajectory context (see below) |
-| `trajectory_score` | An existing `Session` node with that `sessionId`; nothing is written if there is none | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `TrajectoryScore` | An existing `Session` node with that `sessionId`; nothing is written if there is none | `0` or `1`; `reasoning` is `trajectory_reasoning` |
 
 Each metric is a `Metric` node linked by `hasMetric`, with `provider`
 `stateful_evals`, `source` `StatefulEval`, `metricId` equal to the name, and

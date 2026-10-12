@@ -1644,7 +1644,7 @@ def collect_page_sessions_with_stateful_eval_query_multi_query(
     """Build a query for collect page sessions including stateful eval metrics.
 
     Returns a Cypher string for Neo4j that also collects any session-attached
-    metrics named `trajectory_score` or `statefulEval` as `statefulEvals`.
+    metrics named `TrajectoryScore` or `statefulEval` as `statefulEvals`.
     """
     # Only Neo4j currently supports attached Metric nodes for stateful eval
     if dialect is Dialect.NEO4J:
@@ -1655,7 +1655,7 @@ def collect_page_sessions_with_stateful_eval_query_multi_query(
         OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
         OPTIONAL MATCH (ac)-[:hasLLMCall]->(l:LLMCall)
         OPTIONAL MATCH (s)-[:hasMetric]->(se:Metric)
-            WHERE se.metricName IN ['trajectory_score','statefulEval']
+            WHERE se.metricName IN ['TrajectoryScore','statefulEval']
         RETURN
             s.sessionId AS sessionId,
             s.startTime as startTime,
@@ -1742,7 +1742,7 @@ def collect_page_sessions_with_stateful_eval_query(
             [a IN collect(DISTINCT agentNode.name) WHERE a IS NOT NULL] AS agents,
             coalesce(sum(coalesce(l.completionTokenCount, 0) + coalesce(l.promptTokenCount, 0)), 0) AS tokens
         OPTIONAL MATCH (s)-[:hasMetric]->(se:Metric)
-            WHERE se.metricName IN ['trajectory_score','statefulEval']
+            WHERE se.metricName IN ['TrajectoryScore','statefulEval']
         WITH
             s,
             cost,

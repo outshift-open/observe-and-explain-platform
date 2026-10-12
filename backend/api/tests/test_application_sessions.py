@@ -306,12 +306,12 @@ class TestLocalClientInstance:
             for sess in sessions:
                 if isinstance(sess, dict):
                     se = sess.get("statefulEval")
-                    if isinstance(se, dict) and se.get("name") == "trajectory_score":
+                    if isinstance(se, dict) and se.get("name") == "TrajectoryScore":
                         found_stateful = True
                         break
 
         assert found_stateful, (
-            "Expected at least one session with statefulEval.name == 'trajectory_score'"
+            "Expected at least one session with statefulEval.name == 'TrajectoryScore'"
         )
 
         elapsed = time.perf_counter() - start_ts
@@ -335,7 +335,7 @@ class TestLocalClientInstance:
         application_id = "noa-trip-planner-mas"
 
         # Tight 3-minute window that brackets a small cluster of sessions, all
-        # of which carry a ``trajectory_score`` stateful eval.
+        # of which carry a ``TrajectoryScore`` stateful eval.
         start = to_epoch("2025-12-19 17:02:00")
         end = to_epoch("2025-12-19 17:05:00")
 
@@ -376,12 +376,12 @@ class TestLocalClientInstance:
             for sess in sessions:
                 if isinstance(sess, dict):
                     se = sess.get("statefulEval")
-                    if isinstance(se, dict) and se.get("name") == "trajectory_score":
+                    if isinstance(se, dict) and se.get("name") == "TrajectoryScore":
                         found_stateful = True
                         break
 
         assert found_stateful, (
-            "Expected at least one session with statefulEval.name == 'trajectory_score'"
+            "Expected at least one session with statefulEval.name == 'TrajectoryScore'"
         )
 
         elapsed = time.perf_counter() - start_ts
@@ -432,12 +432,12 @@ class TestLocalClientInstance:
             for sess in sessions:
                 if isinstance(sess, dict):
                     se = sess.get("statefulEval")
-                    if isinstance(se, dict) and se.get("name") == "trajectory_score":
+                    if isinstance(se, dict) and se.get("name") == "TrajectoryScore":
                         found_stateful = True
                         break
 
         assert found_stateful, (
-            "Expected at least one session with statefulEval.name == 'trajectory_score'"
+            "Expected at least one session with statefulEval.name == 'TrajectoryScore'"
         )
 
         elapsed = time.perf_counter() - start_ts
@@ -454,7 +454,7 @@ class TestLocalClientInstance:
         The endpoint accepts ``semantic_group_id`` (the ``id`` property of a
         ``SemanticGroup``). When provided, only sessions that belong to that
         group are returned, so the result must be a strict subset of the
-        unfiltered call while still containing ``trajectory_score`` evals.
+        unfiltered call while still containing ``TrajectoryScore`` evals.
         """
 
         start_ts = time.perf_counter()
@@ -513,12 +513,12 @@ class TestLocalClientInstance:
             for sess in sessions:
                 if isinstance(sess, dict):
                     se = sess.get("statefulEval")
-                    if isinstance(se, dict) and se.get("name") == "trajectory_score":
+                    if isinstance(se, dict) and se.get("name") == "TrajectoryScore":
                         found_stateful = True
                         break
 
         assert found_stateful, (
-            "Expected at least one session with statefulEval.name == 'trajectory_score'"
+            "Expected at least one session with statefulEval.name == 'TrajectoryScore'"
         )
 
         elapsed = time.perf_counter() - start_ts

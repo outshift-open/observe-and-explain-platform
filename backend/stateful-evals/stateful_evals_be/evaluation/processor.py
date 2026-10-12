@@ -1551,7 +1551,9 @@ class TemporalMetricsProcessor:
             prepared, session_id=session_id, policy_override=policy_override
         )
 
-    def _prepare_otel_session(self, raw_spans: List[Dict[str, Any]]) -> _PreparedSession:
+    def _prepare_otel_session(
+        self, raw_spans: List[Dict[str, Any]]
+    ) -> _PreparedSession:
         raw_spans = self._sort_spans_chronologically(raw_spans)
         raw_spans = self._deduplicate_spans(raw_spans)
         spans_by_id = {
@@ -1661,7 +1663,9 @@ class TemporalMetricsProcessor:
             # are folded into the first transition's context so replaying the
             # deltas starts complete.
             seed = traj_ctx.context_delta({})
-            first_transition = span_dicts[0].get("transition_id") if span_dicts else None
+            first_transition = (
+                span_dicts[0].get("transition_id") if span_dicts else None
+            )
             if seed and first_transition:
                 transition_contexts[first_transition] = seed
 
@@ -1953,7 +1957,9 @@ class TemporalMetricsProcessor:
                     record_synthesis=True,
                 )
             traj_ctx.finalize_state()
-            last_transition = span_dicts[-1].get("transition_id") if span_dicts else None
+            last_transition = (
+                span_dicts[-1].get("transition_id") if span_dicts else None
+            )
             if last_transition:
                 finalization = traj_ctx.context_delta(finalize_marker)
                 if finalization:

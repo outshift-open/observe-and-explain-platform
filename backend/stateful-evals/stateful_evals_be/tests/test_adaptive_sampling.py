@@ -129,7 +129,8 @@ class TestBuildSamplingPlan:
     def _plan_spans(self, spans):
         spans_by_id = {str(s["SpanId"]): s for s in spans}
         span_dicts = [
-            self.proc._otel_trace_to_span_dict(s, spans_by_id=spans_by_id) for s in spans
+            self.proc._otel_trace_to_span_dict(s, spans_by_id=spans_by_id)
+            for s in spans
         ]
         return self.proc._build_sampling_plan_for(span_dicts, self.cfg)
 

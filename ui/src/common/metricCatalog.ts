@@ -37,7 +37,7 @@ export const metricCatalog = {
     description: 'The relevancy of the answer.',
     unit: Unit.Percentage
   },
-  trajectory_score: {
+  TrajectoryScore: {
     name: 'Trajectory Score',
     description: 'The trajectory score of the session.',
     unit: Unit.Scalar

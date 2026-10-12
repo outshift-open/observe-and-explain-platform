@@ -1311,7 +1311,7 @@ class SymbolicClient:
             f"WHERE true {time_filter}"
             "WITH DISTINCT s, ma "
             "MATCH (s)-[:hasMetric]->(m:Metric) "
-            "WHERE m.metricName IN ['trajectory_score', 'statefulEval'] "
+            "WHERE m.metricName IN ['TrajectoryScore', 'statefulEval'] "
             "  AND m.reasoning IS NOT NULL "
             "RETURN ma.id AS applicationName, "
             "  collect(m.reasoning) AS reasonings"

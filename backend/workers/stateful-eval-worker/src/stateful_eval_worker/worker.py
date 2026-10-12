@@ -180,7 +180,7 @@ class StatefulEvalWorker(BaseWorker):
             ok = provider.save_metrics(
                 [
                     MetricResult(
-                        metric_id="trajectory_score",
+                        metric_id="TrajectoryScore",
                         resource_id=result.session_id,
                         provider="stateful_evals",
                         value=result.trajectory_score,
@@ -190,6 +190,6 @@ class StatefulEvalWorker(BaseWorker):
                 ]
             )
             if ok:
-                logger.info("Wrote trajectory_score=%s for session %s", result.trajectory_score, result.session_id)
+                logger.info("Wrote TrajectoryScore=%s for session %s", result.trajectory_score, result.session_id)
             else:
-                logger.error("Could not write trajectory_score for session %s", result.session_id)
+                logger.error("Could not write TrajectoryScore for session %s", result.session_id)
