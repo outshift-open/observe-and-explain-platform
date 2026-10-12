@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versioning starts at `1.0.0` with this open-source release.
 
+## [1.0.5] - 2026-10-12
+
+### Added
+
+- `metrics-ontology.ttl`: required `timestamp` (`xsd:dateTime`) on `MetricResult`, the time the observation was computed, so a metric's results can be ordered and bucketed over time.
+
 ## [1.0.4] - 2026-10-12
 
 ### Added
