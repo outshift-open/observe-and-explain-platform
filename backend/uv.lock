@@ -2841,7 +2841,7 @@ requires-dist = [
     { name = "neo4j", specifier = ">=6.1.0" },
     { name = "numba", specifier = ">=0.60.0" },
     { name = "numpy", specifier = ">=2.3.5" },
-    { name = "oxp-ontology", extras = ["models", "verify"], specifier = ">=1.0.2" },
+    { name = "oxp-ontology", extras = ["models", "verify"], specifier = ">=1.0.3" },
     { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
@@ -3181,14 +3181,14 @@ requires-dist = [{ name = "oxp-mce-core", editable = "mce/mce-core" }]
 
 [[package]]
 name = "oxp-ontology"
-version = "1.0.2"
+version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "rdflib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/40/c4c0eb849ddca002c047982a17a593315db69f695d0c38d9c5595d814be1/oxp_ontology-1.0.2.tar.gz", hash = "sha256:e05ef0c9d1ddc0ade7d3b4fd328ef4e491bc26b2db84beba59916a09c7ee3df2", size = 33295 }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/9c/fd840ea457be7df0bf6ac39024dea523f5eb7a7d6a4e9d66fe7d7fa1f857/oxp_ontology-1.0.3.tar.gz", hash = "sha256:9ea6e442560c1e45ff4ab8e82284701021c4ff5a1045dca8b238924228f87de7", size = 34828 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/ae/11be83b0987984ed5fca081cc648cf85ba2d0a230d606a4b2f54fc8dc0fd/oxp_ontology-1.0.2-py3-none-any.whl", hash = "sha256:b91e591ede23cc59c9729b681ebf74e880d5378d9004ff2747e4eececcc0d450", size = 60846 },
+    { url = "https://files.pythonhosted.org/packages/b2/1b/5217733d40a0b036a10a6e67050d9b5c60681c600ad174b07086c1f11f1a/oxp_ontology-1.0.3-py3-none-any.whl", hash = "sha256:6295769792662052e95b5d253a664917c2c6cd9e2128ae5d1eefdd1ace984480", size = 63195 },
 ]
 
 [package.optional-dependencies]

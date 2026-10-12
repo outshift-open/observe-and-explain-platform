@@ -14,10 +14,11 @@ from oxp_ontology import OntologyValidationError, verify_kg_object
 from oxp_ontology.models.edges import (
     aboutMetric,
     containsSession,
+    hasContext,
     hasMedioidSession,
     ofSemanticGroup,
 )
-from oxp_ontology.models.nodes import SemanticGroup
+from oxp_ontology.models.nodes import SemanticGroup, TrajectoryContext
 
 from oxp.connectors.base import Connector
 from oxp.core.exceptions import DatabaseError
@@ -2330,9 +2331,6 @@ def write_transition_context(
     transition via ``hasContext``. Returns False if the transition does not
     exist.
     """
-    from oxp_ontology.models.edges import hasContext
-    from oxp_ontology.models.nodes import TrajectoryContext
-
     fields: Dict[str, Any] = {}
     for key, value in context.items():
         if key in _CONTEXT_FIELDS:
