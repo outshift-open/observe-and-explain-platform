@@ -941,6 +941,7 @@ export interface CognitiveObservabilityMetric {
 export interface CognitiveFailure {
   name: string;
   confidence: number;
+  description?: string | null;
   remediations?: string[] | null;
 }
 

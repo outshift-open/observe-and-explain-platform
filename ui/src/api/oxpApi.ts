@@ -45,9 +45,6 @@ import {
   LiveTopologySessionResponse,
   SessionsCountResponse
 } from '@/types/oxpApi.type';
-import { mockSessionsWithCognitiveObservability } from './mock/sessionsWithCognitiveObservability';
-import { mockSessionL9Protocols } from './mock/sessionL9Protocols';
-import { mockSessionsWithL9Protocols } from './mock/sessionsWithL9Protocols';
 
 const OCE_API_BASE_URL = window.restApiUrl ?? import.meta.env.VITE_REST_API_URL;
 // const OCE_API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -1350,23 +1347,25 @@ export const useApplicationsWithStatefulEval = (
 };
 
 const fetchSessionsWithCognitiveObservability = async (
+  applicationId: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  sessionId?: string
 ): Promise<SessionsWithCognitiveObservability> => {
   const params = new URLSearchParams();
   if (startTime != null) params.set('start_time', String(startTime));
   if (endTime != null) params.set('end_time', String(endTime));
+  if (sessionId) params.set('session_id', sessionId);
 
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions-with-cognitive-observability?${params.toString()}`
-  // );
-
-  const response = {
-    ok: true,
-    json: () => mockSessionsWithCognitiveObservability,
-    statusText: 'OK'
-  };
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-cognitive-observability?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -1378,30 +1377,42 @@ const fetchSessionsWithCognitiveObservability = async (
 };
 
 export const useSessionsWithCognitiveObservability = (
+  applicationId: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  sessionId?: string
 ) => {
   return useQuery<SessionsWithCognitiveObservability>({
-    queryKey: ['sessionsWithCognitiveObservability', startTime, endTime],
-    queryFn: () => fetchSessionsWithCognitiveObservability(startTime, endTime)
+    queryKey: [
+      'sessionsWithCognitiveObservability',
+      applicationId,
+      startTime,
+      endTime,
+      sessionId
+    ],
+    queryFn: () =>
+      fetchSessionsWithCognitiveObservability(
+        applicationId,
+        startTime,
+        endTime,
+        sessionId
+      ),
+    enabled: !!applicationId
   });
 };
 
 const fetchSessionL9Protocols = async (
   sessionId: string
 ): Promise<SessionL9Protocols> => {
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions/${sessionId}/l9-protocols`
-  // );
-
-  const response = {
-    ok: true,
-    json: () =>
-      // Sessions without any L9 protocol have an empty list.
-      mockSessionL9Protocols[sessionId] ?? { sessionId, protocols: [] },
-    statusText: 'OK'
-  };
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/sessions/${sessionId}/l9-protocols`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -1421,6 +1432,7 @@ export const useSessionL9Protocols = (sessionId?: string) => {
 };
 
 const fetchSessionsWithL9Protocols = async (
+  applicationId: string,
   startTime?: number,
   endTime?: number
 ): Promise<SessionsWithL9Protocols> => {
@@ -1428,16 +1440,15 @@ const fetchSessionsWithL9Protocols = async (
   if (startTime != null) params.set('start_time', String(startTime));
   if (endTime != null) params.set('end_time', String(endTime));
 
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions-with-l9-protocols?${params.toString()}`
-  // );
-
-  const response = {
-    ok: true,
-    json: () => mockSessionsWithL9Protocols,
-    statusText: 'OK'
-  };
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-l9-protocols?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -1449,11 +1460,14 @@ const fetchSessionsWithL9Protocols = async (
 };
 
 export const useSessionsWithL9Protocols = (
+  applicationId: string,
   startTime?: number,
   endTime?: number
 ) => {
   return useQuery<SessionsWithL9Protocols>({
-    queryKey: ['sessionsWithL9Protocols', startTime, endTime],
-    queryFn: () => fetchSessionsWithL9Protocols(startTime, endTime)
+    queryKey: ['sessionsWithL9Protocols', applicationId, startTime, endTime],
+    queryFn: () =>
+      fetchSessionsWithL9Protocols(applicationId, startTime, endTime),
+    enabled: !!applicationId
   });
 };

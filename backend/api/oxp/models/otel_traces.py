@@ -323,6 +323,74 @@ class CollectByApplicationResponse(BaseModel):
     sessionList: list[CollectSessionItem] = []
 
 
+# ── Cognitive observability models ────────────────────────────────────────────
+
+
+class CognitiveObservabilityMetric(BaseModel):
+    """A single named cognitive metric score (0..1, unit ``PERCENTAGE``)."""
+
+    name: str
+    value: "SingleValueData"
+
+
+class CognitiveFailure(BaseModel):
+    """A cognitive failure detected for a session (one ``CognitiveFailuresReport``)."""
+
+    name: str
+    confidence: float
+    description: str = ""
+    remediations: list[str] = []
+
+
+class CognitiveSessionItem(CollectSessionItem):
+    """A session with its cognitive observability metrics and failures."""
+
+    cognitiveObservabilityMetrics: list[CognitiveObservabilityMetric] = []
+    cognitiveFailures: list[CognitiveFailure] = []
+
+
+class SessionsWithCognitiveObservabilityResponse(BaseModel):
+    """Response body for ``sessions-with-cognitive-observability``."""
+
+    sessions: list[CognitiveSessionItem] = []
+
+
+# ── L9 protocols models ───────────────────────────────────────────────────────
+
+
+class SessionL9ProtocolsResponse(BaseModel):
+    """Response body for ``GET /sessions/{session_id}/l9-protocols``.
+
+    Each protocol is a camelCase dict (``protocol``, ``enabled``, ``activated``
+    and the metric sections of the protocol) as consumed by the UI.
+    """
+
+    sessionId: str
+    protocols: list[dict[str, Any]] = []
+
+
+class SessionL9ProtocolStatus(BaseModel):
+    """Whether a protocol was enabled / activated in a session."""
+
+    protocol: str
+    enabled: bool
+    activated: bool
+
+
+class SessionWithL9ProtocolsItem(CognitiveSessionItem):
+    """A session with its L9 protocol status and cognitive observability."""
+
+    l9Protocols: list[SessionL9ProtocolStatus] = []
+    # Only for sessions where CONCORD was activated.
+    concord: dict[str, Any] | None = None
+
+
+class SessionsWithL9ProtocolsResponse(BaseModel):
+    """Response body for ``sessions-with-l9-protocols``."""
+
+    sessions: list[SessionWithL9ProtocolsItem] = []
+
+
 # ── Application General Charts models ─────────────────────────────────────────
 
 

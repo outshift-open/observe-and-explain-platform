@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { PATHS } from '@/routes/routes.tsx';
 import { format } from 'date-fns';
+import { parseTimestamp } from '@/utils/dateUtils';
 import {
   OS_LIGHT_COLORS,
   TagBackgroundColorVariants,
@@ -40,6 +41,7 @@ export const ApplicationCard = ({
   healthScore
 }: ApplicationCardProps) => {
   const theme = useTheme();
+  const timestamp = parseTimestamp(application.timestamp);
   const applicationDetailsPath = PATHS.application.replace(
     ':applicationId',
     encodeURIComponent(application.applicationName ?? '')
@@ -165,9 +167,7 @@ export const ApplicationCard = ({
                     }}
                   />
                   <Typography variant={'caption'} fontWeight={500}>
-                    {application.timestamp
-                      ? format(new Date(application.timestamp), 'MMM d, yyyy')
-                      : ''}
+                    {timestamp ? format(timestamp, 'MMM d, yyyy') : ''}
                   </Typography>
                 </Box>
               </Stack>

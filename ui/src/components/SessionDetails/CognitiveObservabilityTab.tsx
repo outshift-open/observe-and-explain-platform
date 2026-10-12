@@ -47,12 +47,14 @@ const formatPercent = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
 export const CognitiveObservabilityTab = () => {
   const theme = useTheme();
-  const { sessionId } = useParams();
+  const { sessionId, applicationId } = useParams();
   const { startDate, endDate } = useTimeRangeStore();
 
   const { data, isLoading, isError } = useSessionsWithCognitiveObservability(
+    applicationId ?? '',
     startDate,
-    endDate
+    endDate,
+    sessionId
   );
 
   const session = useMemo(
@@ -168,7 +170,10 @@ export const CognitiveObservabilityTab = () => {
               <WidgetCard
                 key={failure.name}
                 title={failure.name}
-                description={COGNITIVE_FAILURE_DESCRIPTIONS[failure.name]}
+                description={
+                  failure.description ||
+                  COGNITIVE_FAILURE_DESCRIPTIONS[failure.name]
+                }
                 content={
                   <Stack direction="column" gap="8px" sx={{ width: '100%' }}>
                     <ScoreSeverityBadgeLabel

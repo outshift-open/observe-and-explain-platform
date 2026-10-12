@@ -3099,3 +3099,112 @@ def slim_histogram_values_by_agent_query(
         .where(_ch_metrics_histogram.c.TimeUnix <= end_time)
         .order_by(_ch_metrics_histogram.c.TimeUnix.asc())
     )
+
+
+def neo4j_sessions_with_cognitive_observability_query(
+    *,
+    application_id: str,
+    start_epoch: Optional[float] = None,
+    end_epoch: Optional[float] = None,
+    session_id: Optional[str] = None,
+):
+    """Build a Neo4j query returning sessions with cognitive observability data.
+
+    One row per session: ``sessionId, startTime, duration, cost, agents, tokens,
+    sessionMetrics, failures``.  ``failures`` holds the raw properties of the
+    session's ``CognitiveFailuresReport`` / ``ChallengeDetectionReport`` nodes (one per failure).  The
+    relationship is matched undirected/untyped, as for the other session-attached
+    nodes in this module.
+    """
+    stmt = """
+    MATCH (s:Session)-[:executesSession]->(ma:MAS) WHERE ma.id = $application_id
+    WITH DISTINCT s
+    WHERE ($start_epoch IS NULL OR toFloat(s.startTime) >= $start_epoch)
+      AND ($end_epoch IS NULL OR toFloat(s.startTime) <= $end_epoch)
+      AND ($session_id IS NULL OR s.sessionId = $session_id)
+    OPTIONAL MATCH (s)-[]-(mCost:Metric) WHERE mCost.metricName = 'Cost'
+    WITH s, head(collect(DISTINCT mCost.metricResult)) AS cost
+    OPTIONAL MATCH (s)-[]-(mDuration:Metric) WHERE mDuration.metricName = 'Duration'
+    WITH s, cost, head(collect(DISTINCT mDuration.metricResult)) AS duration
+    OPTIONAL MATCH (s)-[:hasMASCall]->(:MASCall)-[:hasAgentCall]->(ac:AgentCall)
+    OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
+    OPTIONAL MATCH (ac)-[:hasLLMCall]->(l:LLMCall)
+    WITH
+        s,
+        cost,
+        duration,
+        [a IN collect(DISTINCT agentNode.name) WHERE a IS NOT NULL] AS agents,
+        coalesce(sum(coalesce(l.completionTokenCount, 0)
+                     + coalesce(l.promptTokenCount, 0)), 0) AS tokens
+    OPTIONAL MATCH (s)-[:hasMetric]->(sm:Metric)
+    WITH
+        s,
+        cost,
+        duration,
+        agents,
+        tokens,
+        [x IN collect(DISTINCT {
+            name: sm.metricName,
+            result: sm.metricResult,
+            value: sm.value,
+            provider: sm.provider,
+            metric_id: coalesce(sm.metricId, sm.metricName),
+            source: sm.source,
+            reasoning: sm.reasoning
+        }) WHERE x.name IS NOT NULL] AS sessionMetrics
+    OPTIONAL MATCH (s)-[]-(f)
+        WHERE f:CognitiveFailuresReport
+           OR f:ChallengeDetectionReport
+           OR f.type = 'ChallengeDetectionReport'
+    WITH
+        s,
+        cost,
+        duration,
+        agents,
+        tokens,
+        sessionMetrics,
+        [x IN collect(DISTINCT properties(f)) WHERE x IS NOT NULL] AS failures
+    OPTIONAL MATCH (s)-[]-(l9:L9Report)
+    WITH
+        s,
+        cost,
+        duration,
+        agents,
+        tokens,
+        sessionMetrics,
+        failures,
+        [x IN collect(DISTINCT properties(l9)) WHERE x IS NOT NULL] AS l9Reports
+    RETURN
+        s.sessionId AS sessionId,
+        s.startTime AS startTime,
+        duration,
+        cost,
+        agents,
+        tokens,
+        sessionMetrics,
+        failures,
+        l9Reports
+    ORDER BY s.startTime DESC
+    """
+    return stmt, {
+        "application_id": application_id,
+        "start_epoch": start_epoch,
+        "end_epoch": end_epoch,
+        "session_id": session_id,
+    }
+
+
+def neo4j_session_l9_reports_query(*, session_id: str):
+    """Build a Neo4j query returning the ``L9Report`` nodes of a session.
+
+    One row with ``found`` (whether the session exists) and ``reports`` (the
+    raw properties of its L9 reports, one per protocol).
+    """
+    stmt = """
+    OPTIONAL MATCH (s:Session {sessionId: $session_id})
+    OPTIONAL MATCH (s)-[]-(r:L9Report)
+    RETURN
+        s IS NOT NULL AS found,
+        [x IN collect(DISTINCT properties(r)) WHERE x IS NOT NULL] AS reports
+    """
+    return stmt, {"session_id": session_id}

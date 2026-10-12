@@ -21,6 +21,7 @@ from oxp.models.otel_traces import (
     GraphResponse,
     ImpactAssessmentResponse,
     LatentSpaceResponse,
+    SessionL9ProtocolsResponse,
     SessionSpansResponse,
     SessionSummaryResponse,
     TrajectoryResponse,
@@ -130,6 +131,23 @@ def get_session_impact_assessment(
         redis_client=redis_client,
         key=key,
         fetch=lambda: ui_client.get_session_impact_assessment(session_id=session_id),
+        ttl=settings.CACHE_TTL_SECONDS,
+        enabled=settings.CACHE_ENABLED,
+    )
+
+
+@router.get("/{session_id}/l9-protocols", response_model=SessionL9ProtocolsResponse)
+def get_session_l9_protocols(
+    session_id: str,
+    kg_client=Depends(_kg_client),  # noqa: B008
+    redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
+) -> Any:
+    """Return the L9 protocols of a session (one report per protocol)."""
+    key = make_cache_key("sessions:l9_protocols", {"session": session_id})
+    return cached(
+        redis_client=redis_client,
+        key=key,
+        fetch=lambda: kg_client.get_session_l9_protocols(session_id=session_id),
         ttl=settings.CACHE_TTL_SECONDS,
         enabled=settings.CACHE_ENABLED,
     )
