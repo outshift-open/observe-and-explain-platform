@@ -26,9 +26,9 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/metrics/1.0.0-rc0> ;
-    owl:versionInfo "1.0.4" ;
+    owl:versionInfo "1.0.5" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
-    rdfs:comment "Metrics ontology for MAS telemetry. Defines the Metric/MetricResult definition-observation split and integrates with mas-ontology.ttl via hasMetric property." ;
+    rdfs:comment "Metrics ontology for MAS telemetry. Defines the Metric/MetricResult definition-observation split and links to mas-ontology.ttl through mas:ofMetricType (a result to its Metric) and mas:measures (a result to the ExecutionElement it measures)." ;
     rdfs:seeAlso <https://outshift-open.github.io/oxp-ontology/mas> ,
                  <https://www.w3.org/TR/skos-reference/> .
 
@@ -101,6 +101,15 @@ mas:result rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     rdfs:domain mas:MetricResult ;
     rdfs:range xsd:double ;
     rdfs:comment "Numeric value of the metric observation (raw measurement). Unit and possible range are documented on the associated Metric (see mas:unit, mas:valueRange). Example: Latency_obs_001 mas:result 1250.5 (ms), TokenCount_obs_002 mas:result 450 (tokens)." .
+
+mas:timestamp rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:timestamp ;
+    sh:targetClass mas:MetricResult ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:MetricResult ;
+    rdfs:range xsd:dateTime ;
+    rdfs:comment "When this observation was computed. Used to order a metric's results over time." .
 
 mas:reasoning rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:reasoning ;
