@@ -160,6 +160,19 @@ class TestOntologyValidity:
         assert (mas.result, RDF.type, OWL.DatatypeProperty) in g
         assert (mas.reasoning, RDF.type, OWL.DatatypeProperty) in g
 
+    def test_metric_result_declares_a_required_timestamp(self):
+        """Every observation is timestamped, so results can be ordered over time."""
+        from rdflib import RDFS, XSD, Graph, Namespace
+        from rdflib.namespace import SH
+
+        g = Graph()
+        g.parse(get_ontology_path("metrics"), format="turtle")
+        mas = Namespace("https://outshift-open.github.io/oxp-ontology/mas#")
+
+        assert (mas.timestamp, RDFS.domain, mas.MetricResult) in g
+        assert (mas.timestamp, RDFS.range, XSD.dateTime) in g
+        assert next(g.objects(mas.timestamp, SH.minCount)).toPython() == 1
+
     def test_metric_result_declares_optional_evaluation_cost_properties(self):
         """LLM-judged metrics can record the judge model, its token usage and an estimated USD cost."""
         from rdflib import RDFS, XSD, Graph, Namespace
