@@ -66,6 +66,8 @@ spec:
                 secretKeyRef:
                   name: {{ $llmSecretName }}
                   key: {{ $statefulEvalLlmModelKey }}
+            - name: STATEFUL_EVAL_CONFIG_PATH
+              value: {{ $worker.configPath | quote }}
             - name: MAX_INFLIGHT_MESSAGES
               value: {{ $worker.maxInflightMessages | quote }}
             {{- if $workerOverrides.aiGatewayApiKey }}
@@ -96,12 +98,18 @@ spec:
           {{- end }}
           resources:
             {{- toYaml $worker.resources | nindent 12 }}
-          {{- with $worker.volumeMounts }}
           volumeMounts:
+            - name: stateful-eval-config
+              mountPath: {{ $worker.configPath }}
+              subPath: stateful_eval_config.yaml
+            {{- with $worker.volumeMounts }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
-      {{- with $worker.volumes }}
+            {{- end }}
       volumes:
+        - name: stateful-eval-config
+          configMap:
+            name: {{ include "oxp.statefulEvalConfigMapName" . }}
+        {{- with $worker.volumes }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
 {{- end }}

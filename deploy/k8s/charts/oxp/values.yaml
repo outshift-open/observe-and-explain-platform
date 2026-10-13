@@ -705,6 +705,7 @@ workers:
     inputQueue: new_session_to_stateful_eval
     outputQueue: []
     feedbackQueue: ""
+    configPath: /oxp/stateful_eval_config.yaml
     maxInflightMessages: "32"
     extraEnv: {}
     image:
@@ -712,6 +713,10 @@ workers:
       # Overrides the image tag whose default is the chart appVersion.
       tag: ""
       pullPolicy: IfNotPresent
+    # Contents of stateful_eval_config.yaml (see backend/stateful_eval_config.yaml).
+    # Trajectory metrics are opt-in: list the ones to run, or `all`. Each adds a judge call per session.
+    config:
+      trajectory_metrics: []
     resources:
       requests:
         memory: 256Mi
