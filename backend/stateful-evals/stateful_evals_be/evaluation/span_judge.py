@@ -218,6 +218,7 @@ class SpanJudge:
                     "coordination_events": [{"id": "coordination:N", "source_ref": "catalog source_id",
                                              "event_type": "observed event", "operation_name": "operation"}],
                     "operation": {"operation_type": "llm|tool|coordination", "entity_name": "operation name",
+                                  "agent_id": "observed_agent_id or null if unknown",
                                   "actor_scope": "root|peer|unknown", "is_delegation": False},
                     "metadata": {"root_agent_id": "root agent ID or null if not known",
                                  "policy_text_ref": "root instruction source ID or null if unchanged",

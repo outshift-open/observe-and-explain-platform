@@ -80,7 +80,8 @@ class LLMState:
                 "Infer links from meaning, including which broader request a delegated task serves. "
                 "evidence_refs can cite facts/contracts and claims from earlier spans; provenance "
                 "does not make an agent's claim verified truth. Include one operation for the action "
-                "actually recorded; proposed actions are not executions. "
+                "actually recorded; proposed actions are not executions. Set operation.agent_id "
+                "to observed_agent_id when provided; null is allowed when the author is unknown. "
                 "An unfinished input-only observation cannot establish "
                 "a returned output or successful tool completion. Select operation input_ref "
                 "only for current request/tool arguments, never a whole replayed conversation. "
@@ -269,6 +270,8 @@ class LLMState:
         candidate.source_spans.append(self._raw_spans[span_index])
         self._metadata(candidate, delta.get("metadata", {}), span_index)
         owner = SpanNormalizer.resolve_agent_id(self._raw_spans[span_index])
+        if owner and operation.get("agent_id") != owner:
+            raise ValueError("operation.agent_id must match the recorded author")
         if owner and candidate.root_agent_id and operation.get("actor_scope") in {"root", "peer"}:
             if (operation["actor_scope"] == "root") != (owner == candidate.root_agent_id):
                 raise ValueError("operation.actor_scope contradicts the recorded author and root_agent_id")
@@ -281,7 +284,7 @@ class LLMState:
                     set(matches).intersection(candidate.agents[owner].contract_ids)):
                 raise ValueError(f"Capture instruction source {instruction['source_id']} as policy_rule "
                                  "and link its fact ID in the observed agent's contract_ids")
-            if owner == candidate.root_agent_id and not candidate.policy_text:
+            if owner and owner == candidate.root_agent_id and not candidate.policy_text:
                 raise ValueError("Select the observed root instructions using metadata.policy_text_ref")
         if operation.get("actor_scope") == "root" and not candidate.root_agent_id:
             raise ValueError("A root operation requires metadata.root_agent_id")
