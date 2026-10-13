@@ -57,7 +57,7 @@ class LLMState:
                 "operation is one object, never an operations list. Return only new/changed coarse "
                 "records; empty lists are allowed. The record_fields guide below describes fields, "
                 "not a wrapper to copy into the response. "
-                "Every record, including agents, requires id and source_ref from the source catalog. "
+                "Every new record, including agents, requires its own id and a source_ref from the source catalog. "
                 "For a NEW intent/work unit, source_ref selects its complete original request; "
                 "description_ref/request_ref is only an optional replacement on later updates. "
                 "Agent IDs can identify observed authors, owners, or recipients before an agent profile "
@@ -71,6 +71,11 @@ class LLMState:
                 "An update's source_ref supports the change; description_ref/request_ref replaces "
                 "the original request only when that request changed. Relationship IDs may reference "
                 "existing or same-delta records; null means unknown, [] means no list relationship. "
+                "source:* IDs select raw content only in source_ref, content_ref, input_ref, "
+                "request_ref, description_ref, or metadata refs. Relationship fields such as "
+                "response_artifact_ids, input_artifact_ids, output_artifact_ids, and evidence_refs "
+                "require artifact IDs, never source:* IDs. To link raw content, first declare an "
+                "appropriate supported record with source_ref, then cite that record's id. "
                 "Infer links from meaning, including which broader request a delegated task serves. "
                 "evidence_refs can cite facts/contracts and claims from earlier spans; provenance "
                 "does not make an agent's claim verified truth. Include one operation for the action "
@@ -350,6 +355,12 @@ class LLMState:
                         if not isinstance(target, str):
                             raise ValueError(f"{artifact_id}.{key} must contain agent IDs")
                         continue
+                    if isinstance(target, str) and target.startswith("source:"):
+                        raise ValueError(
+                            f"{artifact_id}.{key} requires artifact IDs, not source pointer {target!r}. "
+                            "Reuse an existing artifact ID or declare a supported record with "
+                            "that source_ref in this delta and cite the record's id"
+                        )
                     if not isinstance(target, str) or target not in records and target not in contracts or family and not target.startswith(family):
                         raise ValueError(f"{artifact_id}.{key}: unavailable reference {target!r}")
                     if key == "evidence_refs" and not (target.startswith(("fact:", "claim:")) or target in contracts):

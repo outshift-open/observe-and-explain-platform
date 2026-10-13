@@ -16,6 +16,7 @@ from typing import Any, Callable, Protocol
 from metrics_computation_engine.llm_judge.llm import LLMClient
 
 from stateful_evals_be.evaluation.async_utils import query, run_sync
+from stateful_evals_be.evaluation.json_response import loads_json_response
 from stateful_evals_be.evaluation.trajectory_context import TrajectoryContext
 
 from .base import EvidenceRef, HighLevelMetricFailure, MetricInputConfig
@@ -376,7 +377,7 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
             usage_totals["completion_tokens"] += completion_tokens
             usage_totals["total_tokens"] += total_tokens
             try:
-                parsed = parse_judge_json(content)
+                parsed = parse_judge_json(content, allow_eof_close=self.last_finish_reason == "stop")
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = exc
                 rejected_response = content
@@ -538,21 +539,19 @@ async def call_judge(
     return getattr(judge, method)(**kwargs)
 
 
-def parse_judge_json(raw_text: str) -> Mapping[str, Any]:
+def parse_judge_json(raw_text: str, *, allow_eof_close: bool = False) -> Mapping[str, Any]:
     """Parse JSON from a judge response."""
     text = (raw_text or "").strip()
-    if "```json" in text:
-        text = text.split("```json", 1)[1].split("```", 1)[0].strip()
-    elif "```" in text:
-        text = text.split("```", 1)[1].split("```", 1)[0].strip()
     try:
-        parsed = json.loads(text)
+        parsed = loads_json_response(text, allow_eof_close=allow_eof_close)
     except json.JSONDecodeError as original_error:
+        if text.startswith(("```json\n", "```\n")) and text.endswith("```"):
+            return parse_judge_json(text.split("\n", 1)[1][:-3], allow_eof_close=allow_eof_close)
         # Recover a complete object surrounded by prose, never a nested fragment
         # inside a malformed outer verdict. The latter can look like a pass when
         # result normalization finds no fatal_failures on the fragment.
         start = text.find("{")
-        if start < 0:
+        if start <= 0:
             raise original_error
         parsed, _ = json.JSONDecoder().raw_decode(text[start:])
     if not isinstance(parsed, Mapping):

@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
+from stateful_evals_be.evaluation.json_response import loads_json_response
 from stateful_evals_be.evaluation.span_context import current_agent_instruction_records
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.models.requests import TemporalMetricOptions
@@ -179,7 +180,7 @@ class SpanJudge:
                     text = (response.choices[0].message.content or "").strip()
                     if text.startswith("```"):
                         text = text.split("\n", 1)[1].removesuffix("```").strip()
-                    result = json.loads(text)
+                    result = loads_json_response(text, allow_eof_close=getattr(response.choices[0], "finish_reason", None) == "stop")
                     if not isinstance(result, dict) or result.get("metric_name") != name:
                         raise ValueError(f"Return metric_name={name!r}")
                     if type(result.get("score")) not in (int, float) or result["score"] not in (0, 1):
@@ -195,7 +196,8 @@ class SpanJudge:
                         messages.append({"role": "assistant", "content": text})
                     messages.append({"role": "user", "content": (
                         f"Previous response rejected: {exc}. State has not changed. "
-                        "Return the complete corrected JSON with exact catalog IDs. "
+                        "Return complete corrected JSON. Use catalog source IDs only for content "
+                        "pointers; relationship fields require record IDs. "
                         "Preserve valid state_delta records and fields; declare any new "
                         "referenced record in the same delta or reuse an available ID."
                     )})
