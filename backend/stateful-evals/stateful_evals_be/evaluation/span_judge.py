@@ -108,6 +108,65 @@ for absent updates, actual source IDs and supported values for real records.
 """
 
 
+def _metric_state_view(prior: dict[str, Any], metric_name: str) -> dict[str, Any]:
+    """Project existing ledgers without inferring intent, roles or behavior."""
+    ledgers = {
+        "IntentRecognition": ("intents", "agents", "work_units"),
+        "Groundedness": ("intents", "agents", "claims", "evidence"),
+        "Relevancy": ("intents", "agents", "work_units", "claims"),
+    }.get(metric_name.split(".")[-1])
+    if ledgers is None:
+        return prior
+    records = {name: rows for name, rows in prior["records"].items() if name in ledgers}
+    # Explicit contract relationships retain instruction sources for every judge.
+    contracts = {ref for agent in records.get("agents", []) for ref in agent.get("contract_ids", [])}
+    for name, rows in prior["records"].items():
+        if name not in records and any(row["id"] in contracts for row in rows):
+            records[name] = [row for row in rows if row["id"] in contracts]
+    index_fields = {
+        "id", "artifact_id", "name", "fact_type", "source_name", "claim_type",
+        "entity_name", "operation_type", "event_type", "agent_id", "actor_scope",
+        "owner_agent_ids", "allocator_agent_id", "recipient_agent_ids",
+        "related_intent_ids", "parent_intent_ids", "intent_id", "work_id",
+        "evidence_refs", "revision_of_claim_id", "content_ref", "status", "outcome",
+        "span_index", "first_seen", "last_seen", "request_span_index",
+        "response_span_index", "started_at", "observed_at", "observation_complete",
+        "observation_status", "is_delegation", "delegation_id", "span_id", "parent_span_id",
+    }
+
+    def index(row):
+        return {key: value for key, value in row.items()
+                if key in index_fields and value not in (None, "", [], {})}
+
+    view = {
+        "records": records,
+        "new_record_ids": prior["new_record_ids"],
+        "artifact_index": {name: [index(row) for row in rows if row not in records.get(name, [])]
+                           for name, rows in prior["records"].items()},
+        "operations": [index(row) for row in prior["operations"]],
+        "metadata": {key: value for key, value in prior["metadata"].items()
+                     if key != "final_answer_ref"},
+        "context_view": metric_name,
+    }
+    sources = prior["selected_source_texts"]
+    selected = {}
+
+    def retain_sources(value):
+        if isinstance(value, str) and value in sources:
+            selected[value] = sources[value]
+        elif isinstance(value, dict):
+            for item in value.values():
+                retain_sources(item)
+        elif isinstance(value, list):
+            for item in value:
+                retain_sources(item)
+
+    retain_sources(records)
+    retain_sources(view["metadata"])
+    view["selected_source_texts"] = selected
+    return view
+
+
 class SpanJudge:
     """Judge one transition using the caller-owned model query function."""
 
@@ -128,17 +187,17 @@ class SpanJudge:
         prior = state.prompt_state()
         extractor = next((name for name in self.metric_names
                           if name.split(".")[-1] == "IntentRecognition"), self.metric_names[0])
-        payload = {"current_span_index": span_index, "current_raw_span": raw_span,
-                   "available_current_sources": state.source_catalog(span_index),
-                   "trajectory_state_before_span": prior}
+        payload = {"current_span_index": span_index, "current_raw_span": raw_span}
 
         async def judge_metric(name):
             extracting = name == extractor
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            request = {**payload, "requested_metrics": [name],
+            request = {**payload, "trajectory_state_before_span": _metric_state_view(prior, name),
+                       "requested_metrics": [name],
                        "output_schema": {"metric_name": name, "score": "numeric0or1",
                                          "reasoning": "one concise evidence-grounded sentence"}}
             if extracting:
+                request["available_current_sources"] = state.source_catalog(span_index)
                 request["state_update_guidance"] = state.schema()
                 request["output_schema"]["state_delta"] = {
                     "evidence": [{"id": "fact:N", "source_ref": "catalog source_id",
@@ -163,6 +222,9 @@ class SpanJudge:
                 _SPAN_STATE_DELTA_SYSTEM_PROMPT.partition("Return strict JSON only")[0]
                 + _FOCUSED_TRANSITION_INSTRUCTIONS
                 + (_EXTRACTION_INSTRUCTIONS if extracting else "")
+                + "Artifact indexes provide identity and provenance, not omitted source content. "
+                "Use records and selected_source_texts for supporting content; an indexed claim "
+                "or unfinished operation is not verified evidence. "
                 + "Return one strict JSON object for only the requested metric using output_schema."
             )}, {"role": "user", "content": json.dumps(request, ensure_ascii=False, default=str)}]
             error = None
