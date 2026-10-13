@@ -73,7 +73,6 @@ GROUNDEDNESS_METRIC = "Groundedness"
 RELEVANCY_METRIC = "Relevancy"
 
 
-
 @dataclass
 class _PreparedSession:
     """Everything the evaluation loop needs, independent of where it came from.

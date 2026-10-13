@@ -443,9 +443,7 @@ def test_mce_library_metric_failure_remains_structured(monkeypatch, offline_proc
     compute = AsyncMock(side_effect=[RuntimeError("metric failed"), None])
     monkeypatch.setattr(
         "metrics_computation_engine.util.get_metric_class",
-        Mock(
-            return_value=(Mock(return_value=Mock(compute=compute)), "Groundedness")
-        ),
+        Mock(return_value=(Mock(return_value=Mock(compute=compute)), "Groundedness")),
     )
     source = {
         "entity_type": "llm",

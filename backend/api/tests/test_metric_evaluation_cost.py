@@ -309,7 +309,5 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
 
 def test_payloads_without_cost_still_write_the_full_model():
     db = _Db()
-    _client(db).write_span_metrics(
-        "s1", "sp1", [{"name": "Relevancy", "value": 1.0}]
-    )
+    _client(db).write_span_metrics("s1", "sp1", [{"name": "Relevancy", "value": 1.0}])
     assert set(db.commands[0][1]["result"]) == MODEL_FIELDS

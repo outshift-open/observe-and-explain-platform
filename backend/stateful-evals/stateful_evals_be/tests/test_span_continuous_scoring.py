@@ -161,7 +161,9 @@ def test_unsatisfied_intents_count_only_below_threshold() -> None:
 # ---------------------------------------------------------------------------
 
 _SYSTEM = json.dumps([{"type": "text", "content": "Answer the user's request."}])
-_USER = json.dumps([{"role": "user", "parts": [{"type": "text", "content": "Say hello."}]}])
+_USER = json.dumps(
+    [{"role": "user", "parts": [{"type": "text", "content": "Say hello."}]}]
+)
 _ASSISTANT = json.dumps(
     [
         {

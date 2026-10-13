@@ -1979,7 +1979,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.80.17"
+version = "1.83.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1996,9 +1996,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/3d/e066b752d1a9f234e9cb34bb443487e6bbc1bde546bbe1f2a0d18a3d4659/litellm-1.80.17.tar.gz", hash = "sha256:514ae407e488bccbe0c33a280ed88495d6f079c1dbfe745eb374d898c94b0ac3", size = 13413478 }
+sdist = { url = "https://files.pythonhosted.org/packages/22/92/6ce9737554994ca8e536e5f4f6a87cc7c4774b656c9eb9add071caf7d54b/litellm-1.83.0.tar.gz", hash = "sha256:860bebc76c4bb27b4cf90b4a77acd66dba25aced37e3db98750de8a1766bfb7a", size = 17333062 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/32/6673e1250c6a5fe8b5ebb9b6ad039f4c7ce5b66cb6f94056bdef582fd1af/litellm-1.80.17-py3-none-any.whl", hash = "sha256:52b23a21910a16820e6ea4b982dc81d27c993c1054ce148c56b251e9b89d89df", size = 11708291 },
+    { url = "https://files.pythonhosted.org/packages/19/2c/a670cc050fcd6f45c6199eb99e259c73aea92edba8d5c2fc1b3686d36217/litellm-1.83.0-py3-none-any.whl", hash = "sha256:88c536d339248f3987571493015784671ba3f193a328e1ea6780dbebaa2094a8", size = 15610306 },
 ]
 
 [[package]]
@@ -2724,7 +2724,7 @@ wheels = [
 
 [[package]]
 name = "opik"
-version = "2.2.90"
+version = "2.0.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3-stubs", extra = ["bedrock-runtime"] },
@@ -2748,9 +2748,9 @@ dependencies = [
     { name = "uuid6" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/7c/9c727ae2fb7fa9a32dca4c1beee9ee2b2a23add4b95b5b71b7042df736a6/opik-2.2.90.tar.gz", hash = "sha256:0eeebfe2d2ce42be6e4a208f1e1dccf1540fe45e3595603b5156f20435adb7f9", size = 1385460 }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/b5/d560bfc8df4de10ea832162db8ab83e209dd079890d4a2eafb867daa5261/opik-2.0.21.tar.gz", hash = "sha256:6a5f4fd2234d336c20928dbc2a75d6c2004fae0c4f52a5ae9440c39c170c309e", size = 915258 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/eb/1c/c05666f7344822399adf9b433a0129ae32b32191aeed7cb67818bff4ae50/opik-2.2.90-py3-none-any.whl", hash = "sha256:93482a8ca83dfd8cf8982335635011413bc1620cd8757d76715252e4ca47f124", size = 2117221 },
+    { url = "https://files.pythonhosted.org/packages/b1/54/d7d24abfbd25fcc0353916c6a892d0d6cb9773f4c024ccd29f8271d56f1b/opik-2.0.21-py3-none-any.whl", hash = "sha256:41edce41760341284b67e3ec2d2bc459f5e8bd831b06ff04b3d4bf43a0d21e70", size = 1514960 },
 ]
 
 [[package]]
@@ -4190,6 +4190,7 @@ name = "stateful-evals"
 version = "1.0.0"
 source = { editable = "stateful-evals" }
 dependencies = [
+    { name = "litellm" },
     { name = "mdt-metrics" },
     { name = "metrics-computation-engine" },
     { name = "pydantic" },
@@ -4209,6 +4210,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "clickhouse-connect", marker = "extra == 'import'", specifier = ">=0.8.0" },
+    { name = "litellm", specifier = ">=1.83.0" },
     { name = "mdt-metrics", directory = "stateful-evals/stateful_evals_be/plugins/mdt_metrics" },
     { name = "metrics-computation-engine", specifier = ">=1.2.7" },
     { name = "pydantic", specifier = ">=2.0.0" },
