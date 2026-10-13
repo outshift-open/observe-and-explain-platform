@@ -106,7 +106,8 @@ async def evaluate_llm_spans(processor, spans, *, session_id, policy_override=No
                     failures.append(MetricFailure(
                         metric_name=result.metric_name, score=0, reasoning=result.reasoning,
                         span_index=index, span_type=result.span_type, entity_name=result.entity_name,
-                        span_id=result.span_id, output_payload=operation.get("content", ""),
+                        span_id=result.span_id, input_payload=operation.get("input_payload"),
+                        output_payload=operation.get("content", ""),
                         eval_context="span_state",
                     ))
         context = state.context
