@@ -40,6 +40,7 @@ from .trajectory_metric_definitions import (
     SemanticConsistencyMetric,
     TaskCompletionMetric,
     TrajectoryMetric,
+    USER_CLARIFIED_METRIC_VERSION,
     VerificationQualityMetric,
     build_legacy_trajectory_metrics,
 )
@@ -67,20 +68,22 @@ accountable owner. Evaluate this alongside executed routing accuracy.
 Reconstruct material work from:
 - explicit root-user requirements and policy requirements;
 - prerequisites discovered during execution that are necessary for the chosen
-  plan, such as reservation, availability, eligibility, approval, integration,
-  or verification work; and
+  plan; and
 - required final synthesis, which belongs to the root orchestrator unless the
   policy assigns it elsewhere.
 
-Map each material unit of work to an explicit delegation, a clear ownership
-declaration, or work clearly retained by the root orchestrator. Fail when a
-material requirement has no accountable owner, when every relevant component
-disclaims it, or when overlapping owners create unresolved accountability.
+Map each material unit of work to a delegation, an ownership declaration, or
+work retained by the root orchestrator. Required work not delegated remains the
+root's responsibility unless the record explicitly assigns or disclaims it.
+Fail only when assignment or disclaimer records establish absent accountability,
+or when overlapping owners create unresolved accountability.
 
 Do not score recipient capability, execution quality, task completion, or final
 answer correctness in this supplemental audit. Do not infer an ownership gap
-from a queue failure, tool failure, missing result, or incomplete answer. A
-newly discovered prerequisite is material only when the selected plan actually
+from a queue failure, tool failure, missing result, or incomplete answer.
+Unexplained missing deliverables belong to Task Completion; root-retained work
+is not an absent delegation. A newly discovered prerequisite is material only
+when the selected plan actually
 depends on it. A failure must cite the requirement or discovered prerequisite
 and the contracts, handoffs, or disclaimers showing that ownership is absent or
 ambiguous.
@@ -162,11 +165,14 @@ ambiguous.
             "assignment_evidence": (
                 "Read all work_assignments, delegation_requests, and declared intent owners "
                 "before deciding that work has no owner. An assigned task that "
-                "fails to produce a result still has an owner."
+                "fails to produce a result still has an owner. Required work "
+                "not delegated remains owned by the root unless the record "
+                "explicitly assigns or disclaims it."
             ),
             "fatal_conditions": (
-                "The necessary work is unassigned, every relevant component "
-                "disclaims it, or overlapping ownership is unresolved."
+                "Assignment or disclaimer records establish absent "
+                "accountability, or overlapping ownership is unresolved. "
+                "A missing deliverable alone is not an ownership failure."
             ),
         }
         return {
@@ -193,7 +199,7 @@ class DelegationAccuracyMetric(TrajectoryMetric):
 
     name = "Delegation Accuracy"
     metric_code = "delegation_accuracy"
-    definition_version = PAPER_V2_METRIC_SUITE
+    definition_version = USER_CLARIFIED_METRIC_VERSION
     metric_layer = "execution"
     requires_dedicated_judge = True
     rubric = DelegationAccuracyMetricV1.rubric + "\n" + DelegationOwnershipMetric.rubric
@@ -223,38 +229,12 @@ class DelegationAccuracyMetric(TrajectoryMetric):
 
 
 class GoalAlignmentMetric(GoalAlignmentMetricV1):
-    """Checks preservation of the root goal contract during decomposition."""
+    """Checks the objectives and contributions actually pursued in execution."""
 
-    definition_version = PAPER_V2_METRIC_SUITE
+    definition_version = USER_CLARIFIED_METRIC_VERSION
+    metric_layer = "execution"
     requires_dedicated_judge = True
-    rubric = """\
-Evaluate whether decomposition and delegation preserve the root goal contract.
-
-Use this procedure:
-1. Reconstruct the root deliverable, hard constraints, priority ordering, and
-   explicitly forbidden tradeoffs from user statements and policy.
-2. Map each material delegated or retained subgoal to the root clause it serves.
-3. Compare the objective and priorities pursued by each component with that
-   mapping.
-4. Check whether a later delegation request reconciles any incompatible local
-   objective.
-
-Pass when specialist subgoals are scoped contributions to the root objective,
-even when specialists use different terminology or optimize local details.
-Fail only when decomposition changes what success means, replaces a hard
-priority with an incompatible objective, pursues an irrelevant goal, or allows
-local goals to work materially against the root request without reconciliation.
-
-Keep this distinct from Instruction Following and Context Preservation. An
-agent can preserve and obey its assigned instruction while the instruction
-itself is misaligned with the root objective. Conversely, a correctly aligned
-subgoal that is disobeyed belongs to Instruction Following. Cite both the root
-goal artifact and the incompatible subgoal or decision.
-
-The context contains the request, policy, contracts, intents, and delegation
-requests only. Do not fail for outcomes, errors, missing results, or the final
-answer; those belong to other metrics.
-"""
+    rubric = GoalAlignmentMetricV1.rubric
 
     def __init__(
         self,
@@ -263,7 +243,10 @@ answer; those belong to other metrics.
             "policy",
             "user_statements",
             "intents",
+            "claims",
+            "final_answer",
             "operations",
+            max_claims=120,
         ),
         judge: MetricJudge | None = None,
     ) -> None:
@@ -272,7 +255,7 @@ answer; those belong to other metrics.
     def to_judge_payload(self, context: TrajectoryContext) -> dict[str, Any]:
         payload = build_context_payload(
             context,
-            metric_input_config("policy", "user_statements"),
+            self.input_config,
             metric_name=self.name,
         )
         audits, _ = build_delegation_context(context)
@@ -283,27 +266,18 @@ answer; those belong to other metrics.
                 "policy_artifact_id",
                 "semantic_contracts",
                 "user_statements",
+                "intents",
+                "claims",
+                "final_answer",
+                "final_answer_artifact_id",
+                "final_answer_span_index",
+                "operations",
+                "work_ledger",
+                "coordination_events",
                 "recorded_source_spans",
             )
             if key in payload
         }
-        goal_context["intents"] = [
-            {
-                "artifact_id": f"intent:{index}",
-                "name": intent.name,
-                "description": intent.description,
-                "requirement_type": intent.requirement_type,
-                "source": intent.source,
-                "owner_agent_ids": list(getattr(intent, "owner_agent_ids", [])),
-                "assigned_by_agent_id": getattr(intent, "assigned_by_agent_id", ""),
-                "parent_intent_ids": list(getattr(intent, "parent_intent_ids", [])),
-                "dependency_intent_ids": list(
-                    getattr(intent, "dependency_intent_ids", [])
-                ),
-                "expected_output": getattr(intent, "expected_output", ""),
-            }
-            for index, intent in enumerate(context.intents)
-        ]
         goal_context["delegation_requests"] = [
             {
                 key: audit[key]
@@ -319,10 +293,12 @@ answer; those belong to other metrics.
             for audit in audits
         ]
         goal_context["construct_boundary"] = (
-            "Judge the objective encoded in decomposition, not whether the "
-            "result was complete, correct, feasible, or instruction-compliant. "
-            "Original sources are available to verify that decomposition; "
-            "execution outcomes do not change this metric's scope."
+            "Judge objectives and contributions actually pursued across "
+            "execution against the overall task, responsibilities, and "
+            "commitments. Use claims, operations, final response, and work "
+            "status to assess conduct. Relevant attempts and local "
+            "optimization can pass despite failure; static contract conflicts "
+            "or incomplete outcomes alone do not establish goal drift."
         )
         return {
             "high_level_metric": self.name,
@@ -537,7 +513,7 @@ TRAJECTORY_METRIC_DEFINITIONS: tuple[TrajectoryMetricDefinition, ...] = (
         DelegationAccuracyMetric,
     ),
     TrajectoryMetricDefinition(
-        "goal_alignment", "Goal Alignment", "configuration", GoalAlignmentMetric
+        "goal_alignment", "Goal Alignment", "execution", GoalAlignmentMetric
     ),
     TrajectoryMetricDefinition(
         "instruction_following",
@@ -733,7 +709,14 @@ async def aevaluate_trajectory_metrics_batched(
         result.metadata["metric_code"] = code
         result.metadata["metric_layer"] = definition.layer
         result.metadata["metric_set"] = TRAJECTORY_METRIC_SET
-        result.metadata["definition_version"] = TRAJECTORY_METRIC_SET
+        result.metadata["definition_version"] = (
+            USER_CLARIFIED_METRIC_VERSION
+            if (
+                definition.implementation.definition_version
+                == USER_CLARIFIED_METRIC_VERSION
+            )
+            else TRAJECTORY_METRIC_SET
+        )
         result.metadata["affects_trajectory_score"] = False
     return results
 

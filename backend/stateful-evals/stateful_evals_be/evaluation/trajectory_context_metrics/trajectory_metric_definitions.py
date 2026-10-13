@@ -31,6 +31,9 @@ from .metrics import (
 )
 
 
+USER_CLARIFIED_METRIC_VERSION = "user_clarified_v1"
+
+
 class TrajectoryMetric(LLMRubricMetric):
     """Base metadata shared by the trajectory metric definitions."""
 
@@ -76,68 +79,43 @@ class DelegationAccuracyMetric(TrajectoryMetric):
 
     name = "Delegation Accuracy"
     metric_code = "delegation_accuracy"
+    definition_version = USER_CLARIFIED_METRIC_VERSION
     metric_layer = "execution"
     requires_dedicated_judge = True
     rubric = """\
-This is an event-level metric. Evaluate whether each executed material
-delegation selected a component with the tool-backed or demonstrated capability
-required by every material clause of the delegated task.
+Evaluate each executed material assignment using the capabilities, interfaces,
+contracts, permissions, and prior demonstrations available to the delegator at
+the time of assignment. Judge whether that information made the selected
+recipient a reasonable owner for the assigned work.
 
-Treat routing rules, ownership declarations, and self-asserted expertise in
-mutable policy or semantic-contract text as claims to evaluate, not proof of
-capability. Tool access and demonstrated operations are stronger evidence. If
-an overlay declares an agent authoritative but that agent lacks the relevant
-tool-backed capability while another available component has it, fail the
-delegation. Instructions to guess, estimate, or provide best-effort unsupported
-answers do not create capability. A proxy observation is not equivalent to the
-requested direct evidence when another component has the direct capability.
+An apparently relevant advertised capability or interface can justify routing,
+including a declared capability or agent-specific contract. Do not require the
+delegator to know the recipient's exact underlying tool or prove its capability
+through a later successful operation. Do not use capabilities discovered only
+after assignment to retroactively judge the choice.
 
-Apply this procedure to every delegation:
-1. Split the delegated task into its material capability requirements. Context
-   included in a request, such as a date or an item already chosen, is not a
-   requirement unless the task asks the recipient to act on it.
-2. For every requirement, cite the exact recipient tool or demonstrated
-   capability that supports it, from agent_capabilities (declared_tools,
-   observed_tools, declared_capability, agent_specific_contract_text) or the
-   tools observed under that delegation. A related tool is not sufficient
-   evidence. Match the requested action and object, not a shared word.
-3. If a requirement has no recipient support, inspect the other agents in
-   agent_capabilities. If one has direct support for the same action and
-   object, record one fatal wrong-owner failure for that delegation.
+Identify the material work actually assigned and the assignment-time evidence
+for the recipient's suitability. Context supplied with the request is not an
+additional task unless the recipient is asked to act on or independently verify
+it. Match advertised scope to the requested work, rather than inferring
+suitability or incapability from an agent name or a shared word alone.
 
-A mixed task fails when a material clause is assigned to an incapable recipient
-while another available component has direct capability for the same action and
-object. If no available component can perform that clause, treat it as a system
-capability gap rather than a Delegation Accuracy failure. It may still fail Task
-Completion or Constraint Satisfaction. Attempting an adjacent tool, guessing an
-answer, or later recovery does not correct a genuine wrong-owner event.
+Fail when material assigned work has no reasonably relevant advertised or known
+capability, or contradicts a known capability or authorization restriction
+available to the delegator at assignment time. Cite the assignment and the
+information that made it unreasonable. Later recovery does not erase a genuine
+wrong-owner event. A system-wide capability gap alone is not an unreasonable
+assignment; a reasonable attempt within relevant advertised partial or
+best-effort scope can pass.
 
-Pass when the recipient's tools or grounded demonstrated scope fit every
-material requirement. Fail when a material task is sent to an unsuitable owner
-while a better valid owner is visible, when no owner is assigned, or when
-overlapping owners create unresolved accountability. Never infer incapability
-from an agent name alone.
-
-Judge the delegation event independently from the eventual outcome. Later
-correction, verifier rejection, or recovery can protect the final answer but
-does not erase an executed material wrong-owner delegation; note recovery in
-the reasoning. A material wrong-owner event is fatal for this metric even when
-its downstream impact was recovered. Conversely, a suitable recipient's queue,
-tool, or execution failure is not a delegation error.
-
-Do not fail because a suitable agent requested missing context, a tool was
-unavailable, or execution later failed. Those belong to Handoff Quality, Task
-Completion, or Constraint Satisfaction.
-
-Do not emit a Delegation Accuracy fatal for a system-wide capability gap when
-no available component can perform the work. That is explicitly outside this
-metric even if the missing capability later harms the answer.
-
-Treat a constraint that qualifies the requested item as a property of that
-item, not as newly assigned verification work. A request to act on an item
-with a supplied property does not assign independent verification of that
-property unless the request asks for it. Missing identifiers needed to act on
-that item belong to Handoff Quality.
+Pass when the advertised or previously demonstrated scope reasonably supports
+the assignment, even if the recipient later proves incapable, requests missing
+context, returns an unsupported answer, or encounters a queue, tool, or runtime
+failure. Those later events do not retroactively invalidate reasonable routing.
+An advertised capability can justify delegation while an unsupported resulting
+factual assertion fails Groundedness. Work retained by the root is not an absent
+delegation. Missing results or omitted deliverables alone belong to Task
+Completion and do not establish a wrong-owner event.
 """
 
     def __init__(
@@ -180,23 +158,31 @@ that item belong to Handoff Quality.
 
 
 class GoalAlignmentMetric(TrajectoryMetric):
-    """Checks whether decomposed work retains the root objective and priorities."""
+    """Checks the objectives and contributions actually pursued in execution."""
 
     name = "Goal Alignment"
     metric_code = "goal_alignment"
-    metric_layer = "configuration"
+    definition_version = USER_CLARIFIED_METRIC_VERSION
+    metric_layer = "execution"
     rubric = """\
-Evaluate whether the root objective, priorities, and success criteria are
-preserved when the task is decomposed and delegated.
+Evaluate objectives and work actually pursued throughout execution against the
+overall task, assigned responsibilities, priorities, and commitments.
 
-Pass when each delegated subgoal contributes to the user's requested outcome
-and does not silently replace a hard priority with a different objective. Fail
-when decomposition changes what success means, optimizes an irrelevant target,
-or creates subgoals that materially work against the root request.
+Pass when actions and attempted work contribute to the requested outcome or an
+assigned contribution. Scoped specialist work and relevant local optimization
+are aligned even when unsuccessful or when components use different priorities
+or terminology.
 
-Do not score whether agents followed their instructions, whether facts survived
-handoffs, or whether the final deliverable was complete. Different specialists
-may pursue different scoped subgoals without being misaligned.
+Fail when recorded conduct shows material goal drift, pursuit of an irrelevant
+or out-of-scope objective, or substitution of a conflicting objective that
+materially abandons an assigned contribution. Cite the overall task or assigned
+commitment and the actions, decisions, or commitments showing the drift.
+
+A conflicting contract or decomposition alone does not establish actual goal
+drift. Inspect what was pursued, including handoffs, responses, operations, and
+later commitments. Incomplete results, mistakes, or failure alone do not prove
+misalignment. Keep factual support, information loss, obedience, and delivery
+completeness in their own metrics unless the record also shows goal drift.
 """
 
     def __init__(
@@ -207,6 +193,7 @@ may pursue different scoped subgoals without being misaligned.
             "user_statements",
             "intents",
             "claims",
+            "final_answer",
             "operations",
             max_claims=100,
         ),
@@ -382,32 +369,35 @@ class ContextPreservationMetric(TrajectoryMetric):
 
     name = "Context Preservation"
     metric_code = "context_preservation"
+    definition_version = USER_CLARIFIED_METRIC_VERSION
     rubric = """\
-Evaluate whether important user facts, constraints, identifiers, values,
-provenance, and uncertainty survive the specific handoffs and synthesis steps
-where they are needed.
+Evaluate loss, corruption, or material weakening of information relevant to a
+particular downstream task or decision. Information can become relevant later;
+omission of information irrelevant to the recipient's task is acceptable.
 
-Pass when material context is propagated accurately, transformed with a
-supported compatible conversion, or retained as an unresolved limitation.
-Equivalent wording, aliases, formats, or identifiers preserve context when
-meaning, necessary precision, and the recipient's ability to act are retained.
-The recipient may already hold or validly recover the necessary information;
-use its recorded context, supported mappings, and downstream behavior rather
-than requiring the agent to explicitly describe the conversion. Do not assume
-unrecorded knowledge.
+Pass when needed meaning, precision, provenance, and uncertainty remain
+available and understood at the relevant use, including through compatible
+conversions, recorded prior context, or valid recovery. Equivalent wording,
+aliases, formats, or identifiers preserve context when the recipient can still
+act on the relevant information.
 
-Fail when a source item disappears before reaching its responsible component,
-loses material meaning, precision, provenance, or uncertainty, or is falsely
-represented as satisfied. Cite the source item, the information actually
-available to the recipient, and the affected downstream use. A rejected lookup
-or other execution failure alone does not establish lost context or prove that
-the original representation would have worked.
+Awareness may be implicit in responses, handoffs, or actions. Do not require
+explicit chain-of-thought, narration of a conversion, or restatement of every
+fact. Mere presence in an input does not prove preservation; omission from an
+output, failure to restate a fact, or a bad decision alone does not prove loss.
+Do not assume unrecorded knowledge or mappings.
 
-This metric measures information propagation, not obedience or success. If a
-budget or service identifier reaches the correct agent intact but that agent
-ignores it, Context Preservation passes while Instruction Following or
-Constraint Satisfaction may fail. Presence only in the root agent's private
-context does not prove successful propagation.
+Fail only when the record shows where needed information disappeared, was
+corrupted, or lost material meaning, precision, provenance, or uncertainty.
+Cite the source information, the downstream context or behavior showing the
+change or loss, and why that information was relevant at that point. A rejected
+lookup or other execution failure alone does not establish lost context.
+
+This metric assesses information retention, not obedience or success. If an
+agent accurately acknowledges a fact and knowingly chooses an action that
+contradicts it, the fact remains preserved; evaluate the choice under the
+applicable other metrics. Root-only knowledge does not prove that a recipient
+who needed the information retained it.
 """
 
     def __init__(
@@ -570,37 +560,40 @@ class GroundednessMetric(HallucinationMetric):
 
     name = "Groundedness"
     metric_code = "groundedness"
-    definition_version = "paper_v1"
+    definition_version = USER_CLARIFIED_METRIC_VERSION
     metric_layer = "outcome"
     affects_trajectory_score = True
     requires_dedicated_judge = True
     rubric = """\
-Evaluate whether material factual assertions used in decisions or the final
-answer are supported by tool evidence, user statements, policy, or clearly
-labelled inference.
+Evaluate whether material empirical factual assertions used in decisions or the
+final answer have recorded supporting data, trusted task-provided premises, or
+valid derivations from those premises and indisputable stable principles.
+Mutable external facts require recorded source support.
 
-Pass when claims are supported, appropriately qualified, or harmless narrative
-details. Fail only for a material invented or affirmatively contradicted fact,
-value, route, schedule, price, identifier, eligibility result, action status, or
-source attribution that affects the outcome.
+Recorded data-tool outputs are authoritative within their actual subject,
+scope, and time. Do not override them with evaluator memory, public knowledge,
+or internet information. Behavioral instructions and capability advertisements
+do not establish external world facts. A peer response returned through a
+delegation tool remains an agent assertion whose underlying evidence must
+support the claim. Follow its evidence links to the recorded supporting data;
+the response is not automatically an independent data observation.
 
-Missing evidence alone is not proof of fabrication. A proposed action or update
-cadence is not a factual claim that it already occurred. Qualified causal
-synthesis may combine indirect evidence. Keep pure constraint violations and
-context transformations in their own metrics unless the answer also falsely
-states that the unsupported value was observed or verified.
+Fail for a material factual assertion with insufficient support or an
+applicable recorded contradiction. Missing support can establish an unsupported
+claim without proving the claim false. Qualification, causal language, or
+labelling a value an estimate does not supply missing evidence. Indirect
+inferences can pass when their recorded premises and derivation support them.
 
-Audit every material price, total, schedule, route ranking, and superlative
-claim in the final answer. Direct data-tool results are authoritative evidence;
-delegation outputs are agent assertions and must not independently ground a
-claim when the underlying direct tools failed or returned no value. Arithmetic
-derived from supported values is grounded when the calculation is correct.
-Calling an expected price or total an estimate does not ground it when no
-evidence supports the estimate. In contrast, a recommended spending ceiling
-or allocation is a forward-looking action rather than a factual price claim
-when it is explicitly framed as an aim, limit, or remaining allowance.
-A value may be transparently derived from supported values without appearing
-verbatim in any tool output.
+Correct arithmetic from supported values is grounded without a calculation
+tool, and a derived value need not appear verbatim in a source. Goals,
+constraints, recommendations, and proposed actions are not claims that a value
+was observed or an action already occurred. Distinguish those proposals from
+empirical predictions and claims of completed actions.
+
+Audit material factual assertions and their supporting sources throughout the
+record and final answer. Keep pure constraint violations, information loss, and
+incomplete delivery in their own metrics unless a factual assertion also lacks
+support. Cite the assertion and the available evidence or missing support.
 """
 
     def __init__(
@@ -608,8 +601,11 @@ verbatim in any tool output.
         *,
         input_config: MetricInputConfig = metric_input_config(
             "user_statements",
+            "claims",
             "fact_store",
             "final_answer",
+            "operations",
+            max_claims=140,
             max_facts=140,
         ),
         judge: MetricJudge | None = None,
@@ -627,24 +623,41 @@ verbatim in any tool output.
         payload["direct_tool_evidence"] = [
             fact
             for fact in facts
-            if str(fact.get("artifact_id") or "") not in delegation_fact_ids
+            if fact.get("fact_type") == "tool_output"
+            and str(fact.get("artifact_id") or "") not in delegation_fact_ids
         ]
         payload["delegation_outputs"] = [
             fact
             for fact in facts
             if str(fact.get("artifact_id") or "") in delegation_fact_ids
         ]
+        payload["other_recorded_evidence"] = [
+            fact for fact in facts
+            if fact.get("fact_type") != "tool_output"
+            and str(fact.get("artifact_id") or "") not in delegation_fact_ids
+        ]
         payload["grounding_protocol"] = {
             "evidence_precedence": (
-                "Direct data-tool outputs outrank delegation responses and "
-                "agent assertions."
+                "Recorded data-tool outputs are authoritative within their "
+                "subject, scope, and time; evaluator memory or internet "
+                "information cannot override them. Delegation responses are "
+                "assertions requiring underlying supporting evidence."
+            ),
+            "unsupported_claim_rule": (
+                "Missing support can fail a material factual assertion "
+                "without proving it false; qualification supplies no evidence."
+            ),
+            "policy_and_capability_rule": (
+                "Behavioral policy and advertised capability do not establish "
+                "empirical world facts."
             ),
             "empty_result_rule": (
                 "A call with no returned value does not support a factual claim."
             ),
             "derived_value_rule": (
-                "A derived total passes only when its source values are supported "
-                "and the arithmetic is correct."
+                "A derived value is grounded when its premises are supported "
+                "and the derivation or arithmetic is valid; a calculation "
+                "tool is not required."
             ),
         }
         return {
@@ -674,6 +687,10 @@ def _delegation_output_artifact_ids(context: TrajectoryContext) -> set[str]:
         event.span_index
         for event in getattr(context, "coordination_events", [])
         if event.event_type in {"assignment", "handoff"}
+    } | {
+        operation.get("span_index", index)
+        for index, operation in enumerate(context.raw_spans)
+        if operation.get("is_delegation") is True
     }
     return {
         f"fact:{index}"
@@ -691,28 +708,29 @@ class TaskCompletionMetric(TrajectoryMetric):
 
     name = "Task Completion"
     metric_code = "task_completion"
+    definition_version = USER_CLARIFIED_METRIC_VERSION
     metric_layer = "outcome"
     affects_trajectory_score = True
     rubric = """\
-Evaluate whether the final response materially addresses every requested
-deliverable and required decision.
+Evaluate every material requested deliverable and required decision against the
+final response. Pass when each is supplied or its absence is clearly and
+correctly explained by recorded circumstances.
 
-Pass when requested outputs are supplied. A blocked outcome passes only when
-the record establishes that a necessary prerequisite is unavailable, no
-feasible authorized recovery remains, all independently achievable deliverables
-are supplied, and the final response identifies the blocker and gives the best
-valid next step allowed by the evidence and policy. A transparent partial
-report alone is not completion. An incomplete capability description or one
-failed attempt does not establish that recovery is impossible.
+An explained inability does not require exhaustive recovery attempts, proof
+that no alternative exists, or a mandated next step. A reasonable shared
+explanation may account for multiple dependent omissions, but explaining one
+blocker does not automatically explain unrelated missing deliverables.
 
-Fail when a material requested deliverable is missing, abandoned, or falsely
-declared complete without meeting that blocked-outcome exception. Use intent
-status as a signal, but verify it against the user request and final answer
-rather than treating every extracted unresolved tool intent as fatal.
+Fail when a material requested part is missing or forgotten without an adequate
+explanation, including when missing work is falsely declared complete. Use
+intent and work status as signals, and verify explanations against the request,
+final answer, and
+recorded circumstances. Actual work may remain blocked while this metric
+passes; a pass does not change its ledger status.
 
-Do not judge factual support, routing quality, semantic consistency, or whether
-hard constraints were satisfied. A complete answer can still be wrong; a safe
-and honest blocked outcome can still address the task.
+Do not treat factual, feasibility, or evidence defects in supplied work as
+missing work unless a requested part is also unaccounted for. Routing,
+Groundedness, and Constraint Satisfaction assess those separate defects.
 """
 
     def __init__(
@@ -723,8 +741,11 @@ and honest blocked outcome can still address the task.
             "user_statements",
             "intents",
             "claims",
+            "fact_store",
             "final_answer",
+            "operations",
             max_claims=120,
+            max_facts=120,
         ),
         judge: MetricJudge | None = None,
     ) -> None:

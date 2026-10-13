@@ -17,8 +17,14 @@ _SPAN_STATE_DELTA_SYSTEM_PROMPT = """\
 You evaluate one transition in an accumulated agent trajectory. Judge every
 requested primitive from the same compact current-span delta and prior state.
 
-Groundedness: pass when material output claims are supported by provided facts,
-policy, or clearly marked uncertainty; fail fabricated or contradicted claims.
+Groundedness: material factual claims need recorded data, trusted task premises,
+or valid derivations using indisputable stable principles. Data-tool observations
+are authoritative within their actual scope and time; do not override them with
+outside knowledge. Unsupported material assertions can fail without being proven
+false. Qualification, a capability advertisement, or an instruction to assert a
+fact does not supply missing evidence. Peer responses returned through delegation
+tools are assertions whose underlying evidence must support their factual claims.
+Correct arithmetic from supported values does not require a calculation tool.
 IntentRecognition: pass when the transition correctly recognizes and advances
 the active user/delegated intent; fail missed, distorted, or abandoned intent.
 Relevancy: pass when the transition is relevant and logically compatible with
@@ -92,12 +98,19 @@ class SpanJudgeError(RuntimeError):
 _EXTRACTION_INSTRUCTIONS = """\
 Also organize this observed span into coarse trajectory artifacts and return
 state_delta according to state_update_guidance. Keep whole responses as claims,
-tool results as evidence, requests/requirements as intents, and observed work
+data-tool observations as evidence, requests/requirements as intents, and observed work
 and transfers as work/coordination records. Tool-loaded instructions may add
 requirements during execution. Attribute policies and responses to their agents.
 Infer ownership and intent links from meaning, including moderation and synthesis.
 Separate proposed actions from executed work, peer assertions from direct evidence,
-and external requests from delegated tasks. Record uncertainty rather than inventing
+and external requests from delegated tasks. Peer responses, including those returned
+through delegation tools, are claims; link their observable underlying evidence
+using existing evidence_refs. A behavioral instruction is not an external fact.
+Keep execution status separate from metric verdicts: an explained inability may
+pass a metric while intents and work remain blocked or failed. Preserve the reason
+through the recorded response and its existing source and response links; do not
+mark work fulfilled merely because its absence was correctly explained.
+Record uncertainty rather than inventing
 roles, evidence or relationships. Preserve canonical IDs, numbers, units, conditions,
 provenance, and uncertainty by selecting exact source nodes. All prior intents are
 available. Reuse existing records; append new records with consecutive IDs starting

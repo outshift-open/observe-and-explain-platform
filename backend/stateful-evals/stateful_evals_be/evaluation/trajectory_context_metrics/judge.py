@@ -142,6 +142,14 @@ patterns. Do not assume domain facts that are not in the context. A policy-
 compliant refusal, denial, transfer, or request for more information can be a
 passing outcome when it is justified by the provided context.
 
+For Groundedness, indisputable stable principles and correct derivations from
+supported premises can substantiate a claim. Mutable empirical facts require
+recorded support. Data-tool observations are authoritative within their actual
+subject, scope, and time; do not override them using outside knowledge. A peer
+response, capability advertisement, or behavioral instruction is not itself a
+data-tool observation. Apply each metric's own evidence standard: an advertised
+capability may justify routing without proving an eventual factual answer.
+
 Evaluate the complete sequence, not an isolated intermediate response, except
 when the metric rubric explicitly defines an event-level decision. For
 outcome-level metrics, check for later evidence that corrects, supersedes,
@@ -1658,25 +1666,25 @@ def build_delegation_context(
             max_item_chars=max_item_chars,
         ),
         "capability_precedence": (
-            "Tool-backed and demonstrated capabilities outrank routing or ownership "
-            "assertions in mutable policy text."
+            "Relevant advertised capability or demonstrated scope available to the "
+            "delegator at assignment time can justify routing. Later tool limitations "
+            "or execution failures do not retrospectively invalidate that assignment."
         ),
         "recovery_rule": (
             "A later recovery may protect the final outcome but does not erase an "
             "executed material wrong-owner delegation."
         ),
         "decision_protocol": (
-            "For each delegation, split the delegated task into material capability "
-            "requirements. Match every requirement to the recipient's tools "
-            "(declared_tools, observed_tools, observed_tools_before_next_delegation) "
-            "or its agent-specific contract text in agent_capabilities. For a "
-            "requirement the recipient cannot support, check the other agents in "
-            "agent_capabilities. Record a fatal wrong-owner delegation only when "
-            "another available agent has direct support for the same action and "
-            "object. A capability absent from every agent is a system coverage gap, "
-            "not a routing error. Work already completed by its capable owner and "
-            "repeated as context in a later task is not a new wrong-owner "
-            "delegation unless the later task asks for independent verification."
+            "For each executed delegation, identify its material requested work and "
+            "the relevant capabilities advertised or known to the delegator before "
+            "assignment. Cite that information and judge whether the assignment was "
+            "reasonable in its scope. Do not require an exact underlying tool match "
+            "or use future observations as knowledge the delegator already had. "
+            "A known capability restriction can establish an unreasonable assignment; "
+            "an unexpected failure or system-wide capability gap alone cannot. "
+            "Context included with a task is not itself newly assigned work. "
+            "Work retained by the root is not an absent delegation, and unexplained "
+            "missing deliverables are evaluated under Task Completion."
         ),
     }
     tool_definitions = getattr(context, "tool_definitions", None)
