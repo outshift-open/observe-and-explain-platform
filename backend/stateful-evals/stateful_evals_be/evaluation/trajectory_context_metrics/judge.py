@@ -118,6 +118,8 @@ def compact_prompt_context(context: Mapping[str, Any]) -> dict[str, Any]:
                 provenance.setdefault(source_id, []).append({"artifact_id": artifact_id, "path": list(path)})
                 return {"source_text_ref": source_id}
         if isinstance(value, dict):
+            if len(path) > 1 and path[-2] == "delegation_requests" and value.get("delegation_id"):
+                value = {"artifact_id": value["delegation_id"], **value}
             artifact_id = value.get("artifact_id", artifact_id)
             return {key: project(item, (*path, key), artifact_id) for key, item in value.items()}
         if isinstance(value, list):
@@ -1893,6 +1895,30 @@ def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dic
             "kind": "final_answer",
             "content": compact(str(shared_context["final_answer"]), 400),
         }
+
+    def register(value, path=()):
+        if isinstance(value, Mapping):
+            delegation = len(path) > 1 and path[-2] == "delegation_requests" and isinstance(value.get("delegation_id"), str) and bool(value["delegation_id"])
+            ids = [value.get("artifact_id")]
+            if delegation:
+                ids.extend((value.get("delegation_id"), value.get("operation_artifact_id")))
+            for artifact_id in ids:
+                if isinstance(artifact_id, str) and artifact_id:
+                    artifact_lookup.setdefault(artifact_id, {
+                        "artifact_id": artifact_id,
+                        "span_index": _safe_int(value.get("span_index"), -1),
+                        "source_name": str(value.get("source_name") or value.get("entity_name") or "context"),
+                        "kind": str(value.get("kind") or "artifact"),
+                        "content": json.dumps(value, ensure_ascii=False, default=str),
+                        "metadata": {"source_record": deepcopy(value), "path": list(path)},
+                    })
+            for key, item in value.items():
+                register(item, (*path, key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                register(item, (*path, index))
+
+    register(shared_context)
     projected = compact_prompt_context(shared_context)
     for text_id, text in projected["source_texts"].items():
         sources = projected["source_text_provenance"][text_id]
