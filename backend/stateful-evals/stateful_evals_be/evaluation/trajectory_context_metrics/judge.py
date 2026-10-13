@@ -1911,9 +1911,21 @@ def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dic
             "kind": "policy",
             "content": compact(str(shared_context["policy"]), 400),
         }
-    if shared_context.get("final_answer"):
-        artifact_lookup["final_answer"] = {
-            "artifact_id": "final_answer",
+    root_policy_id = shared_context.get("root_policy_artifact_id")
+    if isinstance(root_policy_id, str) and root_policy_id and shared_context.get("root_policy"):
+        artifact_lookup[root_policy_id] = {
+            "artifact_id": root_policy_id,
+            "span_index": -1,
+            "source_name": "root_policy",
+            "kind": "policy",
+            "content": compact(str(shared_context["root_policy"]), 400),
+        }
+    final_answer_id = shared_context.get("final_answer_artifact_id")
+    declared_final_answer = isinstance(final_answer_id, str) and bool(final_answer_id) and "final_answer" in shared_context
+    if shared_context.get("final_answer") or declared_final_answer:
+        final_answer_id = final_answer_id if declared_final_answer else "final_answer"
+        artifact_lookup[final_answer_id] = {
+            "artifact_id": final_answer_id,
             "span_index": _safe_int(shared_context.get("final_answer_span_index"), -1),
             "source_name": "final_answer",
             "kind": "final_answer",
@@ -1922,7 +1934,7 @@ def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dic
 
     def register(value, path=()):
         if isinstance(value, Mapping):
-            delegation = len(path) > 1 and path[-2] == "delegation_requests" and isinstance(value.get("delegation_id"), str) and bool(value["delegation_id"])
+            delegation = len(path) > 1 and path[-2] in {"delegation_requests", "delegation_audit"} and isinstance(value.get("delegation_id"), str) and bool(value["delegation_id"])
             ids = [value.get("artifact_id")]
             if delegation:
                 ids.extend((value.get("delegation_id"), value.get("operation_artifact_id")))
