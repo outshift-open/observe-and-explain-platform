@@ -9,6 +9,7 @@ import json
 from dataclasses import asdict, fields
 from typing import Any
 
+from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.evaluation.trajectory_context import (
     AgentProfile, ClaimEntry, CoordinationEvent, EvidenceFact, IntentEntry,
     TrajectoryContext, WorkUnit, _timestamp_ns,
@@ -82,8 +83,14 @@ class LLMState:
                 "actually recorded; proposed actions are not executions. "
                 "An unfinished input-only observation cannot establish "
                 "a returned output or successful tool completion. Select operation input_ref "
-                "only for current request/tool arguments, never a whole replayed conversation. Metadata refs are optional "
-                "and unchanged when absent/null. Select final_answer_ref only for a root agent's "
+                "only for current request/tool arguments, never a whole replayed conversation. "
+                "Return metadata on every update; null refs preserve prior values. "
+                "Capture observed_instruction_sources as fact_type=policy_rule with agent_id, "
+                "and link their fact IDs in that agent's contract_ids. Reuse an existing identical "
+                "contract for the same agent instead of duplicating it. When the observed agent "
+                "is the root, select its system instructions as policy_text_ref. "
+                "Use tool_output for direct data results, agent_response for relayed peer replies. "
+                "Select final_answer_ref only for a root agent's "
                 "actual user-facing response, and update it when a later root answer is recorded. "
                 "All categories, roles, owners, statuses, and links are model decisions."
             ),
@@ -96,7 +103,7 @@ class LLMState:
                 "coordination_events": "id=coordination:N; source_ref; event_type, operation_name; optional actor_agent_id, sender_agent_ids, recipient_agent_ids, related_intent_ids, input_artifact_ids, output_artifact_ids, status",
             },
             "operation": "operation_type=llm|tool|coordination, entity_name, actor_scope=root|peer|unknown, is_delegation; optional agent_id, content_ref, input_ref, evidence_refs, work_id, delegation_id, delegator_agent_id, recipient_agent_ids, outcome, coordination_event_ids",
-            "metadata": "optional root_agent_id, policy_text_ref, root_request_ref, final_answer_ref, tool_definitions_ref, delivery_span_index, termination_span_index",
+            "metadata": "required root_agent_id (null if not known), policy_text_ref, root_request_ref, final_answer_ref (source IDs or null if unchanged); optional tool_definitions_ref, delivery_span_index, termination_span_index",
         }
 
     def source_catalog(self, span_index: int) -> list[dict[str, Any]]:
@@ -128,6 +135,37 @@ class LLMState:
             visit(self._raw_spans[span_index], [])
             self._catalogs[span_index] = catalog
         return copy.deepcopy(self._catalogs[span_index])
+
+    def instruction_sources(self, span_index):
+        """Expose structured message roles for coverage checks, not text interpretation."""
+        catalog = self.source_catalog(span_index)
+        paths = {tuple(row["location"]): row["source_id"] for row in catalog}
+        owner = SpanNormalizer.resolve_agent_id(self._raw_spans[span_index]) or ""
+        result, seen = [], set()
+        input_paths = {(), ("input",), ("input_payload",),
+                       ("SpanAttributes", "ioa_observe.entity.input"),
+                       ("SpanAttributes", "traceloop.entity.input")}
+        for row in catalog:
+            path = row["location"]
+            if not path or not isinstance(path[-1], str):
+                continue
+            key = path[-1]
+            role_path = None
+            if key.startswith("gen_ai.prompt.") and key.endswith(".content") and tuple(path[:-1]) in {
+                    (), ("SpanAttributes",), ("input_payload",), ("input",)}:
+                role_path = (*path[:-1], key.removesuffix(".content") + ".role")
+            elif key == "content" and len(path) >= 3 and path[-3] == "messages" and tuple(path[:-3]) in input_paths:
+                role_path = (*path[:-1], "role")
+            role_id = paths.get(role_path)
+            role = self._sources[role_id][2] if role_id is not None else None
+            if not isinstance(role, str) or role not in {"system", "developer"}:
+                continue
+            text = self._sources[row["source_id"]][2]
+            if isinstance(text, str) and text and text not in seen:
+                seen.add(text)
+                result.append({"source_id": row["source_id"], "message_role": role,
+                               "agent_id": owner})
+        return result
 
     def _source_id(self, source_id, ctx=None):
         ctx = self.context if ctx is None else ctx
@@ -230,6 +268,29 @@ class LLMState:
         candidate.raw_spans.append(operation)
         candidate.source_spans.append(self._raw_spans[span_index])
         self._metadata(candidate, delta.get("metadata", {}), span_index)
+        owner = SpanNormalizer.resolve_agent_id(self._raw_spans[span_index])
+        if owner and candidate.root_agent_id and operation.get("actor_scope") in {"root", "peer"}:
+            if (operation["actor_scope"] == "root") != (owner == candidate.root_agent_id):
+                raise ValueError("operation.actor_scope contradicts the recorded author and root_agent_id")
+        for instruction in self.instruction_sources(span_index):
+            text = self._sources[instruction["source_id"]][2]
+            matches = [f"fact:{i}" for i, fact in enumerate(candidate.evidence)
+                       if fact.fact_type == "policy_rule" and fact.content == text
+                       and (not owner or fact.agent_id == owner)]
+            if not matches or owner and (owner not in candidate.agents or not
+                    set(matches).intersection(candidate.agents[owner].contract_ids)):
+                raise ValueError(f"Capture instruction source {instruction['source_id']} as policy_rule "
+                                 "and link its fact ID in the observed agent's contract_ids")
+            if owner == candidate.root_agent_id and not candidate.policy_text:
+                raise ValueError("Select the observed root instructions using metadata.policy_text_ref")
+        if operation.get("actor_scope") == "root" and not candidate.root_agent_id:
+            raise ValueError("A root operation requires metadata.root_agent_id")
+        if owner and owner == candidate.root_agent_id and not operation.get("is_delegation"):
+            new_claims = candidate.claims[len(self.context.claims):]
+            if any(claim.span_index == span_index for claim in new_claims) and (
+                    not delta.get("metadata", {}).get("final_answer_ref") or
+                    candidate.latest_root_answer_span_index != span_index):
+                raise ValueError("Select the current root response using metadata.final_answer_ref")
         self._validate_refs(candidate)
         candidate.rebuild_runtime_indexes()
         if commit:
@@ -310,9 +371,14 @@ class LLMState:
     def _metadata(self, ctx, metadata, span_index):
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be an object")
-        # Store selected fields; derived indexes come from the selected source.
         allowed = set(_METADATA_REFS) | {"source_ref", "root_agent_id", "delivery_span_index", "termination_span_index"}
-        metadata = {key: value for key, value in metadata.items() if key in allowed}
+        if set(metadata) - allowed:
+            raise ValueError("Unknown metadata fields; use the declared metadata schema")
+        required = {"root_agent_id", "policy_text_ref", "root_request_ref", "final_answer_ref"}
+        if not required <= metadata.keys():
+            raise ValueError("Return all required metadata fields; use null for unchanged refs")
+        if metadata.get("root_agent_id") is not None:
+            ctx.root_agent_id = metadata["root_agent_id"]
         if metadata.get("source_ref") not in (None, ""):
             self._source(metadata["source_ref"], span_index, ctx)
         for key, attribute in _METADATA_REFS.items():
@@ -320,12 +386,27 @@ class LLMState:
                 continue
             source_id = self._source_id(metadata[key], ctx)
             source_ref, value = self._source(source_id, span_index)
+            owner = SpanNormalizer.resolve_agent_id(self._raw_spans[source_ref["span_index"]])
+            if key in {"policy_text_ref", "final_answer_ref"}:
+                if not ctx.root_agent_id or owner and owner != ctx.root_agent_id:
+                    raise ValueError(f"{key} must reference the recorded root agent, not a peer")
+            if key == "policy_text_ref" and not any(fact.fact_type == "policy_rule"
+                    and fact.agent_id == ctx.root_agent_id and any(p.get("content_source_id") == source_id
+                        for p in ctx.artifact_sources.get(f"fact:{i}", []))
+                    for i, fact in enumerate(ctx.evidence)):
+                raise ValueError("policy_text_ref must select a recorded root policy_rule")
             if key == "final_answer_ref":
+                attributes = self._raw_spans[source_ref["span_index"]].get("SpanAttributes", {})
+                kind = attributes.get("ioa_observe.span.kind") or attributes.get("traceloop.span.kind")
+                if kind and kind != "llm":
+                    raise ValueError("final_answer_ref must select an LLM response, not a tool or delegation result")
+                if not any(claim.agent_id == ctx.root_agent_id and any(
+                        p.get("content_source_id") == source_id for p in ctx.artifact_sources.get(f"claim:{i}", []))
+                        for i, claim in enumerate(ctx.claims)):
+                    raise ValueError("final_answer_ref must select a recorded root response claim")
                 ctx.latest_root_answer_span_index = source_ref["span_index"]
             setattr(ctx, attribute, value if key == "tool_definitions_ref" else _text(value))
             ctx.artifact_sources.setdefault(f"metadata:{attribute}", []).append({"source_ref": source_ref, "source_id": source_id, "observed_at_span_index": span_index})
-        if "root_agent_id" in metadata:
-            ctx.root_agent_id = metadata["root_agent_id"]
         for key in ("delivery_span_index", "termination_span_index"):
             if key in metadata:
                 if type(metadata[key]) is not int or not 0 <= metadata[key] <= span_index:

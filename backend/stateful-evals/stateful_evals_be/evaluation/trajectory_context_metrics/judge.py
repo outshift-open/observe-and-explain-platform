@@ -9,7 +9,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
@@ -566,6 +566,8 @@ def build_context_payload(
             {
                 "span_index": fact.span_index,
                 "source_name": fact.source_name,
+                "agent_id": getattr(fact, "agent_id", ""),
+                "actor_scope": getattr(fact, "actor_scope", ""),
                 "content": _content(fact.content, max_item_chars),
                 "artifact_id": (
                     context._evidence_artifact_id(evidence_indexes[id(fact)], fact)
@@ -1401,6 +1403,8 @@ def build_instruction_following_context(
         {
             "span_index": fact.span_index,
             "source_name": fact.source_name,
+            "agent_id": getattr(fact, "agent_id", ""),
+            "actor_scope": getattr(fact, "actor_scope", ""),
             "content": _content(fact.content, max_item_chars),
             "artifact_id": (
                 context._evidence_artifact_id(evidence_indexes[id(fact)], fact)
@@ -1421,6 +1425,25 @@ def build_instruction_following_context(
         for fact in context.evidence
         if fact.fact_type == "user_statement"
     ]
+    if model_organized:
+        user_statements.extend(
+            {
+                **asdict(intent),
+                "artifact_id": f"intent:{index}",
+                "description": _content(intent.description, max_item_chars),
+                "events": _compact_intent_events(
+                    intent.events,
+                    max_item_chars=max_item_chars,
+                    available_components=frozenset({"user_statements"}),
+                ),
+                "kind": "intent",
+                "provenance": deepcopy(
+                    getattr(context, "artifact_sources", {}).get(f"intent:{index}", [])
+                ),
+            }
+            for index, intent in enumerate(context.intents)
+            if intent.source == "user"
+        )
     authoritative_tool_outputs = [
         {
             **_fact_payload(fact, max_item_chars=max_item_chars),
@@ -1457,6 +1480,7 @@ def build_instruction_following_context(
             ),
         },
         "root_policy": _content(context.policy_text, None),
+        **({"root_agent_id": context.root_agent_id} if model_organized else {}),
         "root_policy_artifact_id": "policy:root",
         "semantic_contracts": semantic_contracts,
         "user_statements": user_statements,
@@ -1876,7 +1900,7 @@ def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dic
                     or item.get("name")
                     or component
                 ),
-                "kind": kind,
+                "kind": str(item.get("kind") or kind),
                 "content": compact(str(content), 400),
             }
     if shared_context.get("policy"):

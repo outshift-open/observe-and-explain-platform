@@ -144,8 +144,7 @@ def _metric_state_view(prior: dict[str, Any], metric_name: str) -> dict[str, Any
         "artifact_index": {name: [index(row) for row in rows if row not in records.get(name, [])]
                            for name, rows in prior["records"].items()},
         "operations": [index(row) for row in prior["operations"]],
-        "metadata": {key: value for key, value in prior["metadata"].items()
-                     if key != "final_answer_ref"},
+        "metadata": prior["metadata"],
         "context_view": metric_name,
     }
     sources = prior["selected_source_texts"]
@@ -198,17 +197,21 @@ class SpanJudge:
                                          "reasoning": "one concise evidence-grounded sentence"}}
             if extracting:
                 request["available_current_sources"] = state.source_catalog(span_index)
+                request["observed_instruction_sources"] = state.instruction_sources(span_index)
+                request["observed_agent_id"] = SpanNormalizer.resolve_agent_id(raw_span)
                 request["state_update_guidance"] = state.schema()
                 request["output_schema"]["state_delta"] = {
                     "evidence": [{"id": "fact:N", "source_ref": "catalog source_id",
-                                  "fact_type": "model-assigned type", "source_name": "source name"}],
+                                  "fact_type": "policy_rule|tool_output|agent_response|other",
+                                  "agent_id": "observed recipient/author ID", "source_name": "source name"}],
                     "claims": [{"id": "claim:N", "source_ref": "catalog source_id",
                                 "claim_type": "model-assigned type", "entity_name": "author",
                                 "agent_id": "declared agent ID", "related_intent_ids": []}],
                     "intents": [{"id": "intent:N", "source_ref": "catalog source_id",
                                  "name": "short task name", "source": "user or peer_agent",
                                  "status": "in_progress", "owner_agent_ids": [], "parent_intent_ids": []}],
-                    "agents": [{"id": "stable agent ID", "source_ref": "catalog source_id"}],
+                    "agents": [{"id": "stable agent ID", "source_ref": "catalog source_id",
+                                "contract_ids": ["existing or same-delta policy_rule fact ID"]}],
                     "work_units": [{"id": "work:N", "source_ref": "catalog source_id",
                                     "allocator_agent_id": "declared agent ID", "recipient_agent_ids": [],
                                     "intent_id": "existing or same-delta intent ID"}],
@@ -216,7 +219,10 @@ class SpanJudge:
                                              "event_type": "observed event", "operation_name": "operation"}],
                     "operation": {"operation_type": "llm|tool|coordination", "entity_name": "operation name",
                                   "actor_scope": "root|peer|unknown", "is_delegation": False},
-                    "metadata": {},
+                    "metadata": {"root_agent_id": "root agent ID or null if not known",
+                                 "policy_text_ref": "root instruction source ID or null if unchanged",
+                                 "root_request_ref": "external request source ID or null if unchanged",
+                                 "final_answer_ref": "root response source ID or null if unchanged"},
                 }
             messages = [{"role": "system", "content": (
                 _SPAN_STATE_DELTA_SYSTEM_PROMPT.partition("Return strict JSON only")[0]
