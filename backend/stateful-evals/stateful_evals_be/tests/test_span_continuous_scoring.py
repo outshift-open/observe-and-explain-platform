@@ -78,30 +78,30 @@ def test_parse_rubric_score_is_tolerant_and_clamped(raw, expected) -> None:
 
 
 def test_judge_normalizes_rubric_scores_to_unit_interval() -> None:
-    scores = {"mdt.Groundedness": 1, "mdt.IntentRecognition": 3, "mdt.Relevancy": "5"}
+    scores = {"Groundedness": 1, "IntentRecognition": 3, "Relevancy": "5"}
 
     out = _judge(scores).evaluate(_SPAN, context_state=_CONTEXT)
 
     by_name = {item["metric_name"]: item for item in out["results"]}
-    assert by_name["mdt.Groundedness"]["value"] == 0.0
-    assert by_name["mdt.IntentRecognition"]["value"] == 0.5
-    assert by_name["mdt.Relevancy"]["value"] == 1.0
-    assert by_name["mdt.IntentRecognition"]["raw_score"] == 3
+    assert by_name["Groundedness"]["value"] == 0.0
+    assert by_name["IntentRecognition"]["value"] == 0.5
+    assert by_name["Relevancy"]["value"] == 1.0
+    assert by_name["IntentRecognition"]["raw_score"] == 3
     assert out["failed_metrics"] == []
 
 
 def test_judge_rejects_missing_score() -> None:
-    content = json.dumps({"metrics": [{"metric_name": "mdt.Relevancy"}]})
+    content = json.dumps({"metrics": [{"metric_name": "Relevancy"}]})
     judge = SpanJudge(
         query=lambda messages, **kwargs: _response(content),
         options=TemporalMetricOptions(span_judge_max_attempts=1),
-        metric_names=["mdt.Relevancy"],
+        metric_names=["Relevancy"],
     )
 
     out = judge.evaluate(_SPAN, context_state=_CONTEXT)
 
     assert out["results"] == []
-    assert [f["metric_name"] for f in out["failed_metrics"]] == ["mdt.Relevancy"]
+    assert [f["metric_name"] for f in out["failed_metrics"]] == ["Relevancy"]
 
 
 def test_pass_threshold_option_defaults_to_half() -> None:
@@ -230,23 +230,23 @@ def _failed_metrics(processor) -> list:
 )
 def test_span_failure_requires_value_below_threshold(value, fails) -> None:
     values = {name: 1.0 for name in CORE_METRICS}
-    values["mdt.Groundedness"] = value
+    values["Groundedness"] = value
     processor, _ = _session_processor(values, [_USAGE])
 
     processor.evaluate_session("session-1")
 
-    assert (_failed_metrics(processor) == ["mdt.Groundedness"]) is fails
+    assert (_failed_metrics(processor) == ["Groundedness"]) is fails
     assert fails or _failed_metrics(processor) == []
 
 
 def test_custom_threshold_changes_pass_boundary() -> None:
     values = {name: 1.0 for name in CORE_METRICS}
-    values["mdt.Groundedness"] = 0.5
+    values["Groundedness"] = 0.5
     processor, _ = _session_processor(values, [_USAGE], span_pass_threshold=0.75)
 
     processor.evaluate_session("session-1")
 
-    assert _failed_metrics(processor) == ["mdt.Groundedness"]
+    assert _failed_metrics(processor) == ["Groundedness"]
 
 
 @pytest.mark.parametrize(("value", "expected_calls"), [(0.25, 2), (0.5, 1)])
@@ -256,7 +256,7 @@ def test_expansion_triggers_only_below_threshold(
     from stateful_evals_be.evaluation.trajectory_context import TrajectoryContext
 
     values = {name: 1.0 for name in CORE_METRICS}
-    values["mdt.Groundedness"] = value
+    values["Groundedness"] = value
     processor, calls = _session_processor(values, [_USAGE])
     real_retrieve = TrajectoryContext.retrieve_for_span
 

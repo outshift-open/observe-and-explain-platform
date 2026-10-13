@@ -43,7 +43,7 @@ Each trajectory gets fresh state — runs never share context or token counts.
 |---|---|---|
 | `trajectory_metrics` | `None` | Metric codes to compute (or `["all"]`); diagnostic only, never changes `trajectory_score` |
 | `high_level_metric_suite` | `"legacy_v1"` | Metric suite used by the final audit (`legacy_v1`, `paper_v1`, `paper_v2`) |
-| `span_pass_threshold` | `0.5` | Span metrics (`mdt.*`) are judged on a 1-5 rubric and normalized to `(score-1)/4` (0, 0.25, 0.5, 0.75, 1). A span metric passes at or above this value and fails below it |
+| `span_pass_threshold` | `0.5` | Span metrics (`Groundedness`, `IntentRecognition`, `Relevancy`) are judged on a 1-5 rubric and normalized to `(score-1)/4` (0, 0.25, 0.5, 0.75, 1). A span metric passes at or above this value and fails below it |
 | `use_fatal_mode` | `True` | Fatal/minor audit with a binary trajectory score |
 | `fatality_threshold` | `0.69` | Severity at or above which a failure is fatal |
 | `batch_size` | `50` | Sessions evaluated concurrently by `EvaluationEngine` |

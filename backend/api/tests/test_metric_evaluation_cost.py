@@ -278,9 +278,9 @@ def test_write_span_metrics_forwards_the_cost_from_the_payload():
     db = _Db()
     payload = [
         {
-            "name": "mdt.Relevancy",
+            "name": "Relevancy",
             "value": 0.5,
-            "provider": "stateful_evals",
+            "provider": "StatefulEvals",
             "source": "StatefulEval",
             **COST_METADATA,
         }
@@ -289,7 +289,7 @@ def test_write_span_metrics_forwards_the_cost_from_the_payload():
     assert result == {"written": 1, "errors": []}
     params = db.commands[0][1]
     assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
-    assert params["definition"]["metricProvider"] == "stateful_evals"
+    assert params["definition"]["metricProvider"] == "StatefulEvals"
 
 
 def test_write_session_metrics_forwards_the_cost_from_the_payload():
@@ -298,7 +298,7 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
         {
             "name": "TrajectoryScore",
             "value": 1,
-            "provider": "stateful_evals",
+            "provider": "StatefulEvals",
             "source": "StatefulEval",
             **COST_METADATA,
         }
@@ -306,12 +306,12 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
     _client(db).write_session_metrics("s1", payload)
     params = db.commands[0][1]
     assert {k: params["result"][k] for k in COST_FIELDS} == COST_FIELDS
-    assert params["definition"]["metricProvider"] == "stateful_evals"
+    assert params["definition"]["metricProvider"] == "StatefulEvals"
 
 
 def test_payloads_without_cost_still_write_the_full_model():
     db = _Db()
     _client(db).write_span_metrics(
-        "s1", "sp1", [{"name": "mdt.Relevancy", "value": 1.0}]
+        "s1", "sp1", [{"name": "Relevancy", "value": 1.0}]
     )
     assert set(db.commands[0][1]["result"]) == MODEL_FIELDS

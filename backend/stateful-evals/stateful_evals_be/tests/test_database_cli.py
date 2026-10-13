@@ -23,7 +23,7 @@ def test_session_cli_writes_legacy_metric_via_library(monkeypatch):
             {
                 "name": "TrajectoryScore",
                 "value": 0,
-                "provider": "stateful_evals",
+                "provider": "StatefulEvals",
                 "reasoning": None,
             }
         ],

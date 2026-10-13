@@ -275,7 +275,7 @@ async def test_worker_persists_legacy_result_without_changing_payload(rabbit_url
             {
                 "name": "TrajectoryScore",
                 "value": 0,
-                "provider": "stateful_evals",
+                "provider": "StatefulEvals",
                 "reasoning": "Unresolved requirement.",
                 "evaluation_model": "gpt-4o",
             }
@@ -288,7 +288,7 @@ async def test_worker_persists_session_and_span_evaluation_cost(rabbit_url, sess
     span_metric = SimpleNamespace(
         span_id="span-1",
         span_index=0,
-        metric_name="mdt.Groundedness",
+        metric_name="Groundedness",
         score=0.75,
         reasoning="ok",
         evaluation_model="gpt-4o",
@@ -300,7 +300,7 @@ async def test_worker_persists_session_and_span_evaluation_cost(rabbit_url, sess
     unmeasured = SimpleNamespace(
         span_id="span-2",
         span_index=1,
-        metric_name="mdt.Relevancy",
+        metric_name="Relevancy",
         score=0.0,
         reasoning="Auto-failed: span contains error",
         evaluation_model=None,

@@ -36,7 +36,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_METRICS_DIR = "metrics_out"
-PROVIDER = "stateful_evals"
+PROVIDER = "StatefulEvals"
 
 
 def parse_args() -> argparse.Namespace:

@@ -23,7 +23,7 @@ flowchart LR
 ```
 
 The OXP API's `quality` category reads `TrajectoryScore` as a source of `MDT` (`trajectoryQuality`) in [`config.py`](../../api/oxp/core/config.py); no default
-category lists the `mdt.*` span metrics.
+category lists the span metrics (`Groundedness`, `IntentRecognition`, `Relevancy`) under the `StatefulEvals` provider.
 
 ## How it works
 
@@ -62,11 +62,11 @@ The worker only reads ClickHouse. It writes to Neo4j with
 
 | Metric | Attached to | Value |
 | --- | --- | --- |
-| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `LLM/tool call with that `spanId` (`(:MetricResult)-[:measures]->(:LLMCall|:ToolCall)`); written only if the call exists | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
+| `Groundedness`, `IntentRecognition`, `Relevancy` | `LLM/tool call with that `spanId` (`(:MetricResult)-[:measures]->(:LLMCall|:ToolCall)`); written only if the call exists | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
 | `TrajectoryScore` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
 
 Each value is a `MetricResult` node (`result`, `reasoning`, `timestamp`) linked by `ofMetricType` to a
-`Metric` definition (one per name and provider, here `metricProvider` `stateful_evals`) and by `measures` to what it
+`Metric` definition (one per name and provider, here `metricProvider` `StatefulEvals`) and by `measures` to what it
 measures. A result is keyed by definition and measured resource, so a re-run overwrites it.
 
 ## Configuration

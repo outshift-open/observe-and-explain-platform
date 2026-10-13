@@ -64,18 +64,15 @@ def _empty_usage() -> Dict[str, int]:
 logger = logging.getLogger("stateful_evals_be.processor")
 
 CORE_METRICS = [
-    "mdt.Groundedness",
-    "mdt.IntentRecognition",
-    "mdt.Relevancy",
+    "Groundedness",
+    "IntentRecognition",
+    "Relevancy",
 ]
 
-INTENT_METRIC = "mdt.IntentRecognition"
-GROUNDEDNESS_METRIC = "mdt.Groundedness"
-RELEVANCY_METRIC = "mdt.Relevancy"
+INTENT_METRIC = "IntentRecognition"
+GROUNDEDNESS_METRIC = "Groundedness"
+RELEVANCY_METRIC = "Relevancy"
 
-_INTENT_METRIC_NAMES = {"mdt.IntentRecognition", "IntentRecognition"}
-_GROUNDEDNESS_METRIC_NAMES = {"mdt.Groundedness", "Groundedness"}
-_RELEVANCY_METRIC_NAMES = {"mdt.Relevancy", "Relevancy"}
 
 
 class TemporalMetricsProcessor:
@@ -526,7 +523,7 @@ class TemporalMetricsProcessor:
 
     @staticmethod
     def _is_intent_metric(metric_name: str) -> bool:
-        return metric_name in _INTENT_METRIC_NAMES
+        return metric_name == INTENT_METRIC
 
     # ================================================================
     # Intent state resolution

@@ -549,7 +549,7 @@ def test_mce_library_computation_preserves_payload_and_usage(
     jury_factory = Mock(return_value=jury)
     monkeypatch.setattr("metrics_computation_engine.llm_judge.jury.Jury", jury_factory)
     expected = {
-        "metric_name": "mdt.Groundedness",
+        "metric_name": "Groundedness",
         "value": score,
         "reasoning": "Observed evidence.",
     }
@@ -560,7 +560,7 @@ def test_mce_library_computation_preserves_payload_and_usage(
 
     metric = Mock(compute=AsyncMock(side_effect=compute))
     metric_class = Mock(return_value=metric)
-    resolve = Mock(return_value=(metric_class, "mdt.Groundedness"))
+    resolve = Mock(return_value=(metric_class, "Groundedness"))
     monkeypatch.setattr("metrics_computation_engine.util.get_metric_class", resolve)
     source = {
         "entity_type": "llm",
@@ -575,7 +575,7 @@ def test_mce_library_computation_preserves_payload_and_usage(
             source,
             context="Prior state.",
             policy="A policy.",
-            metrics=["mdt.Groundedness"],
+            metrics=["Groundedness"],
         )
         assert result["results"] == [expected]
         assert result["failed_metrics"] == []
@@ -585,8 +585,8 @@ def test_mce_library_computation_preserves_payload_and_usage(
             "total_tokens": 30,
         }
     jury_factory.assert_called_once()
-    resolve.assert_called_with("mdt.Groundedness")
-    metric_class.assert_called_with("mdt.Groundedness")
+    resolve.assert_called_with("Groundedness")
+    metric_class.assert_called_with("Groundedness")
     assert metric.jury is jury
     args, kwargs = metric.compute.call_args
     assert args[0].span_id == "s1"
@@ -605,7 +605,7 @@ def test_mce_library_metric_failure_remains_structured(monkeypatch, offline_proc
     monkeypatch.setattr(
         "metrics_computation_engine.util.get_metric_class",
         Mock(
-            return_value=(Mock(return_value=Mock(compute=compute)), "mdt.Groundedness")
+            return_value=(Mock(return_value=Mock(compute=compute)), "Groundedness")
         ),
     )
     source = {
@@ -616,11 +616,11 @@ def test_mce_library_metric_failure_remains_structured(monkeypatch, offline_proc
     }
     for error in ("metric failed", "Metric returned None"):
         result = offline_processor.compute_span_metrics_inprocess(
-            source, metrics=["mdt.Groundedness"]
+            source, metrics=["Groundedness"]
         )
         assert result["results"] == []
         assert result["failed_metrics"] == [
-            {"metric_name": "mdt.Groundedness", "error_message": error}
+            {"metric_name": "Groundedness", "error_message": error}
         ]
 
 

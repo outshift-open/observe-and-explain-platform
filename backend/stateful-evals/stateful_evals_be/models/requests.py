@@ -112,7 +112,7 @@ class TemporalMetricOptions(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Span-level metrics (mdt.*) are scored on a 1-5 rubric normalized to "
+            "Span-level metrics (Groundedness, IntentRecognition, Relevancy) are scored on a 1-5 rubric normalized to "
             "0.0-1.0 ((score-1)/4). A span metric passes when its normalized "
             "value is >= this threshold and fails when it is below it."
         ),
@@ -217,9 +217,9 @@ class TemporalEvalRequest(BaseModel):
 
     metrics: List[str] = Field(
         default=[
-            "mdt.Groundedness",
-            "mdt.IntentRecognition",
-            "mdt.Relevancy",
+            "Groundedness",
+            "IntentRecognition",
+            "Relevancy",
         ],
         description="List of metric names to compute.",
     )
