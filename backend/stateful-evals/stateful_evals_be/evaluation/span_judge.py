@@ -250,6 +250,8 @@ class SpanJudge:
                     if text.startswith("```"):
                         text = text.split("\n", 1)[1].removesuffix("```").strip()
                     result = loads_json_response(text, allow_eof_close=getattr(response.choices[0], "finish_reason", None) == "stop")
+                    if isinstance(result, dict) and set(result) == {name} and isinstance(result[name], dict):
+                        result = result[name]
                     if isinstance(result, dict):
                         result.setdefault("metric_name", name)
                     if not isinstance(result, dict) or result.get("metric_name") != name:
