@@ -178,43 +178,6 @@ fields with your judgment. Do not return the input wrapper, rubric,
 trajectory_context, or output_schema itself. Return strict JSON. No markdown.
 """
 
-    _OUTPUT_SCHEMA = {
-        "applicable": "boolean; false only when the rubric's applicability condition is not met",
-        "score": "integer 0 or 1; 1 means the metric passes, 0 means it fails",
-        "reasoning": "short overall explanation",
-        "fatal_failures": [
-            {
-                "span_index": "integer; use -1 if not clear",
-                "entity_name": "component/agent/tool/final_answer name",
-                "reasoning": "why this is fatal for the metric",
-                "explanation": "specific context-grounded details",
-                "observed_impact": "concise snake_case impact label",
-                "confidence": "number from 0.0 to 1.0",
-                "evidence": [
-                    {
-                        "span_index": "integer",
-                        "source_name": "component/source name",
-                        "kind": "claim|fact|intent|final_answer|policy|operation",
-                        "artifact_id": "exact source or artifact ID when available",
-                        "content": "brief supporting excerpt",
-                    }
-                ],
-            }
-        ],
-        "minor_failures": [
-            {
-                "span_index": "integer; use -1 if not clear",
-                "entity_name": "component/agent/tool/final_answer name",
-                "reasoning": "why this is minor or self-corrected",
-                "explanation": "specific context-grounded details",
-                "observed_impact": "concise snake_case impact label",
-                "confidence": "number from 0.0 to 1.0",
-                "evidence": [],
-            }
-        ],
-        "metadata": "optional object with judge notes; keep small",
-    }
-
     _BATCH_OUTPUT_SCHEMA = {
         "metrics": [
             {
@@ -438,12 +401,15 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         allow_not_applicable: bool | None = None,
     ) -> Mapping[str, Any]:
         causal = metric_name in _CAUSAL_METRICS
-        output_schema = {**self._OUTPUT_SCHEMA, **({"causal_evidence": _CAUSAL_SCHEMA} if causal else {})}
+        output_schema = {key: deepcopy(value) for key, value in self._BATCH_OUTPUT_SCHEMA["metrics"][0].items() if key != "high_level_metric"}
+        if causal:
+            output_schema["causal_evidence"] = _CAUSAL_SCHEMA
         if allow_not_applicable is False:
             output_schema["applicable"] = "true; this metric does not permit a not-applicable verdict"
         user_prompt = json.dumps(
             {
                 "metric_name": metric_name,
+                "task": "Cite exact evidence_refs only; do not copy source content or excerpts.",
                 "rubric": rubric,
                 **compact_prompt_context(context_payload),
                 "output_schema": output_schema,
@@ -451,7 +417,7 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
             ensure_ascii=True,
             default=str,
         )
-        return await self._query_json(
+        raw = await self._query_json(
             (
                 {"role": "system", "content": self._SYSTEM_PROMPT + (_CAUSAL_INSTRUCTIONS if causal else "")},
                 {"role": "user", "content": user_prompt},
@@ -463,6 +429,9 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
                 allow_not_applicable=allow_not_applicable,
             ),
         )
+        if isinstance(raw.get("metadata"), Mapping) and raw["metadata"].get("evaluation_invalid"):
+            return raw
+        return resolve_batch_evidence_refs(raw, context_payload)
 
     async def ajudge_batch(
         self,
@@ -2039,6 +2008,14 @@ def _final_response_validator(
             errors.append("score 0 requires fatal failures; score 1 requires none")
         if raw.get("applicable") is False and (score != 1 or raw.get("minor_failures")):
             errors.append("not-applicable verdicts require score 1 and no failures")
+        scopes = [raw, *(row for key in ("fatal_failures", "minor_failures")
+                           for row in _safe_list(raw.get(key)) if isinstance(row, Mapping))]
+        for row in scopes:
+            refs = row.get("evidence_refs", [])
+            if not isinstance(refs, list):
+                errors.append("evidence_refs must be an array")
+            elif any(not isinstance(ref, str) or ref not in lookup for ref in refs):
+                errors.append("evidence_refs must contain exact available artifact IDs")
         if metric_name in _CAUSAL_METRICS:
             raw, causal_errors = _retain_causal_evidence(raw, lookup, required=True)
             errors.extend(causal_errors)

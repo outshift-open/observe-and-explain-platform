@@ -181,6 +181,8 @@ class SpanJudge:
                     if text.startswith("```"):
                         text = text.split("\n", 1)[1].removesuffix("```").strip()
                     result = loads_json_response(text, allow_eof_close=getattr(response.choices[0], "finish_reason", None) == "stop")
+                    if isinstance(result, dict):
+                        result.setdefault("metric_name", name)
                     if not isinstance(result, dict) or result.get("metric_name") != name:
                         raise ValueError(f"Return metric_name={name!r}")
                     if type(result.get("score")) not in (int, float) or result["score"] not in (0, 1):

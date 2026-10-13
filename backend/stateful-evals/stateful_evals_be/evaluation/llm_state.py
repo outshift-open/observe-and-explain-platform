@@ -129,12 +129,13 @@ class LLMState:
             self._catalogs[span_index] = catalog
         return copy.deepcopy(self._catalogs[span_index])
 
-    def _source_id(self, source_id):
-        history = self.context.artifact_sources.get(source_id, []) if isinstance(source_id, str) else []
+    def _source_id(self, source_id, ctx=None):
+        ctx = self.context if ctx is None else ctx
+        history = ctx.artifact_sources.get(source_id, []) if isinstance(source_id, str) else []
         return next((row["content_source_id"] for row in reversed(history) if "content_source_id" in row), source_id)
 
-    def _source(self, source_id, span_index):
-        source_id = self._source_id(source_id)
+    def _source(self, source_id, span_index, ctx=None):
+        source_id = self._source_id(source_id, ctx)
         if not isinstance(source_id, str) or source_id not in self._sources:
             raise ValueError(f"Unknown source_ref {source_id!r}; copy a catalog source_id")
         source_index, path, value = self._sources[source_id]
@@ -210,7 +211,7 @@ class LLMState:
         for key, target in (("content_ref", "content"), ("input_ref", "input_payload")):
             source_id = operation.get(key)
             if source_id not in (None, ""):
-                source_id = self._source_id(source_id)
+                source_id = self._source_id(source_id, candidate)
                 operation[key] = source_id
                 _, value = self._source(source_id, span_index)
                 operation[target] = _text(value) if target == "content" else value
@@ -253,7 +254,7 @@ class LLMState:
         source_id = next((row[key] for key in selector_keys if row.get(key) not in (None, "")), None)
         if source_id is None and existing is not None:
             source_id = f"source:{span_index}:0"
-        source_id = self._source_id(source_id)
+        source_id = self._source_id(source_id, ctx)
         source_ref, _ = self._source(source_id, span_index)
         values = asdict(existing) if existing is not None else {}
         changes = {key: value for key, value in row.items() if key not in {"id", *selector_keys} | _AUTOMATIC}
@@ -265,7 +266,7 @@ class LLMState:
         values.update(changes)
         content_id = None
         if text_field and (existing is None or replacement):
-            content_id = self._source_id(replacement or source_id)
+            content_id = self._source_id(replacement or source_id, ctx)
             _, value = self._source(content_id, span_index)
             values[text_field] = _text(value)
         for key, value in values.items():
@@ -313,11 +314,11 @@ class LLMState:
         allowed = set(_METADATA_REFS) | {"source_ref", "root_agent_id", "delivery_span_index", "termination_span_index"}
         metadata = {key: value for key, value in metadata.items() if key in allowed}
         if metadata.get("source_ref") not in (None, ""):
-            self._source(metadata["source_ref"], span_index)
+            self._source(metadata["source_ref"], span_index, ctx)
         for key, attribute in _METADATA_REFS.items():
             if metadata.get(key) in (None, ""):
                 continue
-            source_id = self._source_id(metadata[key])
+            source_id = self._source_id(metadata[key], ctx)
             source_ref, value = self._source(source_id, span_index)
             if key == "final_answer_ref":
                 ctx.latest_root_answer_span_index = source_ref["span_index"]
