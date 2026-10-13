@@ -28,7 +28,7 @@ _METADATA_REFS = {
     "final_answer_ref": "latest_root_answer", "tool_definitions_ref": "tool_definitions",
 }
 _ENVELOPE = {"span_id": "SpanId", "parent_span_id": "ParentSpanId", "trace_id": "TraceId"}
-_AUTOMATIC = set(_ENVELOPE) | set(_ENVELOPE.values()) | {"span_index", "first_seen", "last_seen", "started_at_ns", "duration_ns", "request_span_index", "started_at", "ended_at", "Timestamp", "Duration"}
+_AUTOMATIC = set(_ENVELOPE) | set(_ENVELOPE.values()) | {"span_index", "first_seen", "last_seen", "started_at_ns", "duration_ns", "request_span_index", "started_at", "ended_at", "Timestamp", "Duration", "observed_at", "observation_complete", "observation_status"}
 
 
 def _text(value: Any) -> str:
@@ -74,7 +74,9 @@ class LLMState:
                 "Infer links from meaning, including which broader request a delegated task serves. "
                 "evidence_refs can cite facts/contracts and claims from earlier spans; provenance "
                 "does not make an agent's claim verified truth. Include one operation for the action "
-                "actually recorded; proposed actions are not executions. Select operation input_ref "
+                "actually recorded; proposed actions are not executions. "
+                "An unfinished input-only observation cannot establish "
+                "a returned output or successful tool completion. Select operation input_ref "
                 "only for current request/tool arguments, never a whole replayed conversation. Metadata refs are optional "
                 "and unchanged when absent/null. Select final_answer_ref only for a root agent's "
                 "actual user-facing response, and update it when a later root answer is recorded. "
@@ -210,6 +212,14 @@ class LLMState:
         operation.update(artifact_id=f"operation:{span_index}", span_index=span_index)
         if isinstance(self._raw_spans[span_index].get("Timestamp"), str):
             operation["started_at"] = self._raw_spans[span_index]["Timestamp"]
+        attributes = self._raw_spans[span_index].get("SpanAttributes", {})
+        if isinstance(attributes, dict):
+            if "mas.observation.timestamp" in attributes:
+                operation["observed_at"] = copy.deepcopy(attributes["mas.observation.timestamp"])
+            if type(attributes.get("mas.observation.complete")) is bool:
+                operation["observation_complete"] = attributes["mas.observation.complete"]
+            if "mas.status" in attributes:
+                operation["observation_status"] = copy.deepcopy(attributes["mas.status"])
         operation.update({key: str(self._raw_spans[span_index][source]) for key, source in _ENVELOPE.items() if source in self._raw_spans[span_index]})
         candidate.raw_spans.append(operation)
         candidate.source_spans.append(self._raw_spans[span_index])

@@ -32,6 +32,12 @@ include moderating, routing, reviewing, or synthesizing work; infer their meanin
 from the full instructions and recorded flow, not special names or phrases.
 Assigning or proposing work does not establish that it was executed. Quoted or
 relayed material is not automatically the current agent's own assertion.
+Accumulated evaluator state is not the acting agent's memory. Establish access
+from its recorded call-time input, contract, or supported communication. An
+operation's output is available only from its observed_at time. Do not credit a
+decision with another operation's result returned after the decision's call
+began. Missing completion or status does not establish a successful operation
+or a returned result.
 An unknown role or outcome alone is not a failure. When deciding a requested
 metric requires missing earlier evidence, set `needs_more_context` to true if
 that field is available in the output schema.
