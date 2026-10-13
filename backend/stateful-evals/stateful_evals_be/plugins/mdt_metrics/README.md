@@ -43,8 +43,8 @@ pip install mdt-metrics
 import mdt_metrics as mdt
 
 metrics = [
-    mdt.Groundedness,
-    mdt.IntentRecognition,
-    mdt.Relevancy,
+    Groundedness,
+    IntentRecognition,
+    Relevancy,
 ]
 ```

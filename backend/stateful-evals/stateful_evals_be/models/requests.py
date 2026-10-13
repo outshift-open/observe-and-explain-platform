@@ -356,6 +356,8 @@ class SpanMetricResult(BaseModel):
     evaluation_completion_tokens: Optional[int] = None
     evaluation_total_tokens: Optional[int] = None
     evaluation_cost_usd: Optional[float] = None
+    # Trajectory input only: the step the span result belongs to.
+    transition_id: str = ""
 
 
 class SessionResult(BaseModel):
@@ -383,6 +385,11 @@ class SessionResult(BaseModel):
     high_level_metrics: List[Dict[str, Any]] = Field(default_factory=list)
     trajectory_metric_set: Optional[str] = None
     trajectory_metrics: List[Dict[str, Any]] = Field(default_factory=list)
+    # Trajectory input only: what each step added to the trajectory context,
+    # keyed by step (transition) id. Each value maps a constituent (evidence,
+    # claims, intents, work_units, provenance_links, coordination_events, flags,
+    # final_answer) to the items it contributed, with absolute indexes.
+    transition_contexts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     cost_estimate: TokenCostEstimate = Field(default_factory=TokenCostEstimate)
     eval_duration_seconds: Optional[float] = None

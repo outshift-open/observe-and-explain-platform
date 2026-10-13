@@ -281,7 +281,6 @@ def test_write_span_metrics_forwards_the_cost_from_the_payload():
             "name": "Relevancy",
             "value": 0.5,
             "provider": "StatefulEvals",
-            "source": "StatefulEval",
             **COST_METADATA,
         }
     ]
@@ -299,7 +298,6 @@ def test_write_session_metrics_forwards_the_cost_from_the_payload():
             "name": "TrajectoryScore",
             "value": 1,
             "provider": "StatefulEvals",
-            "source": "StatefulEval",
             **COST_METADATA,
         }
     ]

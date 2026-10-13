@@ -160,23 +160,32 @@ def test_unsatisfied_intents_count_only_below_threshold() -> None:
 # Session: failures, expansion trigger, usage split
 # ---------------------------------------------------------------------------
 
-_RAW_SPAN = {
-    "SpanId": "1",
-    "TraceId": "trace-1",
-    "ParentSpanId": "",
-    "Timestamp": "2024-01-01T00:00:00Z",
-    "ServiceName": "test-app",
-    "SpanName": "model.chat",
-    "StatusCode": "OK",
-    "SpanAttributes": {
-        "gen_ai.prompt.0.role": "system",
-        "gen_ai.prompt.0.content": "Answer the user's request.",
-        "gen_ai.prompt.1.role": "user",
-        "gen_ai.prompt.1.content": "Say hello.",
-        "gen_ai.completion.0.role": "assistant",
-        "gen_ai.completion.0.content": "Hello.",
-    },
+_SYSTEM = json.dumps([{"type": "text", "content": "Answer the user's request."}])
+_USER = json.dumps([{"role": "user", "parts": [{"type": "text", "content": "Say hello."}]}])
+_ASSISTANT = json.dumps(
+    [
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "content": "Hello."}],
+            "finish_reason": "stop",
+        }
+    ]
+)
+_STEP = {
+    "transition_id": "transition:1",
+    "call_id": "llmcall:1",
+    "kind": "llm",
+    "name": "gpt-4o",
+    "description": "",
+    "agent_id": "assistant",
+    "parent_id": "",
+    "success": True,
+    "start_time": 1.0,
+    "duration_ms": 100.0,
+    "input_text": _SYSTEM + "\n\n" + _USER,
+    "output_text": _ASSISTANT,
 }
+_TRAJECTORY = {"session_id": "session-1", "steps": [_STEP]}
 
 
 def _session_processor(values: dict, usages: list, **options):
@@ -184,7 +193,6 @@ def _session_processor(values: dict, usages: list, **options):
     processor.options = TemporalMetricOptions(**options)
     processor.metric_names = list(CORE_METRICS)
     processor.llm_config = SimpleNamespace(LLM_MODEL_NAME="gpt-4o")
-    processor.fetch_spans_for_session = lambda _session_id: [_RAW_SPAN]
     calls = []
 
     def judge(*args, **kwargs):
@@ -233,7 +241,7 @@ def test_span_failure_requires_value_below_threshold(value, fails) -> None:
     values["Groundedness"] = value
     processor, _ = _session_processor(values, [_USAGE])
 
-    processor.evaluate_session("session-1")
+    processor.evaluate_trajectory(_TRAJECTORY)
 
     assert (_failed_metrics(processor) == ["Groundedness"]) is fails
     assert fails or _failed_metrics(processor) == []
@@ -244,7 +252,7 @@ def test_custom_threshold_changes_pass_boundary() -> None:
     values["Groundedness"] = 0.5
     processor, _ = _session_processor(values, [_USAGE], span_pass_threshold=0.75)
 
-    processor.evaluate_session("session-1")
+    processor.evaluate_trajectory(_TRAJECTORY)
 
     assert _failed_metrics(processor) == ["Groundedness"]
 
@@ -267,7 +275,7 @@ def test_expansion_triggers_only_below_threshold(
 
     monkeypatch.setattr(TrajectoryContext, "retrieve_for_span", retrieve)
 
-    processor.evaluate_session("session-1")
+    processor.evaluate_trajectory(_TRAJECTORY)
 
     assert len(calls) == expected_calls
 
@@ -276,7 +284,7 @@ def test_span_usage_is_split_evenly_and_sums_to_call_usage() -> None:
     usage = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
     processor, _ = _session_processor({n: 1.0 for n in CORE_METRICS}, [usage])
 
-    result = processor.evaluate_session("session-1")
+    result = processor.evaluate_trajectory(_TRAJECTORY)
 
     metrics = result.span_metric_results
     assert len(metrics) == len(CORE_METRICS) == 3
@@ -292,11 +300,10 @@ def test_span_usage_is_split_evenly_and_sums_to_call_usage() -> None:
 
 
 def test_auto_failed_error_span_has_no_evaluation_usage() -> None:
-    raw = {**_RAW_SPAN, "StatusCode": "ERROR"}
+    failed = {**_TRAJECTORY, "steps": [{**_STEP, "success": False}]}
     processor, calls = _session_processor({n: 1.0 for n in CORE_METRICS}, [_USAGE])
-    processor.fetch_spans_for_session = lambda _session_id: [raw]
 
-    result = processor.evaluate_session("session-1")
+    result = processor.evaluate_trajectory(failed)
 
     assert calls == []
     assert {m.score for m in result.span_metric_results} == {0.0}

@@ -166,17 +166,6 @@ def test_empty_batch_does_not_instantiate_judges(offline_engine):
     clients.assert_not_called()
 
 
-def test_legacy_batch_uses_isolated_engine(monkeypatch, offline_engine):
-    _, config, options, _ = offline_engine
-    processors, _ = install_judge(monkeypatch, barrier=Barrier(2))
-    legacy = TemporalMetricsProcessor(llm_config=config, options=options)
-    legacy.fetch_spans_for_session = lambda sid: [recorded_span(sid)]
-    result = legacy.run_evaluation(["alpha", "beta"])
-    assert result.errors == []
-    assert result.total_token_usage.total_tokens == 330
-    assert all(processor is not legacy for processor in processors)
-
-
 @pytest.mark.parametrize("batch", [False, True])
 def test_read_only_mapping_inputs_remain_supported(monkeypatch, offline_engine, batch):
     engine, _, _, _ = offline_engine

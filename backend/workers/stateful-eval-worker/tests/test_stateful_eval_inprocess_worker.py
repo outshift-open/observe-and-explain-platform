@@ -23,14 +23,13 @@ async def _fake_to_thread(fn, *args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def no_external_services(mocker):
-    original_fetch = StatefulEvalWorker._fetch_spans
-    mocker.patch.object(StatefulEvalWorker, "_fetch_spans", return_value=[{"SpanId": "span-1"}])
-    mocker.patch.object(
-        StatefulEvalWorker,
-        "_get_oxp_client",
-        return_value=mocker.Mock(spec=["get_session_spans", "write_span_metrics", "write_session_metrics", "close"]),
-    )
-    return original_fetch
+    kg = mocker.Mock(spec=["execute", "execute_command", "ensure_connected"])
+    mocker.patch.object(StatefulEvalWorker, "_get_kg", return_value=kg)
+    mocker.patch("oxp.client.dal.get_session_trajectory", return_value=TRAJECTORY)
+    return kg
+
+
+TRAJECTORY = {"session_id": "session-xyz", "app_name": "app", "steps": [{"transition_id": "transition:1"}]}
 
 
 def _make_worker(rabbit_url, **kwargs):
@@ -147,7 +146,7 @@ async def test_handle_message_returns_true_on_success(rabbit_url, session_messag
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -162,7 +161,7 @@ async def test_handle_message_produces_one_output_message(rabbit_url, session_me
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -178,7 +177,7 @@ async def test_handle_message_output_preserves_input_fields(rabbit_url, session_
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -192,20 +191,21 @@ async def test_handle_message_output_preserves_input_fields(rabbit_url, session_
 
 
 @pytest.mark.asyncio
-async def test_handle_message_passes_fetched_spans_with_correct_id(rabbit_url, session_message, mocker):
+async def test_handle_message_evaluates_the_kg_trajectory(rabbit_url, session_message, mocker, no_external_services):
     fake_result = make_session_result()
+    get_trajectory = mocker.patch("oxp.client.dal.get_session_trajectory", return_value=TRAJECTORY)
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
     worker = _make_worker(rabbit_url)
     await worker.handle_message(session_message)
 
-    worker._fetch_spans.assert_called_once_with(session_message.session_id)
-    mock_processor.evaluate_spans.assert_called_once_with([{"SpanId": "span-1"}], session_id=session_message.session_id)
-    mock_processor.evaluate_session.assert_not_called()
+    get_trajectory.assert_called_once_with(no_external_services, session_message.session_id)
+    mock_processor.evaluate_trajectory.assert_called_once_with(TRAJECTORY)
+    mock_processor.evaluate_spans.assert_not_called()
     mock_processor.close.assert_called_once()
 
 
@@ -215,7 +215,7 @@ async def test_handle_message_builds_processor_once_per_message(rabbit_url, sess
     fake_result = make_session_result()
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mock_build = mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -232,7 +232,7 @@ async def test_handle_message_with_error_result_still_returns_true(rabbit_url, s
     fake_result = make_session_result(error="MCE unavailable")
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -248,7 +248,7 @@ async def test_handle_message_fatal_failures_included_in_metrics(rabbit_url, ses
     fake_result = make_session_result(trajectory_score=0, fatal_failures=[fail])
 
     mock_processor = mocker.Mock()
-    mock_processor.evaluate_spans.return_value = fake_result
+    mock_processor.evaluate_trajectory.return_value = fake_result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=mock_processor)
     mocker.patch("asyncio.to_thread", new=_fake_to_thread)
 
@@ -257,34 +257,86 @@ async def test_handle_message_fatal_failures_included_in_metrics(rabbit_url, ses
 
 
 @pytest.mark.asyncio
-async def test_worker_persists_legacy_result_without_changing_payload(rabbit_url, session_message, mocker):
-    result = make_session_result(trajectory_score=0, trajectory_reasoning="Unresolved requirement.")
+async def test_worker_persists_metrics_context_and_session_score(
+    rabbit_url, session_message, mocker, no_external_services
+):
+    smr = SimpleNamespace(
+        transition_id="transition:abc",
+        span_id="llmcall:1",
+        metric_name="Relevancy",
+        score=1.0,
+        reasoning="ok",
+    )
+    result = make_session_result(
+        trajectory_score=0,
+        trajectory_reasoning="Unresolved requirement.",
+        span_metric_results=[smr],
+    )
+    result.transition_contexts = {"transition:abc": {"claims": [{"index": 0}]}}
     processor = mocker.Mock()
-    processor.evaluate_spans.return_value = result
+    processor.evaluate_trajectory.return_value = result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    save_call = mocker.patch("oxp.providers.OXPMetricsProvider.save_call_metrics", return_value=True)
+    save_session = mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    write_context = mocker.patch("oxp.client.dal.write_transition_context", return_value=True)
     worker = _make_worker(rabbit_url)
     worker.push_metrics = True
-    client = worker._get_oxp_client()
-    client.write_session_metrics.return_value = {"written": 1, "errors": []}
 
     await worker.handle_message(session_message)
 
-    client.write_session_metrics.assert_called_once_with(
-        session_message.session_id,
-        [
-            {
-                "name": "TrajectoryScore",
-                "value": 0,
-                "provider": "StatefulEvals",
-                "reasoning": "Unresolved requirement.",
-                "evaluation_model": "gpt-4o",
-            }
-        ],
+    save_call.assert_called_once()
+    session_id, call_id, metrics = save_call.call_args.args
+    assert (session_id, call_id) == (session_message.session_id, "llmcall:1")
+    assert [(m.metric_id, m.resource_id, m.provider, m.value, m.reasoning) for m in metrics] == [
+        ("Relevancy", "llmcall:1", "StatefulEvals", 1.0, "ok")
+    ]
+    assert metrics[0].metadata == {}
+    write_context.assert_called_once_with(
+        no_external_services, session_message.session_id, "transition:abc", {"claims": [{"index": 0}]}
     )
+    (session_metrics,) = save_session.call_args.args
+    assert [(m.metric_id, m.resource_id, m.provider, m.value, m.reasoning) for m in session_metrics] == [
+        ("TrajectoryScore", session_message.session_id, "StatefulEvals", 0, "Unresolved requirement.")
+    ]
+    assert session_metrics[0].metadata == {"evaluation_model": "gpt-4o"}
 
 
 @pytest.mark.asyncio
-async def test_worker_persists_session_and_span_evaluation_cost(rabbit_url, session_message, mocker):
+async def test_worker_skips_context_when_disabled(rabbit_url, session_message, mocker):
+    result = make_session_result()
+    result.transition_contexts = {"transition:abc": {"claims": []}}
+    processor = mocker.Mock()
+    processor.evaluate_trajectory.return_value = result
+    mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    write_context = mocker.patch("oxp.client.dal.write_transition_context")
+    mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    worker = _make_worker(rabbit_url)
+    worker.push_metrics = True
+    worker.push_context = False
+
+    await worker.handle_message(session_message)
+
+    write_context.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_write_when_push_metrics_is_off(rabbit_url, session_message, mocker):
+    processor = mocker.Mock()
+    processor.evaluate_trajectory.return_value = make_session_result()
+    mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
+    push = mocker.patch.object(StatefulEvalWorker, "_push_metrics_to_kg")
+    worker = _make_worker(rabbit_url)
+    worker.push_metrics = False
+
+    await worker.handle_message(session_message)
+
+    push.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_worker_persists_session_and_span_evaluation_cost(
+    rabbit_url, session_message, mocker, no_external_services
+):
     span_metric = SimpleNamespace(
         span_id="span-1",
         span_index=0,
@@ -315,35 +367,39 @@ async def test_worker_persists_session_and_span_evaluation_cost(rabbit_url, sess
         estimated_cost_usd=0.0045,
     )
     processor = mocker.Mock()
-    processor.evaluate_spans.return_value = result
+    processor.evaluate_trajectory.return_value = result
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
     worker = _make_worker(rabbit_url, llm_model_name="gpt-4o")
     worker.push_metrics = True
-    client = worker._get_oxp_client()
-    client.write_span_metrics.return_value = {"written": 1, "errors": []}
-    client.write_session_metrics.return_value = {"written": 1, "errors": []}
+    save_call = mocker.patch("oxp.providers.OXPMetricsProvider.save_call_metrics", return_value=True)
+    save_session = mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    mocker.patch("oxp.client.dal.write_transition_context", return_value=True)
 
     await worker.handle_message(session_message)
 
-    span_calls = {call.args[1]: call.args[2][0] for call in client.write_span_metrics.call_args_list}
-    assert span_calls["span-1"]["evaluation_prompt_tokens"] == 50
-    assert span_calls["span-1"]["evaluation_completion_tokens"] == 5
-    assert span_calls["span-1"]["evaluation_total_tokens"] == 55
-    assert span_calls["span-1"]["evaluation_cost_usd"] == 0.000175
-    assert span_calls["span-1"]["evaluation_model"] == "gpt-4o"
-    assert not any(key.startswith("evaluation_") for key in span_calls["span-2"])
-    session_metric = client.write_session_metrics.call_args.args[1][0]
-    assert session_metric["evaluation_model"] == "gpt-4o"
-    assert session_metric["evaluation_prompt_tokens"] == 1000
-    assert session_metric["evaluation_completion_tokens"] == 200
-    assert session_metric["evaluation_total_tokens"] == 1200
-    assert session_metric["evaluation_cost_usd"] == 0.0045
+    span_metadata = {call.args[1]: call.args[2][0].metadata for call in save_call.call_args_list}
+    assert span_metadata["span-1"] == {
+        "evaluation_model": "gpt-4o",
+        "evaluation_prompt_tokens": 50,
+        "evaluation_completion_tokens": 5,
+        "evaluation_total_tokens": 55,
+        "evaluation_cost_usd": 0.000175,
+    }
+    assert span_metadata["span-2"] == {}
+    (session_metrics,) = save_session.call_args.args
+    assert session_metrics[0].metadata == {
+        "evaluation_model": "gpt-4o",
+        "evaluation_prompt_tokens": 1000,
+        "evaluation_completion_tokens": 200,
+        "evaluation_total_tokens": 1200,
+        "evaluation_cost_usd": 0.0045,
+    }
 
 
 @pytest.mark.asyncio
 async def test_worker_does_not_persist_error_results(rabbit_url, session_message, mocker):
     processor = mocker.Mock()
-    processor.evaluate_spans.return_value = make_session_result(error="evaluation failed")
+    processor.evaluate_trajectory.return_value = make_session_result(error="evaluation failed")
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
     push = mocker.patch.object(StatefulEvalWorker, "_push_metrics_to_kg")
     worker = _make_worker(rabbit_url)
@@ -358,7 +414,7 @@ async def test_worker_does_not_persist_error_results(rabbit_url, session_message
 @pytest.mark.asyncio
 async def test_worker_releases_processor_on_unexpected_failure(rabbit_url, session_message, mocker):
     processor = mocker.Mock()
-    processor.evaluate_spans.side_effect = RuntimeError("unexpected failure")
+    processor.evaluate_trajectory.side_effect = RuntimeError("unexpected failure")
     mocker.patch.object(StatefulEvalWorker, "_build_processor", return_value=processor)
     worker = _make_worker(rabbit_url)
     with pytest.raises(RuntimeError, match="unexpected failure"):
@@ -366,31 +422,8 @@ async def test_worker_releases_processor_on_unexpected_failure(rabbit_url, sessi
     processor.close.assert_called_once()
 
 
-def test_worker_fetches_and_normalizes_spans(rabbit_url, mocker, no_external_services):
-    worker = _make_worker(rabbit_url)
-    client = worker._get_oxp_client()
-    raw_span = mocker.Mock()
-    raw_span.model_dump.return_value = {
-        "span_id": "span-1",
-        "span_attributes": {"ioa_observe.entity.input": "complete input"},
-        "links_trace_id": ["trace-1"],
-        "links_span_id": ["sender"],
-        "links_trace_state": [""],
-        "links_attributes": [{"link.type": "peer_message"}],
-    }
-    client.get_session_spans.return_value.spans = [raw_span]
-
-    spans = no_external_services(worker, "session-1")
-
-    client.get_session_spans.assert_called_once_with(session_ids=["session-1"], limit=500, offset=0, order="asc")
-    assert spans[0]["SpanId"] == "span-1"
-    assert spans[0]["SpanAttributes"] == raw_span.model_dump.return_value["span_attributes"]
-    assert spans[0]["Links.SpanId"] == ["sender"]
-    assert spans[0]["Links.Attributes"] == [{"link.type": "peer_message"}]
-
-
 def test_build_processor_never_fetches_data(rabbit_url, mocker):
     constructor = mocker.patch("stateful_evals_be.TemporalMetricsProcessor")
     worker = _make_worker(rabbit_url)
     assert worker._build_processor() is constructor.return_value
-    worker._get_oxp_client.assert_not_called()
+    worker._get_kg.assert_not_called()

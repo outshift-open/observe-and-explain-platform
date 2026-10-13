@@ -220,7 +220,7 @@ def parse_args() -> argparse.Namespace:
         "--chunk-size",
         type=int,
         default=20,
-        help="Sessions per processor.run_evaluation call (default: 20)",
+        help="Sessions per evaluation batch (default: 20)",
     )
     parser.add_argument(
         "--batch-size",
@@ -632,6 +632,7 @@ def _evaluate_cases(
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
     from stateful_evals_be.evaluation.processor import TemporalMetricsProcessor
+    from stateful_evals_be.integrations.files import load_trajectory_file
     from stateful_evals_be.models.requests import TemporalMetricOptions
 
     llm_config = _build_llm_config(args)
@@ -673,8 +674,10 @@ def _evaluate_cases(
             return None, f"Policy resolution failed for task '{case.task_id}': {exc}"
 
         try:
-            result = processor.evaluate_session(
-                case.session_id,
+            _, spans = load_trajectory_file(case.file_path)
+            result = processor.evaluate_spans(
+                spans,
+                session_id=case.session_id,
                 policy_override=policy_text,
             )
         except Exception as exc:

@@ -227,6 +227,34 @@ class OXPMetricsProvider(MetricsProvider):
                 ok = False
         return ok
 
+    def save_call_metrics(
+        self,
+        session_id: str,
+        call_id: str,
+        metrics: MetricResult | list[MetricResult],
+    ) -> bool:
+        """Persist metrics measuring the call node with id ``call_id`` (convenience beyond the ABC)."""
+        items = [metrics] if isinstance(metrics, MetricResult) else metrics
+        ok = True
+        for m in items:
+            if m.error or m.value is None:
+                continue
+            graph = _graph_properties(m, call_id)
+            if graph is None:
+                ok = False
+                continue
+            query, params = metric_graph.write_metric_result_query(
+                "call", call_id, *graph, session_id=session_id
+            )
+            try:
+                self._db.execute_command(query, params)
+            except Exception as exc:
+                logger.error(
+                    "save_call_metrics failed for %s/%s: %s", call_id, m.metric_id, exc
+                )
+                ok = False
+        return ok
+
     # ── MetricsProvider: clean_metrics ────────────────────────────────────
 
     def clean_metrics(self, session_id: str | None = None) -> int:

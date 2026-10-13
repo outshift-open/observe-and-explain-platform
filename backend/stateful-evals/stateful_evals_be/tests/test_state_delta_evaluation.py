@@ -242,7 +242,6 @@ def test_evaluate_session_uses_one_unified_final_audit_and_accounts_for_it() -> 
             "gen_ai.completion.0.content": "Hello.",
         },
     }
-    processor.fetch_spans_for_session = lambda _session_id: [raw_span]
     processor.compute_span_state_delta = lambda *args, **kwargs: {
         "results": [
             {
@@ -293,7 +292,7 @@ def test_evaluate_session_uses_one_unified_final_audit_and_accounts_for_it() -> 
         AssertionError("legacy final-outcome review must not run")
     )
 
-    result = processor.evaluate_session("session-1")
+    result = processor.evaluate_spans([raw_span], session_id="session-1")
 
     assert len(audit_calls) == 1
     assert result.error is None
@@ -333,7 +332,6 @@ def test_paper_suite_keeps_diagnostic_failure_without_failing_outcome() -> None:
             "gen_ai.completion.0.content": "Hello.",
         },
     }
-    processor.fetch_spans_for_session = lambda _session_id: [raw_span]
     processor.compute_span_state_delta = lambda *args, **kwargs: {
         "results": [
             {
@@ -377,7 +375,7 @@ def test_paper_suite_keeps_diagnostic_failure_without_failing_outcome() -> None:
         {},
     )
 
-    result = processor.evaluate_session("session-paper")
+    result = processor.evaluate_spans([raw_span], session_id="session-paper")
 
     assert result.error is None
     assert result.high_level_metric_suite == "paper_v1"
@@ -414,7 +412,6 @@ def test_configured_trajectory_metric_failure_is_additive_to_correctness() -> No
             "gen_ai.completion.0.content": "Hello.",
         },
     }
-    processor.fetch_spans_for_session = lambda _session_id: [raw_span]
     processor.compute_span_state_delta = lambda *args, **kwargs: {
         "results": [
             {
@@ -457,7 +454,9 @@ def test_configured_trajectory_metric_failure_is_additive_to_correctness() -> No
 
     processor._run_configured_trajectory_metrics = configured_metrics
 
-    result = processor.evaluate_session("session-configured-metrics")
+    result = processor.evaluate_spans(
+        [raw_span], session_id="session-configured-metrics"
+    )
 
     assert len(configured_calls) == 1
     assert configured_calls[0]["trajectory_score"] == 1
