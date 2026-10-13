@@ -16,6 +16,7 @@ dependencies = [
     "metrics-computation-engine>=1.2.7",
     "mdt-metrics",
     "pydantic>=2.0.0",
+    "openai>=2.8.0",
 ]
 
 [project.optional-dependencies]

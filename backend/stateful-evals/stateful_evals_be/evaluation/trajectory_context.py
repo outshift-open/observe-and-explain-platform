@@ -290,9 +290,17 @@ class TrajectoryContext:
         max_context_chars: int = 6000,
         coordination_context: CoordinationContext | Dict[str, Any] | None = None,
         adapter_ingestion: str = "eager",
+        artifact_organization: str = "python",
     ):
         if adapter_ingestion not in {"eager", "incremental"}:
             raise ValueError("adapter_ingestion must be 'eager' or 'incremental'")
+        if artifact_organization not in {"python", "llm"}:
+            raise ValueError("artifact_organization must be 'python' or 'llm'")
+        self.artifact_organization = artifact_organization
+        # In LLM mode these are explicit model-organized operations, not raw
+        # telemetry interpreted again by the final metric payload builders.
+        self.raw_spans: List[Dict[str, Any]] = []
+        self.artifact_relationship_decisions: Dict[str, Dict[str, Any]] = {}
         self.evidence: List[EvidenceFact] = []
         self.intents: List[IntentEntry] = []
         self.claims: List[ClaimEntry] = []
@@ -359,6 +367,9 @@ class TrajectoryContext:
         self.tool_definitions = tool_definitions
         self.recency_window = recency_window
         self.max_context_chars = max_context_chars
+
+        if self.artifact_organization == "llm":
+            return
 
         if self.policy_text:
             self.add_policy_rule(self.policy_text, source_name="policy")
@@ -832,6 +843,8 @@ class TrajectoryContext:
         if self._finalized:
             return
         self._finalized = True
+        if self.artifact_organization == "llm":
+            return
         for edge in list(self._pending_adapter_edges):
             self._ingest_adapter_edge(edge, self._span_index_for_timestamp(edge))
         self._pending_adapter_edges = []
@@ -2268,6 +2281,8 @@ class TrajectoryContext:
         return self._evidence_artifact_id(index, fact)
 
     def _evidence_artifact_id(self, index: int, fact: EvidenceFact) -> str:
+        if self.artifact_organization == "llm":
+            return f"fact:{index}"
         if fact.fact_type == "user_statement":
             return f"user:{index}"
         if fact.fact_type == "policy_rule":
@@ -3679,14 +3694,15 @@ class TrajectoryContext:
         self._tool_fact_by_call_id = {}
         self._work_item_by_inner_span_id = {}
         # The adapter's root turn names the root agent; else the first root claim.
-        self.root_agent_id = next(
-            (
-                turn.agent_id
-                for turn in self.coordination_context.root_turns
-                if turn.agent_id
-            ),
-            "",
-        )
+        if self.artifact_organization != "llm":
+            self.root_agent_id = next(
+                (
+                    turn.agent_id
+                    for turn in self.coordination_context.root_turns
+                    if turn.agent_id
+                ),
+                "",
+            )
         recorded_turn_keys = {
             intent.events[0].get("turn_key")
             for intent in self.intents
@@ -3718,7 +3734,8 @@ class TrajectoryContext:
         for index, claim in enumerate(self.claims):
             claim_id = f"claim:{index}"
             if (
-                not self.root_agent_id
+                self.artifact_organization != "llm"
+                and not self.root_agent_id
                 and claim.agent_id
                 and claim.actor_scope == "root"
             ):
@@ -4183,6 +4200,16 @@ class TrajectoryContext:
 
     def get_final_answer_context(self) -> Dict[str, Any]:
         """Return a final reply and its known origin with tool-output evidence."""
+        if self.artifact_organization == "llm":
+            return {
+                "final_answer": self.latest_root_answer,
+                "final_answer_span_index": self.latest_root_answer_span_index,
+                "user_question": self.root_request,
+                "all_tool_outputs": [
+                    fact for fact in self.evidence if fact.fact_type == "tool_output"
+                ],
+                "coordination_context": self.coordination_context.compact_payload(),
+            }
         user_facing: list[ClaimEntry] = []
         unattributed: list[ClaimEntry] = []
         for claim in self.claims:

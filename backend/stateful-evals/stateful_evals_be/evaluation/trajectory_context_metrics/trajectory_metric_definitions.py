@@ -20,8 +20,7 @@ from .judge import (
     build_delegation_context,
     build_instruction_following_context,
     build_operation_context,
-    judge_usage_payload,
-    resolve_batch_evidence_refs,
+    recorded_source_context,
 )
 from .metrics import (
     CrossAgentTermConsistencyMetric,
@@ -176,6 +175,7 @@ to Handoff Quality.
             "context": {
                 "delegation_audit": audit,
                 "delegation_summary": summary,
+                **recorded_source_context(context),
             },
         }
 
@@ -289,54 +289,6 @@ not evidence that required reasoning was skipped.
             "context": build_instruction_following_context(context),
         }
 
-    def result_from_raw(
-        self,
-        raw,
-        *,
-        judge,
-        usage=None,
-        batch_metadata=None,
-    ):
-        result = super().result_from_raw(
-            raw,
-            judge=judge,
-            usage=usage,
-            batch_metadata=batch_metadata,
-        )
-        supported = []
-        unsupported = []
-        for failure in result.fatal_failures:
-            instruction_evidence = any(
-                ref.kind in {"policy", "intent", "operation"}
-                or ref.source_name in {"user", "peer_agent"}
-                or ref.source_name.startswith("semantic_contract:")
-                for ref in failure.evidence
-            )
-            behavior_evidence = any(
-                ref.kind in {"claim", "fact", "operation", "final_answer"}
-                and ref.source_name not in {"user", "peer_agent"}
-                for ref in failure.evidence
-            )
-            if instruction_evidence and behavior_evidence:
-                supported.append(failure)
-            else:
-                unsupported.append(failure)
-
-        if unsupported:
-            result.fatal_failures = supported
-            result.score = 0 if supported else 1
-            result.metadata["unsubstantiated_fatal_count"] = len(unsupported)
-            result.metadata["score_was_normalized"] = (
-                result.score != result.metadata.get("requested_score")
-            )
-            if not supported:
-                result.reasoning = (
-                    "Instruction Following passed because no alleged violation "
-                    "cited both an available instruction and contradictory "
-                    "component behavior."
-                )
-                result.evidence = []
-        return result
 
 
 class HandoffQualityMetric(TrajectoryMetric):
@@ -431,12 +383,21 @@ Evaluate whether important user facts, constraints, identifiers, values,
 provenance, and uncertainty survive the specific handoffs and synthesis steps
 where they are needed.
 
-Pass when material context is propagated accurately, transformed with an
-explicit compatible conversion, or retained as an unresolved limitation.
+Pass when material context is propagated accurately, transformed with a
+supported compatible conversion, or retained as an unresolved limitation.
+Equivalent wording, aliases, formats, or identifiers preserve context when
+meaning, necessary precision, and the recipient's ability to act are retained.
+The recipient may already hold or validly recover the necessary information;
+use its recorded context, supported mappings, and downstream behavior rather
+than requiring the agent to explicitly describe the conversion. Do not assume
+unrecorded knowledge.
+
 Fail when a source item disappears before reaching its responsible component,
-is silently changed, loses provenance or uncertainty, or is falsely represented
-as satisfied. Cite both the source artifact and the affected downstream
-artifact whenever possible.
+loses material meaning, precision, provenance, or uncertainty, or is falsely
+represented as satisfied. Cite the source item, the information actually
+available to the recipient, and the affected downstream use. A rejected lookup
+or other execution failure alone does not establish lost context or prove that
+the original representation would have worked.
 
 This metric measures information propagation, not obedience or success. If a
 budget or service identifier reaches the correct agent intact but that agent
@@ -697,51 +658,6 @@ verbatim in any tool output.
     ) -> HighLevelMetricResult | None:
         """Always judge; span-level grounding findings are not reused here."""
         return None
-
-    def evaluate(
-        self,
-        context: TrajectoryContext,
-        *,
-        stateful_result: Any = None,
-    ):
-        """Run a focused audit with concise artifact-ID attribution."""
-        judge = self.judge
-        if judge is None or not hasattr(judge, "judge_batch"):
-            return super().evaluate(context, stateful_result=stateful_result)
-        context_payload = self.to_judge_payload(context)["context"]
-        raw_batch = judge.judge_batch(
-            metrics_payload=[
-                {
-                    "high_level_metric": self.name,
-                    "metric_code": self.metric_code,
-                    "rubric": self.rubric,
-                    "input_components": sorted(self.input_config.components),
-                }
-            ],
-            shared_context=context_payload,
-        )
-        raw_items = raw_batch.get("metrics") or []
-        raw = next(
-            (
-                item
-                for item in raw_items
-                if isinstance(item, dict) and item.get("high_level_metric") == self.name
-            ),
-            None,
-        )
-        if raw is None:
-            raise ValueError("Groundedness judge did not return a metric result")
-        resolved = resolve_batch_evidence_refs(raw, context_payload)
-        result = self.result_from_raw(
-            resolved,
-            judge=judge,
-            usage=judge_usage_payload(judge),
-            batch_metadata={
-                "usage_scope": "dedicated_artifact_reference_call",
-                "shared_artifact_payload": False,
-            },
-        )
-        return self.decorate_result(result, context)
 
 
 def _delegation_output_artifact_ids(context: TrajectoryContext) -> set[str]:

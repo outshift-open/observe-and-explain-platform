@@ -57,6 +57,21 @@ class EvaluationEngine:
                 spans, session_id=session_id, policy_override=policy_override
             )
 
+    async def aevaluate_spans(
+        self,
+        spans: Iterable[SpanInput],
+        *,
+        session_id: str,
+        policy_override: str | None = None,
+    ) -> SessionResult:
+        """Evaluate a trajectory on the caller's event loop with native async I/O."""
+        with TemporalMetricsProcessor(
+            llm_config=deepcopy(self._llm_config), options=deepcopy(self._options)
+        ) as processor:
+            return await processor.aevaluate_spans(
+                spans, session_id=session_id, policy_override=policy_override
+            )
+
     def evaluate_sessions(
         self,
         session_ids: Iterable[str],

@@ -9,23 +9,22 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from stateful_evals_be.evaluation.async_utils import run_sync
 from stateful_evals_be.evaluation.trajectory_context import TrajectoryContext
 
 from .base import (
-    EvidenceRef,
     HighLevelMetricResult,
     MetricInputConfig,
     TrajectoryContextMetric,
     metric_input_config,
 )
 from .judge import (
-    LLMMetricJudge,
     MetricJudge,
     build_context_payload,
     build_delegation_context,
     build_operation_context,
 )
-from .metrics import evaluate_high_level_metrics_batched
+from .metrics import aevaluate_high_level_metrics_batched
 from .trajectory_metric_definitions import (
     LEGACY_TRAJECTORY_METRICS,
     ConfidenceCalibrationMetric,
@@ -62,9 +61,8 @@ class DelegationOwnershipMetric(DelegationAccuracyMetricV1):
 
     definition_version = PAPER_V2_METRIC_SUITE
     rubric = """\
-Evaluate ownership completeness only. The executed wrong-owner subscore is
-reused from the legacy Delegation Accuracy routing audit and combined with this
-result after evaluation.
+Also evaluate ownership completeness: every material unit of work needs an
+accountable owner. Evaluate this alongside executed routing accuracy.
 
 Reconstruct material work from:
 - explicit root-user requirements and policy requirements;
@@ -122,9 +120,36 @@ ambiguous.
                 "claims",
                 "fact_store",
                 "operations",
+                "recorded_source_spans",
             )
             if key in payload
         }
+        audits, _ = build_delegation_context(context)
+        ownership_context["delegation_requests"] = [
+            {
+                key: audit[key]
+                for key in (
+                    "delegation_id",
+                    "operation_artifact_id",
+                    "span_index",
+                    "delegator_agent_id",
+                    "recipient_agent",
+                    "delegated_task",
+                )
+            }
+            for audit in audits
+        ]
+        ownership_context["work_assignments"] = [
+            {
+                "work_id": work.work_id,
+                "request": work.request,
+                "request_span_index": work.request_span_index,
+                "allocator_agent_id": work.allocator_agent_id,
+                "recipient_agent_ids": list(work.recipient_agent_ids),
+                "intent_id": work.intent_id,
+            }
+            for work in context.work_units
+        ]
         ownership_context["ownership_audit_protocol"] = {
             "root_requirements": (
                 "Derive explicit requirements from user statements and root "
@@ -133,6 +158,11 @@ ambiguous.
             "discovered_prerequisites": (
                 "Add a requirement only when evidence discovered during the "
                 "run makes that work necessary for the selected plan."
+            ),
+            "assignment_evidence": (
+                "Read all work_assignments, delegation_requests, and declared intent owners "
+                "before deciding that work has no owner. An assigned task that "
+                "fails to produce a result still has an owner."
             ),
             "fatal_conditions": (
                 "The necessary work is unassigned, every relevant component "
@@ -159,20 +189,14 @@ ambiguous.
 
 
 class DelegationAccuracyMetric(TrajectoryMetric):
-    """Combines executed routing accuracy with ownership completeness."""
+    """Checks executed routing and material work ownership in one audit."""
 
     name = "Delegation Accuracy"
     metric_code = "delegation_accuracy"
     definition_version = PAPER_V2_METRIC_SUITE
     metric_layer = "execution"
     requires_dedicated_judge = True
-    rubric = """\
-Evaluate Delegation Accuracy through two subaudits: whether every executed
-delegation selected a capable owner, and whether every material unit of work
-had an accountable owner. Fail when either subaudit finds a material
-wrong-owner delegation, no accountable owner, or unresolved overlapping
-ownership.
-"""
+    rubric = DelegationAccuracyMetricV1.rubric + "\n" + DelegationOwnershipMetric.rubric
 
     def __init__(
         self,
@@ -192,72 +216,10 @@ ownership.
         super().__init__(input_config=input_config, judge=judge)
 
     def to_judge_payload(self, context: TrajectoryContext) -> dict[str, Any]:
-        """Expose the ownership payload used by the second subaudit."""
-        return DelegationOwnershipMetric(
-            input_config=self.input_config,
-            judge=self.judge,
-        ).to_judge_payload(context)
-
-    def evaluate(
-        self,
-        context: TrajectoryContext,
-        *,
-        stateful_result: Any = None,
-    ) -> HighLevelMetricResult:
-        judge = self.judge or LLMMetricJudge()
-        routing = DelegationAccuracyMetricV1(judge=judge).evaluate(
-            context,
-            stateful_result=stateful_result,
-        )
-        ownership = DelegationOwnershipMetric(
-            input_config=self.input_config,
-            judge=judge,
-        ).evaluate(
-            context,
-            stateful_result=stateful_result,
-        )
-        fatal_failures = [*routing.fatal_failures, *ownership.fatal_failures]
-        minor_failures = [*routing.minor_failures, *ownership.minor_failures]
-        evidence = _deduplicate_evidence(
-            [
-                *routing.evidence,
-                *ownership.evidence,
-                *(
-                    evidence
-                    for failure in fatal_failures
-                    for evidence in failure.evidence
-                ),
-            ]
-        )
-        result = HighLevelMetricResult(
-            high_level_metric=self.name,
-            score=0
-            if routing.score == 0 or ownership.score == 0 or fatal_failures
-            else 1,
-            reasoning=(
-                "Executed routing: "
-                f"{routing.reasoning or 'no reasoning recorded'} "
-                "Ownership completeness: "
-                f"{ownership.reasoning or 'no reasoning recorded'}"
-            ),
-            fatal_failures=fatal_failures,
-            minor_failures=minor_failures,
-            evidence=evidence,
-            metadata={
-                "judge_type": "composite_llm_rubric",
-                "usage": _combined_usage(routing, ownership),
-                "subscores": {
-                    "executed_routing_accuracy": routing.score,
-                    "ownership_completeness": ownership.score,
-                },
-                "executed_routing_result_reused": False,
-                "subaudit_metadata": {
-                    "executed_routing_accuracy": routing.metadata,
-                    "ownership_completeness": ownership.metadata,
-                },
-            },
-        )
-        return self.decorate_result(result, context)
+        payload = DelegationOwnershipMetric(input_config=self.input_config).to_judge_payload(context)
+        payload["rubric"] = self.rubric
+        payload["context"].update(DelegationAccuracyMetricV1().to_judge_payload(context)["context"])
+        return payload
 
 
 class GoalAlignmentMetric(GoalAlignmentMetricV1):
@@ -321,6 +283,7 @@ answer; those belong to other metrics.
                 "policy_artifact_id",
                 "semantic_contracts",
                 "user_statements",
+                "recorded_source_spans",
             )
             if key in payload
         }
@@ -358,8 +321,8 @@ answer; those belong to other metrics.
         goal_context["construct_boundary"] = (
             "Judge the objective encoded in decomposition, not whether the "
             "result was complete, correct, feasible, or instruction-compliant. "
-            "Delegation results, tool outputs, intent statuses, and the final "
-            "answer are deliberately omitted."
+            "Original sources are available to verify that decomposition; "
+            "execution outcomes do not change this metric's scope."
         )
         return {
             "high_level_metric": self.name,
@@ -374,9 +337,15 @@ class HandoffQualityMetric(HandoffQualityMetricV1):
 
     definition_version = PAPER_V2_METRIC_SUITE
     metric_layer = "execution"
+    judge_decides_applicability = True
     rubric = """\
 Evaluate whether a component-to-component request and response form a usable
 interface for the recipient's assigned work.
+
+This metric is not applicable only when no inter-component assignment or
+handoff occurred. Check the original source records when supplied; missing
+extracted work units or coordination links do not establish that no handoff
+occurred.
 
 Fail only when all of the following hold:
 1. A material field, identifier, constraint, or scope requirement was already
@@ -387,6 +356,19 @@ Fail only when all of the following hold:
    ignored a clear requested scope.
 4. The interface defect caused an attributable downstream error that was not
    recovered before the final outcome.
+
+Judge usable information, not identical wording or identifiers. Equivalent
+names, aliases, formats, or identifiers are acceptable when the recipient's
+recorded context, supported mappings, available resolution procedures, or
+successful downstream use establish that it can act on them. The agent need
+not narrate the transformation. Do not assume unrecorded knowledge or mappings.
+
+Distinguish an unavailable tool or service, an unsupported reconstruction by
+the recipient, and an omitted prerequisite in the handoff. A rejected lookup
+alone proves neither that the sender caused the failure nor that passing the
+original identifier would have succeeded. Attribute missing context only when
+the recorded interface requirements and downstream behavior support that
+causal link; account for any later resolution or recovery.
 
 A transparent inability, queue failure, tool outage, or reasonable request for
 clarification is not a Handoff Quality failure. If the sender retries with the
@@ -515,36 +497,6 @@ PAPER_V2_METRICS = CURRENT_TRAJECTORY_METRICS
 build_paper_metrics = build_legacy_trajectory_metrics
 build_paper_v2_metrics = build_current_trajectory_metrics
 build_updated_paper_metrics = build_updated_trajectory_metrics
-
-
-def _combined_usage(
-    *results: HighLevelMetricResult,
-) -> dict[str, int]:
-    keys = ("prompt_tokens", "completion_tokens", "total_tokens")
-    return {
-        key: sum(
-            int((result.metadata.get("usage") or {}).get(key) or 0)
-            for result in results
-        )
-        for key in keys
-    }
-
-
-def _deduplicate_evidence(items: list[EvidenceRef]) -> list[EvidenceRef]:
-    deduplicated: list[EvidenceRef] = []
-    seen: set[tuple[str, int, str, str]] = set()
-    for item in items:
-        key = (
-            item.artifact_id,
-            item.span_index,
-            item.source_name,
-            item.content,
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduplicated.append(item)
-    return deduplicated
 
 
 TRAJECTORY_METRIC_SET = "trajectory_v1"
@@ -730,18 +682,41 @@ def evaluate_trajectory_metrics_batched(
     stateful_result: Mapping[str, Any] | Any | None = None,
     judge: MetricJudge | None = None,
     supplemental_context: Mapping[str, Any] | None = None,
+    max_workers: int = 13,
+) -> list[HighLevelMetricResult]:
+    return run_sync(
+        aevaluate_trajectory_metrics_batched(
+            context,
+            selectors,
+            stateful_result=stateful_result,
+            judge=judge,
+            supplemental_context=supplemental_context,
+            max_workers=max_workers,
+        )
+    )
+
+
+async def aevaluate_trajectory_metrics_batched(
+    context: TrajectoryContext,
+    selectors: Sequence[str] | None,
+    *,
+    stateful_result: Mapping[str, Any] | Any | None = None,
+    judge: MetricJudge | None = None,
+    supplemental_context: Mapping[str, Any] | None = None,
+    max_workers: int = 13,
 ) -> list[HighLevelMetricResult]:
     """Evaluate configured metrics without changing correctness state."""
     codes = resolve_trajectory_metric_codes(selectors)
     if not codes:
         return []
     metrics = build_trajectory_metrics(codes, judge=judge)
-    results = evaluate_high_level_metrics_batched(
+    results = await aevaluate_high_level_metrics_batched(
         context,
         stateful_result=stateful_result,
         metrics=metrics,
         judge=judge,
         supplemental_context=supplemental_context,
+        max_workers=max_workers,
     )
     if len(results) != len(codes):
         raise RuntimeError(
@@ -798,5 +773,6 @@ __all__ = (
     "build_updated_trajectory_metrics",
     "build_updated_paper_metrics",
     "evaluate_trajectory_metrics_batched",
+    "aevaluate_trajectory_metrics_batched",
     "resolve_trajectory_metric_codes",
 )
