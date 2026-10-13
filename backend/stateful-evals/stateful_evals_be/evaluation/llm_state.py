@@ -173,6 +173,22 @@ class LLMState:
         history = ctx.artifact_sources.get(source_id, []) if isinstance(source_id, str) else []
         return next((row["content_source_id"] for row in reversed(history) if "content_source_id" in row), source_id)
 
+    def response_sources(self, span_index):
+        """Identify nonempty recorded output text, excluding input and wrappers."""
+        sources = []
+        for row in self.source_catalog(span_index):
+            path = row["location"]
+            if not path or not isinstance(path[-1], str):
+                continue
+            direct = path[-1].startswith("gen_ai.completion.") and path[-1].endswith(".content") and tuple(path[:-1]) in {(), ("SpanAttributes",), ("output_payload",)}
+            entity = path[-1] == "content" and tuple(path[:-1]) in {
+                ("SpanAttributes", "ioa_observe.entity.output"),
+                ("SpanAttributes", "traceloop.entity.output"), ("output",), ("output_payload",)}
+            value = self._sources[row["source_id"]][2]
+            if (direct or entity) and isinstance(value, str) and value.strip():
+                sources.append(row["source_id"])
+        return sources
+
     def _source(self, source_id, span_index, ctx=None):
         source_id = self._source_id(source_id, ctx)
         if not isinstance(source_id, str) or source_id not in self._sources:
@@ -288,12 +304,11 @@ class LLMState:
                 raise ValueError("Select the observed root instructions using metadata.policy_text_ref")
         if operation.get("actor_scope") == "root" and not candidate.root_agent_id:
             raise ValueError("A root operation requires metadata.root_agent_id")
-        if owner and owner == candidate.root_agent_id and not operation.get("is_delegation"):
-            new_claims = candidate.claims[len(self.context.claims):]
-            if any(claim.span_index == span_index for claim in new_claims) and (
-                    not delta.get("metadata", {}).get("final_answer_ref") or
-                    candidate.latest_root_answer_span_index != span_index):
-                raise ValueError("Select the current root response using metadata.final_answer_ref")
+        if owner and owner == candidate.root_agent_id and SpanNormalizer.entity_type(self._raw_spans[span_index]) == "llm" and not operation.get("is_delegation"):
+            outputs = self.response_sources(span_index)
+            reference = delta.get("metadata", {}).get("final_answer_ref")
+            if outputs and self._source_id(reference, candidate) not in outputs:
+                raise ValueError("Record the current root output as a claim and select its source using metadata.final_answer_ref")
         self._validate_refs(candidate)
         candidate.rebuild_runtime_indexes()
         if commit:
@@ -399,6 +414,8 @@ class LLMState:
                     for i, fact in enumerate(ctx.evidence)):
                 raise ValueError("policy_text_ref must select a recorded root policy_rule")
             if key == "final_answer_ref":
+                if source_id not in self.response_sources(source_ref["span_index"]):
+                    raise ValueError("final_answer_ref must select nonempty recorded output text, not input or an output wrapper")
                 attributes = self._raw_spans[source_ref["span_index"]].get("SpanAttributes", {})
                 kind = attributes.get("ioa_observe.span.kind") or attributes.get("traceloop.span.kind")
                 if kind and kind != "llm":
