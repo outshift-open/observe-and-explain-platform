@@ -56,6 +56,7 @@ The worker reads and writes Neo4j only, through the shared connector
 | `Groundedness`, `IntentRecognition`, `Relevancy` | `(:MetricResult)-[:measures]->(:LLMCall\|:ToolCall)`, matched by the call's id; written only if that call exists | `0`, `0.25`, `0.5`, `0.75` or `1` per judged `llm` or `tool` step (1-5 rubric normalized to `(score-1)/4`; passes at or above `span_pass_threshold`, default `0.5`); `tool` steps get no Groundedness |
 | `TrajectoryContext` node | `(:Transition)-[:hasContext]->(:TrajectoryContext {id, evidence, claims, ...})`, one per step (`PUSH_TRANSITION_CONTEXT`) | one JSON property per constituent: what the step added to the trajectory context (see below) |
 | `TrajectoryScore` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `PolicySafety`, `TaskCompletion`, `Groundedness`, ... (only the ones in the config file) | `(:MetricResult)-[:measures]->(:Session {sessionId})`, like `TrajectoryScore` | `0` or `1` each; a metric that was not applicable or could not be judged has no score and is not written. They are diagnostic: they never change `TrajectoryScore`. `Groundedness` here measures the session, where the step metric of the same name measures a call |
 
 Each metric also carries the evaluation cost when measured, as `evaluation_model`,
 `evaluation_prompt_tokens`, `evaluation_completion_tokens`, `evaluation_total_tokens` and
@@ -126,6 +127,7 @@ Flags override environment variables, except `MAX_INFLIGHT_MESSAGES`, which over
 | `LLM_MODEL_NAME` | `--llm-model-name` | `gpt-4o` | Judge model |
 | `LLM_BASE_MODEL_URL_MCE` | `--llm-base-model-url` | `https://api.openai.com/v1` | Judge model endpoint |
 | `SAMPLING_STRATEGY`, `SAMPLING_EARLY_RATE`, `SAMPLING_MID_RATE` | _(env only)_ | none / `0.25` / `0.60` | `tail_weighted` judges these shares of spans in the first 40% and next 30%; the rest and anchor spans are always judged |
+| `STATEFUL_EVAL_CONFIG_PATH` | `--config-file` | none | Path to `stateful_eval_config.yaml`, which declares the opt-in trajectory metrics (see below). With no file, none run |
 | `PUSH_METRICS` | _(env only)_ | `true` | `false`/`0`/`no` skips all Neo4j writes (the trajectory is still read) |
 | `PUSH_TRANSITION_CONTEXT` | _(env only)_ | `true` | `false`/`0`/`no` skips writing `TrajectoryContext` nodes |
 | `NEO4J_HOST` / `NEO4J_PORT` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | _(env only)_ | `localhost` / `7687` / `neo4j` / empty / `neo4j` | Knowledge graph, read and written; `NEO4J_AUTH=user/password` also sets credentials |
@@ -137,6 +139,25 @@ The connector is `oxp.dependencies.get_neo4j_connector()`, the one `BaseWorker` 
 and every other worker uses, so this worker does not close it. It reads `NEO4J_URI` first, else
 `NEO4J_HOST`, which may be a bare host, `host:port`, or a URI, and uses `NEO4J_PORT` when the host
 has no port.
+
+### Trajectory metrics
+
+The trajectory metrics (Policy Safety, Delegation Accuracy, Goal Alignment, Instruction Following, Handoff
+Quality, Semantic Consistency, Context Preservation, Confidence Calibration, Verification Quality, Communication
+Efficiency, Groundedness, Task Completion and Constraint Satisfaction) are opt-in. Which ones run is declared in
+`stateful_eval_config.yaml` (repo `backend/stateful_eval_config.yaml`, mounted into the worker container by
+`docker-compose.yml`; in the Helm chart it is the `workers.stateful-eval.config` value, mounted at `configPath`):
+
+```yaml
+trajectory_metrics:
+  - PolicySafety
+  - TaskCompletion
+```
+
+List the metrics to run, or `- all`. Names are matched ignoring case and spaces, so `PolicySafety`,
+`Policy Safety` and `policy_safety` are the same metric. With no file, or an empty list, none run. A metric you
+list adds one judge call per session, so `all` adds up to 13. A misspelt metric or setting stops the worker at
+startup. Results are written as session metrics (see above) and never change `TrajectoryScore`.
 
 ### Build & Run
 

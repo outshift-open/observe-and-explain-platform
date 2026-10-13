@@ -32,6 +32,7 @@ x-worker-base: &worker-base
       condition: service_healthy
   volumes:
     - ./mce_config.yaml:/oxp/mce_config.yaml
+    - ./stateful_eval_config.yaml:/oxp/stateful_eval_config.yaml
     - /dev/null:/app/workflows/.env
   environment: *worker-env
 
@@ -206,6 +207,7 @@ services:
     build:
       context: .
       dockerfile: workers/stateful-eval-worker/deploy/docker/Dockerfile
+    command: ["--config-file", "/oxp/stateful_eval_config.yaml"]
     environment:
       <<: *worker-env
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${AI_GATEWAY_API_KEY:-}}

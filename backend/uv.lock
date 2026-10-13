@@ -4155,6 +4155,7 @@ dependencies = [
     { name = "oxp-api" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "stateful-evals" },
     { name = "worker-base" },
 ]
@@ -4179,6 +4180,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.10.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "<=0.15.22" },
     { name = "stateful-evals", editable = "stateful-evals" },
     { name = "worker-base", editable = "worker-base" },

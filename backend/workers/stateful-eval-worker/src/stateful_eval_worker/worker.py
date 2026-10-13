@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Optional
 
+import yaml
 from worker_base.base_worker import BaseWorker
 from worker_base.queue_message import BaseQueueMessage
 
@@ -41,6 +42,7 @@ class StatefulEvalWorker(BaseWorker):
         llm_api_key: Optional[str] = None,
         llm_model_name: Optional[str] = None,
         llm_base_model_url: Optional[str] = None,
+        config_path: Optional[str] = None,
         debug: bool = False,
     ):
         super().__init__(
@@ -64,8 +66,37 @@ class StatefulEvalWorker(BaseWorker):
         self.sampling_early_rate = float(os.getenv("SAMPLING_EARLY_RATE", "0.25"))
         self.sampling_mid_rate = float(os.getenv("SAMPLING_MID_RATE", "0.60"))
 
+        self.trajectory_metrics = self._trajectory_metrics_from(config_path)
+
         self.push_metrics = os.getenv("PUSH_METRICS", "true").strip().lower() not in ("false", "0", "no")
         self.push_context = os.getenv("PUSH_TRANSITION_CONTEXT", "true").strip().lower() not in ("false", "0", "no")
+
+    @staticmethod
+    def _trajectory_metrics_from(config_path: Optional[str]) -> Optional[list[str]]:
+        """The ``trajectory_metrics`` of the config file: ``all`` or a list of names or codes.
+
+        With no file, or an empty list, no trajectory metric runs. The file is checked
+        here, so a misspelt key or metric stops the worker at startup and not on every message.
+        """
+        if not config_path:
+            return None
+        with open(config_path, encoding="utf-8") as handle:
+            config = yaml.safe_load(handle) or {}
+        unknown = set(config) - {"trajectory_metrics"}
+        if unknown:
+            raise ValueError(f"Unknown setting(s) in {config_path}: {', '.join(sorted(unknown))}")
+
+        selectors = config.get("trajectory_metrics") or []
+        if isinstance(selectors, str):
+            selectors = [selectors]
+        if not selectors:
+            return None
+        from stateful_evals_be.evaluation.trajectory_context_metrics.trajectory_metrics import (
+            resolve_trajectory_metric_codes,
+        )
+
+        resolve_trajectory_metric_codes(selectors)
+        return list(selectors)
 
     def _get_kg(self):
         """The shared Neo4j connector (owned and closed by the base worker)."""
@@ -103,7 +134,7 @@ class StatefulEvalWorker(BaseWorker):
 
         return TemporalMetricsProcessor(
             llm_config=llm_config,
-            options=TemporalMetricOptions(sampling=sampling_cfg),
+            options=TemporalMetricOptions(sampling=sampling_cfg, trajectory_metrics=self.trajectory_metrics),
         )
 
     @staticmethod
@@ -155,6 +186,43 @@ class StatefulEvalWorker(BaseWorker):
             fields["evaluation_cost_usd"] = result.cost_estimate.estimated_cost_usd
         return fields
 
+    def _trajectory_metric_results(self, result) -> list:
+        """The session's trajectory metrics as ``MetricResult``s measuring the session.
+
+        A metric that was not applicable or could not be judged has no score and is not written.
+        """
+        from oxp.interfaces.models import MetricResult
+        from stateful_evals_be.evaluation.cost_estimator import estimate_usage_cost_usd
+
+        results = []
+        skipped = 0
+        for item in result.trajectory_metrics:
+            if item.get("score") is None:
+                skipped += 1
+                continue
+            usage = (item.get("metadata") or {}).get("usage") or {}
+            metadata: dict = {"evaluation_model": self.llm_model_name}
+            if usage.get("total_tokens"):
+                metadata["evaluation_prompt_tokens"] = usage["prompt_tokens"]
+                metadata["evaluation_completion_tokens"] = usage["completion_tokens"]
+                metadata["evaluation_total_tokens"] = usage["total_tokens"]
+                metadata["evaluation_cost_usd"] = estimate_usage_cost_usd(
+                    usage["prompt_tokens"], usage["completion_tokens"], self.llm_model_name
+                )
+            results.append(
+                MetricResult(
+                    metric_id="".join(item["high_level_metric"].split()),
+                    resource_id=result.session_id,
+                    provider="StatefulEvals",
+                    value=item["score"],
+                    reasoning=item.get("reasoning"),
+                    metadata=metadata,
+                )
+            )
+        if skipped:
+            logger.info("Skipping %d trajectory metrics without a score for session %s", skipped, result.session_id)
+        return results
+
     def _push_metrics_to_kg(self, kg, result) -> None:
         """Write step metrics, trajectory context and the session score to the KG."""
         from oxp.client.dal import write_transition_context
@@ -202,6 +270,14 @@ class StatefulEvalWorker(BaseWorker):
             for transition_id, context in (getattr(result, "transition_contexts", None) or {}).items():
                 if not write_transition_context(kg, result.session_id, transition_id, context):
                     logger.error("Could not write context for transition %s", transition_id)
+
+        trajectory_metrics = self._trajectory_metric_results(result)
+        if trajectory_metrics:
+            ok = provider.save_metrics(trajectory_metrics)
+            if ok:
+                logger.info("Wrote %d trajectory metrics for session %s", len(trajectory_metrics), result.session_id)
+            else:
+                logger.error("Could not write all trajectory metrics for session %s", result.session_id)
 
         if result.trajectory_score is not None:
             ok = provider.save_metrics(

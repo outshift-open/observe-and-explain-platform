@@ -2,6 +2,8 @@
 #  SPDX-License-Identifier: Apache-2.0
 from types import SimpleNamespace
 
+from pathlib import Path
+
 import pytest
 from worker_base.queue_message import BaseQueueMessage
 
@@ -427,3 +429,136 @@ def test_build_processor_never_fetches_data(rabbit_url, mocker):
     worker = _make_worker(rabbit_url)
     assert worker._build_processor() is constructor.return_value
     worker._get_kg.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Opt-in trajectory metrics
+# ---------------------------------------------------------------------------
+
+
+def _config(tmp_path, text):
+    path = tmp_path / "stateful_eval_config.yaml"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_trajectory_metrics_are_off_without_a_config_file(rabbit_url):
+    assert _make_worker(rabbit_url).trajectory_metrics is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "trajectory_metrics:\n",
+        "trajectory_metrics: []\n",
+        "trajectory_metrics:\n  # - PolicySafety\n",
+    ],
+    ids=["empty file", "no entries", "empty list", "all commented out"],
+)
+def test_trajectory_metrics_are_opt_in(rabbit_url, tmp_path, text):
+    worker = _make_worker(rabbit_url, config_path=_config(tmp_path, text))
+
+    assert worker.trajectory_metrics is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("trajectory_metrics: [all]\n", ["all"]),
+        ("trajectory_metrics: all\n", ["all"]),
+        (
+            "trajectory_metrics:\n  - PolicySafety\n  - Task Completion\n  - groundedness\n",
+            ["PolicySafety", "Task Completion", "groundedness"],
+        ),
+    ],
+)
+def test_trajectory_metrics_are_read_from_the_config_file(rabbit_url, tmp_path, text, expected):
+    worker = _make_worker(rabbit_url, config_path=_config(tmp_path, text))
+
+    assert worker.trajectory_metrics == expected
+
+
+def test_an_unknown_trajectory_metric_stops_the_worker_at_startup(rabbit_url, tmp_path):
+    path = _config(tmp_path, "trajectory_metrics:\n  - PolicySafety\n  - NoSuchMetric\n")
+
+    with pytest.raises(ValueError, match="NoSuchMetric"):
+        _make_worker(rabbit_url, config_path=path)
+
+
+def test_an_unknown_setting_stops_the_worker_at_startup(rabbit_url, tmp_path):
+    path = _config(tmp_path, "trajectory_metric:\n  - PolicySafety\n")
+
+    with pytest.raises(ValueError, match="trajectory_metric"):
+        _make_worker(rabbit_url, config_path=path)
+
+
+def test_a_missing_config_file_stops_the_worker_at_startup(rabbit_url, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        _make_worker(rabbit_url, config_path=str(tmp_path / "missing.yaml"))
+
+
+def test_the_configured_trajectory_metrics_reach_the_processor(rabbit_url, tmp_path, mocker):
+    constructor = mocker.patch("stateful_evals_be.TemporalMetricsProcessor")
+    worker = _make_worker(rabbit_url, config_path=_config(tmp_path, "trajectory_metrics: [all]\n"))
+
+    worker._build_processor()
+
+    assert len(constructor.call_args.kwargs["options"].trajectory_metrics) == 13
+
+
+def test_the_example_config_runs_no_trajectory_metric(rabbit_url):
+    example = Path(__file__).resolve().parents[3] / "stateful_eval_config.yaml"
+
+    assert _make_worker(rabbit_url, config_path=str(example)).trajectory_metrics is None
+
+
+def _trajectory_metric(name, score, reasoning="why", total_tokens=0):
+    usage = {
+        "prompt_tokens": total_tokens * 4 // 5,
+        "completion_tokens": total_tokens // 5,
+        "total_tokens": total_tokens,
+    }
+    return {
+        "high_level_metric": name,
+        "score": score,
+        "status": "pass" if score else "fail",
+        "reasoning": reasoning,
+        "metadata": {"usage": usage},
+    }
+
+
+def test_trajectory_metrics_are_written_to_the_session(rabbit_url, mocker):
+    result = make_session_result(
+        trajectory_metrics=[
+            _trajectory_metric("Policy Safety", 1, total_tokens=1000),
+            _trajectory_metric("Groundedness", 0, reasoning="unsupported claim"),
+            {"high_level_metric": "Task Completion", "score": None, "status": "not_applicable", "reasoning": "n/a"},
+        ]
+    )
+    worker = _make_worker(rabbit_url)
+    save = mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    mocker.patch("oxp.client.dal.write_transition_context", return_value=True)
+
+    worker._push_metrics_to_kg(mocker.Mock(), result)
+
+    first_call = save.call_args_list[0].args[0]
+    assert [(m.metric_id, m.resource_id, m.provider, m.value, m.reasoning) for m in first_call] == [
+        ("PolicySafety", "session-xyz", "StatefulEvals", 1, "why"),
+        ("Groundedness", "session-xyz", "StatefulEvals", 0, "unsupported claim"),
+    ]
+    assert first_call[0].metadata["evaluation_model"] == "gpt-4o"
+    assert first_call[0].metadata["evaluation_total_tokens"] == 1000
+    assert first_call[0].metadata["evaluation_prompt_tokens"] == 800
+    assert first_call[0].metadata["evaluation_cost_usd"] > 0
+    assert first_call[1].metadata == {"evaluation_model": "gpt-4o"}
+
+
+def test_nothing_is_written_for_trajectory_metrics_when_none_ran(rabbit_url, mocker):
+    worker = _make_worker(rabbit_url)
+    save = mocker.patch("oxp.providers.OXPMetricsProvider.save_metrics", return_value=True)
+    mocker.patch("oxp.client.dal.write_transition_context", return_value=True)
+
+    worker._push_metrics_to_kg(mocker.Mock(), make_session_result())
+
+    assert [m.metric_id for call in save.call_args_list for m in call.args[0]] == ["TrajectoryScore"]

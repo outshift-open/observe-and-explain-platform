@@ -149,3 +149,10 @@ def test_all_selector_returns_every_registered_metric() -> None:
     assert all(
         result.metadata["affects_trajectory_score"] is False for result in results
     )
+
+
+@pytest.mark.parametrize(
+    "selector", ["policy_safety", "Policy Safety", "PolicySafety", "policysafety"]
+)
+def test_a_metric_is_selected_by_code_name_or_camel_case(selector):
+    assert resolve_trajectory_metric_codes([selector]) == ("policy_safety",)
