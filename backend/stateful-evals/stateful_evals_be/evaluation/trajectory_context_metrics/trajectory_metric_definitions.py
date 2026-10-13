@@ -134,11 +134,10 @@ no available component can perform the work. That is explicitly outside this
 metric even if the missing capability later harms the answer.
 
 Treat a constraint that qualifies the requested item as a property of that
-item, not as newly assigned verification work. For example, "check prices for
-accessible attractions" assigns pricing; it assigns accessibility verification
-only when the task also asks for accessibility to be found, verified,
-confirmed, or assessed. Missing concrete item names in such a handoff belongs
-to Handoff Quality.
+item, not as newly assigned verification work. A request to act on an item
+with a supplied property does not assign independent verification of that
+property unless the request asks for it. Missing identifiers needed to act on
+that item belong to Handoff Quality.
 """
 
     def __init__(
@@ -224,6 +223,11 @@ class InstructionFollowingMetric(TrajectoryMetric):
     rubric = """\
 Evaluate whether components acted on the relevant instructions and constraints
 that were available to them.
+
+Only instructions in the recorded user request, handoff, or applicable agent
+contract are binding on an agent. The evaluator's rubric, citation format, and
+output schema are not agent instructions unless the trajectory itself assigns
+those requirements.
 
 Pass when an agent follows its assigned scope, required procedure, and supplied
 constraints, or explicitly reports why an instruction cannot be completed.
@@ -693,12 +697,18 @@ class TaskCompletionMetric(TrajectoryMetric):
 Evaluate whether the final response materially addresses every requested
 deliverable and required decision.
 
-Pass when requested outputs are supplied, or when a justified limitation is
-made explicit and the user receives the best valid next step allowed by the
-available evidence and policy. Fail when a material requested deliverable is
-missing, abandoned, or falsely declared complete. Use intent status as a signal,
-but verify it against the user request and final answer rather than treating
-every extracted unresolved tool intent as fatal.
+Pass when requested outputs are supplied. A blocked outcome passes only when
+the record establishes that a necessary prerequisite is unavailable, no
+feasible authorized recovery remains, all independently achievable deliverables
+are supplied, and the final response identifies the blocker and gives the best
+valid next step allowed by the evidence and policy. A transparent partial
+report alone is not completion. An incomplete capability description or one
+failed attempt does not establish that recovery is impossible.
+
+Fail when a material requested deliverable is missing, abandoned, or falsely
+declared complete without meeting that blocked-outcome exception. Use intent
+status as a signal, but verify it against the user request and final answer
+rather than treating every extracted unresolved tool intent as fatal.
 
 Do not judge factual support, routing quality, semantic consistency, or whether
 hard constraints were satisfied. A complete answer can still be wrong; a safe

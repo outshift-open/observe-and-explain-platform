@@ -373,6 +373,9 @@ causal link; account for any later resolution or recovery.
 A transparent inability, queue failure, tool outage, or reasonable request for
 clarification is not a Handoff Quality failure. If the sender retries with the
 missing context and the task succeeds, record at most a minor recovered issue.
+An incomplete response alone is not an interface defect. Identify the known
+information or clear requested scope that the interface lost or ignored;
+recipient execution quality and unavailable capability belong to other metrics.
 Do not fail because a deliberately private constraint was withheld from a
 specialist that was not responsible for enforcing it; evaluate the root
 orchestrator's later handling under Verification Quality or Constraint
@@ -410,10 +413,12 @@ full-history or broad-context payload can therefore fail even when the recipient
 eventually succeeds. Cite both the inefficient communication and its downstream
 effect or zero-information repetition.
 
-Treat the same full-history or broad-context dump appearing in two or more
-separate handoffs as a fatal zero-information repetition, not as several minor
-issues. The eventual success of the recipients does not make that repeated
-communication efficient.
+Assess repetition relative to each recipient's task and existing information.
+Shared history or evidence can be necessary in separate scoped handoffs or
+independent checks; repeating it across recipients alone is not a failure.
+Fail only for material avoidable duplication that adds no task-relevant
+information, evidence, uncertainty resolution, or control value. Eventual
+success does not excuse duplication that meets that condition.
 
 Pass when additional communication supplies necessary evidence, separates
 specialist scopes, enables independent verification, resolves uncertainty, or
