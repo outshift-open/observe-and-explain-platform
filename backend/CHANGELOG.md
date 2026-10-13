@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `aboutMetric` links from consistency, anomaly and normal-behaviour reports now point at the `Metric`
   definition(s) of the metric name (they never matched anything before).
 - Requires `oxp-ontology` with `MetricResult.timestamp`.
+- The LLM price table behind the evaluation cost is refreshed from LiteLLM on every `mce-worker` and
+  `stateful-eval-worker` image build (in the Dockerfile, so local builds too) and at run time, falling back to
+  the table packaged in the image. See `MODEL_PRICES_REFRESH`, `MODEL_PRICES_URL` and `MODEL_PRICES_TTL_SECONDS`.
 
 ## [1.0.0] - 2026-09-30
 

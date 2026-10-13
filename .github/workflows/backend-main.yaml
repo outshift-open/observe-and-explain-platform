@@ -48,7 +48,5 @@ jobs:
       bake-targets: ${{ matrix.target }}
       image-tag: ${{ needs.prep.outputs.image-tag }}
       image-repo: ghcr.io/outshift-open/oxp-${{ matrix.target }}
-      # only these images price LLM calls (stateful-evals and the MCE)
-      refresh-model-prices: ${{ matrix.target == 'mce-worker' || matrix.target == 'stateful-eval-worker' }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

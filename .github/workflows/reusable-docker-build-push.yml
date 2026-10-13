@@ -25,11 +25,6 @@ on:
         type: string
         description: "Image repo to use."
         default: "ghcr.io/outshift-open/oxp"
-      refresh-model-prices:
-        required: false
-        type: boolean
-        description: "Pull the latest LLM price table from LiteLLM into the build context (not committed)."
-        default: false
     secrets:
       github-token:
         description: "github token"
@@ -45,23 +40,6 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
-
-      # The images are built from the tagged commit, but should price LLM calls with
-      # the current LiteLLM table. This refreshes the files in the build context
-      # only; nothing is committed. If LiteLLM is unreachable or its file fails
-      # validation, the build goes on with the table committed in the repo.
-      - name: Refresh LLM model prices from LiteLLM
-        if: ${{ inputs.refresh-model-prices }}
-        run: |
-          if python3 .github/scripts/update_model_prices.py --summary "$RUNNER_TEMP/price-summary.md"; then
-            {
-              echo "### LLM model prices (refreshed from LiteLLM for this build)"
-              cat "$RUNNER_TEMP/price-summary.md"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::Could not refresh the LLM price table from LiteLLM; building with the committed copy."
-            git checkout -- backend/stateful-evals/stateful_evals_be/data backend/mce/mce-core/src/mce/engine/data || true
-          fi
 
       - name: Login to GitHub Container Registry
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}

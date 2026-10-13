@@ -186,11 +186,16 @@ Every LLM call a metric makes is counted. The result's `metadata` carries `evalu
 `evaluation_prompt_tokens`, `evaluation_completion_tokens`, `evaluation_total_tokens` and
 `evaluation_cost_usd`, summed over all the metric's calls (including the per-tool-call judge calls of
 `ToolUtilizationAccuracy`). Metrics that make no LLM call carry none of them in the result. The cost is an
-estimate from the token counts and the list price in `mce/engine/data/model_prices.json` (a model
-without a price is priced like `gpt-4o`). That table is a trimmed copy of LiteLLM's
-`model_prices_and_context_window.json`, refreshed from upstream in two ways: every `mce-worker` and `stateful-eval-worker` image build
-downloads the latest table into its build context (a LiteLLM outage falls back to the committed copy),
-and the *Update Model Prices* workflow, run on demand, opens a pull request to sync the committed copy.
+estimate from the token counts and LiteLLM's list price (a model without a price is priced like `gpt-4o`).
+The table is kept current in three layers. The copy committed at `mce/engine/data/model_prices.json` is
+a trimmed form of LiteLLM's `model_prices_and_context_window.json`. Every `mce-worker` and
+`stateful-eval-worker` image build downloads the latest table into the installed package, always; if LiteLLM
+cannot be reached or its file is invalid, the build keeps the committed copy. At run time the table is refreshed
+again from LiteLLM at the first price lookup and every `MODEL_PRICES_TTL_SECONDS` after that; when that
+fails, the table already loaded (the one packaged in the image, or the last fetched) is used and the fetch is
+retried an hour later. `MODEL_PRICES_REFRESH=false` turns the run-time refresh off, for clusters without
+internet access, and `MODEL_PRICES_URL` points it at another copy of the file. To bring the committed
+copies up to date by hand, run `python backend/scripts/update_model_prices.py`.
 
 The API stores metrics natively as the ontology's `Metric` (the definition, one per metric name and provider) and `MetricResult` (one observation), linked by `ofMetricType`; a result `measures` the session or the call (by span id) it was computed for. Each write is validated against
 the model generated from the ontology (`oxp_ontology.models.nodes.MetricResult`) and a result that does

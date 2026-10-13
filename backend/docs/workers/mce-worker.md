@@ -72,6 +72,9 @@ flags / environment variables:
 | `OPENAI_API_KEY` | `--llm-api-key` | LLM API key, for LLM-as-judge metrics |
 | `LLM_MODEL_NAME` | `--llm-model-name` | LLM model identifier |
 | `LLM_BASE_MODEL_URL_MCE` | `--llm-base-model-url` | LLM base URL (optional) |
+| `MODEL_PRICES_REFRESH` | _(env only)_ | `false`/`0`/`no` stops the run-time refresh of the LLM price table from LiteLLM and uses the table packaged in the image. Default `true` |
+| `MODEL_PRICES_URL` | _(env only)_ | Where to fetch the price table from. Default LiteLLM's published `model_prices_and_context_window.json` |
+| `MODEL_PRICES_TTL_SECONDS` | _(env only)_ | How long a fetched price table is used before the next fetch. Default `86400` |
 
 Also supported: the common worker flags `--run-once`, `--input`, `--output`, `--test`, `--debug`,
 and `--max-sessions`, shared by all [workers](index.md).

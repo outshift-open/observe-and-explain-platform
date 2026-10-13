@@ -129,6 +129,9 @@ Flags override environment variables, except `MAX_INFLIGHT_MESSAGES`, which over
 | `PUSH_METRICS` | _(env only)_ | `true` | `false`/`0`/`no` skips all Neo4j writes (the trajectory is still read) |
 | `PUSH_TRANSITION_CONTEXT` | _(env only)_ | `true` | `false`/`0`/`no` skips writing `TrajectoryContext` nodes |
 | `NEO4J_HOST` / `NEO4J_PORT` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | _(env only)_ | `localhost` / `7687` / `neo4j` / empty / `neo4j` | Knowledge graph, read and written; `NEO4J_AUTH=user/password` also sets credentials |
+| `MODEL_PRICES_REFRESH` | _(env only)_ | `true` | `false`/`0`/`no` stops the run-time refresh of the LLM price table from LiteLLM and uses the table packaged in the image |
+| `MODEL_PRICES_URL` | _(env only)_ | LiteLLM's published file | Where to fetch the price table from |
+| `MODEL_PRICES_TTL_SECONDS` | _(env only)_ | `86400` | How long a fetched price table is used before the next fetch; a failed fetch is retried after an hour and the table already loaded keeps being used |
 
 The connector is `oxp.dependencies.get_neo4j_connector()`, the one `BaseWorker` creates at startup
 and every other worker uses, so this worker does not close it. It reads `NEO4J_URI` first, else

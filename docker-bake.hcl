@@ -55,6 +55,10 @@ target "mce-worker" {
   context    = "backend"
   dockerfile = "workers/mce-worker/deploy/docker/Dockerfile"
   platforms  = ["linux/amd64"]
+  # Changes on every build, so the Dockerfile's LLM price refresh is never cached.
+  args = {
+    MODEL_PRICES_REFRESHED_AT = timestamp()
+  }
 }
 
 target "embedding-worker" {
@@ -118,4 +122,8 @@ target "stateful-eval-worker" {
   context    = "backend"
   dockerfile = "workers/stateful-eval-worker/deploy/docker/Dockerfile"
   platforms  = ["linux/amd64"]
+  # Changes on every build, so the Dockerfile's LLM price refresh is never cached.
+  args = {
+    MODEL_PRICES_REFRESHED_AT = timestamp()
+  }
 }
