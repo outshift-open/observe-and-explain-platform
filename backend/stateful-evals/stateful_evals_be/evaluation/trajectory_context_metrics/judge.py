@@ -172,7 +172,9 @@ The source_texts table holds exact source bodies; source_text_ref points into it
 source_text_provenance lists their enclosing artifact IDs and original paths.
 Text IDs may be cited as sources; preserve all listed authorship/time context.
 
-Return strict JSON only. No markdown.
+Return only a verdict object matching the supplied output_schema. Fill its
+fields with your judgment. Do not return the input wrapper, rubric,
+trajectory_context, or output_schema itself. Return strict JSON. No markdown.
 """
 
     _OUTPUT_SCHEMA = {
@@ -328,7 +330,7 @@ Return strict JSON only. No markdown.
         for attempt in range(self.max_attempts):
             attempt_messages = [dict(message) for message in messages]
             if attempt:
-                if validation_errors:
+                if rejected_response:
                     attempt_messages.append({"role": "assistant", "content": rejected_response})
                 attempt_messages.append(
                     {
@@ -336,7 +338,8 @@ Return strict JSON only. No markdown.
                         "content": (
                             "Correct the previous response's invalid verdict fields: "
                             + "; ".join(validation_errors)
-                            + ". Return the full response. Preserve supported findings and use exact "
+                            + ". Return the complete verdict object matching output_schema. "
+                            "Do not echo the input wrapper or schema. Preserve supported findings and use exact "
                             "provided artifact IDs. Use unknown/not_applicable for unsupported causal roles. "
                             "Do not invent evidence or change a verdict merely to satisfy the schema."
                         ) if validation_errors else (
@@ -344,7 +347,9 @@ Return strict JSON only. No markdown.
                             "JSON. Retry with strict compact JSON only. Keep overall "
                             "reasoning under 60 words, return at most one fatal and "
                             "one minor failure per metric, and cite artifact IDs "
-                            "instead of copying evidence excerpts."
+                            "instead of copying evidence excerpts. Return only the "
+                            "verdict described by output_schema; do not echo the "
+                            "request, rubric, or trajectory_context."
                         ),
                     }
                 )
@@ -374,6 +379,7 @@ Return strict JSON only. No markdown.
                 parsed = parse_judge_json(content)
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = exc
+                rejected_response = content
                 validation_errors = []
                 continue
             if validate_response is not None:

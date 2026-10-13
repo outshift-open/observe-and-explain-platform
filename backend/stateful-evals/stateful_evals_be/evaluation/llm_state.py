@@ -191,8 +191,12 @@ class LLMState:
                 seen.add(row["id"])
                 self._record(candidate, name, row, span_index)
         operation = delta.get("operation")
-        if not isinstance(operation, dict) or operation.get("operation_type") not in {"llm", "tool", "coordination"} or operation.get("actor_scope") not in {"root", "peer", "unknown"}:
-            raise ValueError("operation requires operation_type and actor_scope")
+        if not isinstance(operation, dict):
+            raise ValueError("operation must be an object")
+        if operation.get("operation_type") not in {"llm", "tool", "coordination"}:
+            raise ValueError(f"operation_type must be llm|tool|coordination; got {operation.get('operation_type')!r}")
+        if operation.get("actor_scope") not in {"root", "peer", "unknown"}:
+            raise ValueError(f"actor_scope must be root|peer|unknown; got {operation.get('actor_scope')!r}")
         if not isinstance(operation.get("entity_name"), str) or type(operation.get("is_delegation")) is not bool:
             raise ValueError("operation requires entity_name and boolean is_delegation")
         operation = {key: ([] if key.endswith(("_ids", "_refs")) else "") if value is None else value for key, value in operation.items() if key not in _AUTOMATIC | {"artifact_id"}}

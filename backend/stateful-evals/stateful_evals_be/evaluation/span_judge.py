@@ -160,6 +160,7 @@ class SpanJudge:
             )}, {"role": "user", "content": json.dumps(request, ensure_ascii=False, default=str)}]
             error = None
             for attempt in range(self.options.span_judge_max_attempts):
+                text = None
                 try:
                     response = await self._query(
                         messages,
@@ -184,9 +185,13 @@ class SpanJudge:
                     return {"result": result, "usage": usage, "calls": attempt + 1}
                 except (ValueError, TypeError, KeyError, IndexError) as exc:
                     error = exc
+                    if text:
+                        messages.append({"role": "assistant", "content": text})
                     messages.append({"role": "user", "content": (
                         f"Previous response rejected: {exc}. State has not changed. "
-                        "Return the complete corrected JSON with exact catalog IDs."
+                        "Return the complete corrected JSON with exact catalog IDs. "
+                        "Preserve valid state_delta records and fields; declare any new "
+                        "referenced record in the same delta or reuse an available ID."
                     )})
                 except Exception as exc:
                     raise SpanJudgeError(str(exc), usage=usage, calls=attempt + 1) from exc
