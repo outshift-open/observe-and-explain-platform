@@ -8,7 +8,6 @@ import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
-from stateful_evals_be.evaluation.json_response import loads_json_response
 from stateful_evals_be.evaluation.span_context import current_agent_instruction_records
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.models.requests import TemporalMetricOptions
@@ -41,7 +40,9 @@ Assigning or proposing work does not establish that it was executed. Quoted or
 relayed material is not automatically the current agent's own assertion.
 Accumulated evaluator state is not the acting agent's memory. Establish access
 from its recorded call-time input, contract, or supported communication. An
-operation's output is available only from its observed_at time. Do not credit a
+agent's recorded contract does not establish that other agents read it. Do not
+assume the root knows private peer instructions without recorded communication.
+An operation's output is available only from its observed_at time. Do not credit a
 decision with another operation's result returned after the decision's call
 began. Missing completion or status does not establish a successful operation
 or a returned result.
@@ -122,7 +123,7 @@ for absent updates, actual source IDs and supported values for real records.
 
 
 def _metric_state_view(prior: dict[str, Any], metric_name: str) -> dict[str, Any]:
-    """Project existing ledgers without inferring intent, roles or behavior."""
+    """Keep metric ledgers and their links; index only unrelated source content."""
     ledgers = {
         "IntentRecognition": ("intents", "agents", "work_units"),
         "Groundedness": ("intents", "agents", "claims", "evidence"),
@@ -130,53 +131,73 @@ def _metric_state_view(prior: dict[str, Any], metric_name: str) -> dict[str, Any
     }.get(metric_name.split(".")[-1])
     if ledgers is None:
         return prior
-    records = {name: rows for name, rows in prior["records"].items() if name in ledgers}
-    # Explicit contract relationships retain instruction sources for every judge.
-    contracts = {ref for agent in records.get("agents", []) for ref in agent.get("contract_ids", [])}
-    for name, rows in prior["records"].items():
-        if name not in records and any(row["id"] in contracts for row in rows):
-            records[name] = [row for row in rows if row["id"] in contracts]
-    index_fields = {
-        "id", "artifact_id", "name", "fact_type", "source_name", "claim_type",
-        "entity_name", "operation_type", "event_type", "agent_id", "actor_scope",
-        "owner_agent_ids", "allocator_agent_id", "recipient_agent_ids",
-        "related_intent_ids", "parent_intent_ids", "intent_id", "work_id",
-        "evidence_refs", "revision_of_claim_id", "content_ref", "status", "outcome",
-        "span_index", "first_seen", "last_seen", "request_span_index",
-        "response_span_index", "started_at", "observed_at", "observation_complete",
-        "observation_status", "is_delegation", "delegation_id", "span_id", "parent_span_id",
-    }
+    sources = prior["selected_source_texts"]
+    selected = {}
+    all_records = {row["id"]: row for rows in prior["records"].values() for row in rows}
+    retained = set()
+
+    def retain(value):
+        if isinstance(value, str):
+            if value in sources:
+                selected[value] = sources[value]
+            if value in all_records and value not in retained:
+                retained.add(value)
+                retain(all_records[value])
+        elif isinstance(value, dict):
+            for item in value.values():
+                retain(item)
+        elif isinstance(value, list):
+            for item in value:
+                retain(item)
+
+    for name in ledgers:
+        retain(prior["records"].get(name, []))
+    retain(prior["metadata"])
 
     def index(row):
-        return {key: value for key, value in row.items()
-                if key in index_fields and value not in (None, "", [], {})}
+        # Preserve arbitrary navigation fields instead of a second record schema.
+        # Omitted selectors remain explicit provenance, not unresolved text refs.
+        omitted = []
 
-    view = {
-        "records": records,
+        def project(value):
+            if isinstance(value, dict):
+                result = {}
+                for key, item in value.items():
+                    if item in (None, "", [], {}):
+                        continue
+                    if isinstance(item, str) and item in sources and item not in selected:
+                        omitted.append(item)
+                    else:
+                        result[key] = project(item)
+                return result
+            if isinstance(value, list):
+                result = []
+                for item in value:
+                    if isinstance(item, str) and item in sources and item not in selected:
+                        omitted.append(item)
+                    else:
+                        result.append(project(item))
+                return result
+            return value
+
+        result = project(row)
+        if omitted:
+            result["omitted_source_ids"] = list(dict.fromkeys([
+                *result.get("omitted_source_ids", []), *omitted,
+            ]))
+        return result
+
+    return {
+        "records": {name: [row for row in rows if row["id"] in retained]
+                    for name, rows in prior["records"].items()},
         "new_record_ids": prior["new_record_ids"],
-        "artifact_index": {name: [index(row) for row in rows if row not in records.get(name, [])]
+        "artifact_index": {name: [index(row) for row in rows if row["id"] not in retained]
                            for name, rows in prior["records"].items()},
         "operations": [index(row) for row in prior["operations"]],
         "metadata": prior["metadata"],
         "context_view": metric_name,
+        "selected_source_texts": selected,
     }
-    sources = prior["selected_source_texts"]
-    selected = {}
-
-    def retain_sources(value):
-        if isinstance(value, str) and value in sources:
-            selected[value] = sources[value]
-        elif isinstance(value, dict):
-            for item in value.values():
-                retain_sources(item)
-        elif isinstance(value, list):
-            for item in value:
-                retain_sources(item)
-
-    retain_sources(records)
-    retain_sources(view["metadata"])
-    view["selected_source_texts"] = selected
-    return view
 
 
 class SpanJudge:
@@ -210,39 +231,15 @@ class SpanJudge:
                                          "reasoning": "one concise evidence-grounded sentence"}}
             if extracting:
                 request["available_current_sources"] = state.source_catalog(span_index)
-                request["observed_instruction_sources"] = state.instruction_sources(span_index)
-                request["observed_agent_id"] = SpanNormalizer.resolve_agent_id(raw_span)
+                request["observed_agent_id"] = SpanNormalizer.explicit_agent_id(raw_span)
                 request["state_update_guidance"] = state.schema()
-                request["output_schema"]["state_delta"] = {
-                    "evidence": [{"id": "fact:N", "source_ref": "catalog source_id",
-                                  "fact_type": "policy_rule|tool_output|agent_response|other",
-                                  "agent_id": "observed recipient/author ID", "source_name": "source name"}],
-                    "claims": [{"id": "claim:N", "source_ref": "catalog source_id",
-                                "claim_type": "model-assigned type", "entity_name": "author",
-                                "agent_id": "declared agent ID", "related_intent_ids": []}],
-                    "intents": [{"id": "intent:N", "source_ref": "catalog source_id",
-                                 "name": "short task name", "source": "user or peer_agent",
-                                 "status": "in_progress", "owner_agent_ids": [], "parent_intent_ids": []}],
-                    "agents": [{"id": "stable agent ID", "source_ref": "catalog source_id",
-                                "contract_ids": ["existing or same-delta policy_rule fact ID"]}],
-                    "work_units": [{"id": "work:N", "source_ref": "catalog source_id",
-                                    "allocator_agent_id": "declared agent ID", "recipient_agent_ids": [],
-                                    "intent_id": "existing or same-delta intent ID"}],
-                    "coordination_events": [{"id": "coordination:N", "source_ref": "catalog source_id",
-                                             "event_type": "observed event", "operation_name": "operation"}],
-                    "operation": {"operation_type": "llm|tool|coordination", "entity_name": "operation name",
-                                  "agent_id": "observed_agent_id or null if unknown",
-                                  "actor_scope": "root|peer|unknown", "is_delegation": False},
-                    "metadata": {"root_agent_id": "root agent ID or null if not known",
-                                 "policy_text_ref": "root instruction source ID or null if unchanged",
-                                 "root_request_ref": "external request source ID or null if unchanged",
-                                 "final_answer_ref": "root response source ID or null if unchanged"},
-                }
+                request["output_schema"]["state_delta"] = "object following state_update_guidance"
             messages = [{"role": "system", "content": (
                 _SPAN_STATE_DELTA_SYSTEM_PROMPT.partition("Return strict JSON only")[0]
                 + _FOCUSED_TRANSITION_INSTRUCTIONS
                 + (_EXTRACTION_INSTRUCTIONS if extracting else "")
-                + "Artifact indexes provide identity and provenance, not omitted source content. "
+                + "Artifact indexes preserve navigation fields; omitted_source_ids are provenance "
+                "markers whose content is unavailable in this view. "
                 "Use records and selected_source_texts for supporting content; an indexed claim "
                 "or unfinished operation is not verified evidence. "
                 + "Return one strict JSON object for only the requested metric using output_schema."
@@ -262,11 +259,9 @@ class SpanJudge:
                     text = (response.choices[0].message.content or "").strip()
                     if text.startswith("```"):
                         text = text.split("\n", 1)[1].removesuffix("```").strip()
-                    result = loads_json_response(text, allow_eof_close=getattr(response.choices[0], "finish_reason", None) == "stop")
+                    result = json.loads(text)
                     if isinstance(result, dict) and set(result) == {name} and isinstance(result[name], dict):
-                        result = result[name]
-                    if isinstance(result, dict):
-                        result.setdefault("metric_name", name)
+                        result = {"metric_name": name, **result[name]}
                     if not isinstance(result, dict) or result.get("metric_name") != name:
                         raise ValueError(f"Return metric_name={name!r}")
                     if type(result.get("score")) not in (int, float) or result["score"] not in (0, 1):

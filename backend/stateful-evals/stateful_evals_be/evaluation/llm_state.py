@@ -28,6 +28,7 @@ _METADATA_REFS = {
     "policy_text_ref": "policy_text", "root_request_ref": "root_request",
     "final_answer_ref": "latest_root_answer", "tool_definitions_ref": "tool_definitions",
 }
+_METADATA_FIELDS = set(_METADATA_REFS) | {"source_ref", "root_agent_id", "delivery_span_index", "termination_span_index"}
 _ENVELOPE = {"span_id": "SpanId", "parent_span_id": "ParentSpanId", "trace_id": "TraceId"}
 _AUTOMATIC = set(_ENVELOPE) | set(_ENVELOPE.values()) | {"span_index", "first_seen", "last_seen", "started_at_ns", "duration_ns", "request_span_index", "started_at", "ended_at", "Timestamp", "Duration", "observed_at", "observation_complete", "observation_status"}
 
@@ -42,7 +43,7 @@ class LLMState:
     def __init__(self, raw_spans: list[dict[str, Any]]) -> None:
         self._raw_spans = raw_spans
         self._catalogs: dict[int, list[dict[str, Any]]] = {}
-        self._sources: dict[str, tuple[int, list[str | int], Any]] = {}
+        self._sources: dict[str, tuple[int, list[str | int], Any, dict[str, Any]]] = {}
         self.context = TrajectoryContext(policy_text="", artifact_organization="llm")
         self.context.source_spans = []
         self.context.artifact_sources = {}
@@ -85,12 +86,14 @@ class LLMState:
                 "An unfinished input-only observation cannot establish "
                 "a returned output or successful tool completion. Select operation input_ref "
                 "only for current request/tool arguments, never a whole replayed conversation. "
-                "Return metadata on every update; null refs preserve prior values. "
-                "Capture observed_instruction_sources as fact_type=policy_rule with agent_id, "
-                "and link their fact IDs in that agent's contract_ids. Reuse an existing identical "
-                "contract for the same agent instead of duplicating it. When the observed agent "
-                "is the root, select its system instructions as policy_text_ref. "
-                "Use tool_output for direct data results, agent_response for relayed peer replies. "
+                "Metadata fields are optional; omitted or null refs preserve prior values. "
+                "Catalog direction, message_role, and agent_id annotations describe known source "
+                "structure and apply to structural children unless overridden; null means unknown, "
+                "and unfamiliar formats remain available. Select observed instructions "
+                "as policy_rule when relevant, and link their fact IDs in the applicable agent's "
+                "contract_ids. Reuse an existing identical contract for the same agent. "
+                "Use evidence for direct data observations and claims for complete peer responses, "
+                "including relayed replies. "
                 "Select final_answer_ref only for a root agent's "
                 "actual user-facing response, and update it when a later root answer is recorded. "
                 "All categories, roles, owners, statuses, and links are model decisions."
@@ -104,7 +107,7 @@ class LLMState:
                 "coordination_events": "id=coordination:N; source_ref; event_type, operation_name; optional actor_agent_id, sender_agent_ids, recipient_agent_ids, related_intent_ids, input_artifact_ids, output_artifact_ids, status",
             },
             "operation": "operation_type=llm|tool|coordination, entity_name, actor_scope=root|peer|unknown, is_delegation; optional agent_id, content_ref, input_ref, evidence_refs, work_id, delegation_id, delegator_agent_id, recipient_agent_ids, outcome, coordination_event_ids",
-            "metadata": "required root_agent_id (null if not known), policy_text_ref, root_request_ref, final_answer_ref (source IDs or null if unchanged); optional tool_definitions_ref, delivery_span_index, termination_span_index",
+            "metadata": "optional root_agent_id (agent ID), policy_text_ref, root_request_ref, final_answer_ref, tool_definitions_ref (source IDs), delivery_span_index, termination_span_index; null preserves prior values",
         }
 
     def source_catalog(self, span_index: int) -> list[dict[str, Any]]:
@@ -115,12 +118,18 @@ class LLMState:
             raise ValueError("Future source span is unavailable")
         if span_index not in self._catalogs:
             catalog = []
+            span = self._raw_spans[span_index]
+            chat_payload = isinstance(span.get("SpanAttributes", {}), dict) and isinstance(span.get("SpanName", ""), str) and SpanNormalizer.entity_type(span) == "llm"
 
-            def visit(value, path):
+            def visit(value, path, parent=None, inherited=None):
                 source_id = f"source:{span_index}:{len(catalog)}"
-                self._sources[source_id] = (span_index, path, value)
+                annotation = SpanNormalizer.source_annotation(value, path, parent, inherited, chat_payload=chat_payload)
+                self._sources[source_id] = (span_index, path, value, annotation)
                 preview = f"{len(value)} fields" if isinstance(value, dict) else f"{len(value)} items" if isinstance(value, list) else _text(value)[:80]
-                catalog.append({"source_id": source_id, "location": path, "preview": preview})
+                inherited = inherited or {}
+                changes = {key: annotation.get(key) for key in sorted(annotation.keys() | inherited.keys())
+                           if key not in inherited or annotation.get(key) != inherited[key]}
+                catalog.append({"source_id": source_id, "location": path, "preview": preview, **changes})
                 if isinstance(value, str):
                     try:
                         value = json.loads(value)
@@ -128,72 +137,25 @@ class LLMState:
                         return
                 if isinstance(value, dict):
                     for key in sorted(value):
-                        visit(value[key], [*path, key])
+                        visit(value[key], [*path, key], value, annotation)
                 elif isinstance(value, list):
                     for index, child in enumerate(value):
-                        visit(child, [*path, index])
+                        visit(child, [*path, index], value, annotation)
 
             visit(self._raw_spans[span_index], [])
             self._catalogs[span_index] = catalog
         return copy.deepcopy(self._catalogs[span_index])
-
-    def instruction_sources(self, span_index):
-        """Expose structured message roles for coverage checks, not text interpretation."""
-        catalog = self.source_catalog(span_index)
-        paths = {tuple(row["location"]): row["source_id"] for row in catalog}
-        owner = SpanNormalizer.resolve_agent_id(self._raw_spans[span_index]) or ""
-        result, seen = [], set()
-        input_paths = {(), ("input",), ("input_payload",),
-                       ("SpanAttributes", "ioa_observe.entity.input"),
-                       ("SpanAttributes", "traceloop.entity.input")}
-        for row in catalog:
-            path = row["location"]
-            if not path or not isinstance(path[-1], str):
-                continue
-            key = path[-1]
-            role_path = None
-            if key.startswith("gen_ai.prompt.") and key.endswith(".content") and tuple(path[:-1]) in {
-                    (), ("SpanAttributes",), ("input_payload",), ("input",)}:
-                role_path = (*path[:-1], key.removesuffix(".content") + ".role")
-            elif key == "content" and len(path) >= 3 and path[-3] == "messages" and tuple(path[:-3]) in input_paths:
-                role_path = (*path[:-1], "role")
-            role_id = paths.get(role_path)
-            role = self._sources[role_id][2] if role_id is not None else None
-            if not isinstance(role, str) or role not in {"system", "developer"}:
-                continue
-            text = self._sources[row["source_id"]][2]
-            if isinstance(text, str) and text and text not in seen:
-                seen.add(text)
-                result.append({"source_id": row["source_id"], "message_role": role,
-                               "agent_id": owner})
-        return result
 
     def _source_id(self, source_id, ctx=None):
         ctx = self.context if ctx is None else ctx
         history = ctx.artifact_sources.get(source_id, []) if isinstance(source_id, str) else []
         return next((row["content_source_id"] for row in reversed(history) if "content_source_id" in row), source_id)
 
-    def response_sources(self, span_index):
-        """Identify nonempty recorded output text, excluding input and wrappers."""
-        sources = []
-        for row in self.source_catalog(span_index):
-            path = row["location"]
-            if not path or not isinstance(path[-1], str):
-                continue
-            direct = path[-1].startswith("gen_ai.completion.") and path[-1].endswith(".content") and tuple(path[:-1]) in {(), ("SpanAttributes",), ("output_payload",)}
-            entity = path[-1] == "content" and tuple(path[:-1]) in {
-                ("SpanAttributes", "ioa_observe.entity.output"),
-                ("SpanAttributes", "traceloop.entity.output"), ("output",), ("output_payload",)}
-            value = self._sources[row["source_id"]][2]
-            if (direct or entity) and isinstance(value, str) and value.strip():
-                sources.append(row["source_id"])
-        return sources
-
     def _source(self, source_id, span_index, ctx=None):
         source_id = self._source_id(source_id, ctx)
         if not isinstance(source_id, str) or source_id not in self._sources:
             raise ValueError(f"Unknown source_ref {source_id!r}; copy a catalog source_id")
-        source_index, path, value = self._sources[source_id]
+        source_index, path, value, _ = self._sources[source_id]
         if source_index > span_index:
             raise ValueError(f"Future source_ref {source_id!r}")
         return {"span_index": source_index, "path": path}, value
@@ -217,7 +179,7 @@ class LLMState:
                 result["records"][name].append(record)
             if name != "agents":
                 result["new_record_ids"][name] = f"{prefix}:{len(rows)}"
-        result["operations"] = [{key: value for key, value in row.items() if key not in {"content", "input_payload", "input_ref"}} for row in ctx.raw_spans]
+        result["operations"] = [{key: value for key, value in row.items() if key not in {"content", "input_payload"}} for row in ctx.raw_spans]
         for operation in result["operations"]:
             if operation.get("content_ref"):
                 source_id = operation["content_ref"]
@@ -229,6 +191,9 @@ class LLMState:
                 source_id = provenance[-1]["source_id"]
                 result["metadata"][key] = source_id
                 result["selected_source_texts"][source_id] = self._sources[source_id][2]
+        for operation in result["operations"]:
+            if operation.get("input_ref") and operation["input_ref"] not in result["selected_source_texts"]:
+                operation["omitted_source_ids"] = [operation.pop("input_ref")]
         return result
 
     def validate(self, delta, span_index, raw_span=None):
@@ -243,6 +208,13 @@ class LLMState:
         if not isinstance(delta, dict) or set(delta) - set(_RECORDS) - {"operation", "metadata"}:
             raise ValueError("state_delta must contain record lists, operation, and metadata")
         candidate = copy.deepcopy(self.context)
+        metadata = delta.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        if set(metadata) - _METADATA_FIELDS:
+            raise ValueError("Unknown metadata fields; use the declared metadata schema")
+        if metadata.get("root_agent_id") is not None:
+            candidate.root_agent_id = metadata["root_agent_id"]
         for name in _RECORDS:
             rows = delta.get(name, [])
             if not isinstance(rows, list):
@@ -263,6 +235,14 @@ class LLMState:
         if not isinstance(operation.get("entity_name"), str) or type(operation.get("is_delegation")) is not bool:
             raise ValueError("operation requires entity_name and boolean is_delegation")
         operation = {key: ([] if key.endswith(("_ids", "_refs")) else "") if value is None else value for key, value in operation.items() if key not in _AUTOMATIC | {"artifact_id"}}
+        owner = self.source_catalog(span_index)[0].get("agent_id", "")
+        if owner:
+            if operation.get("agent_id") not in (None, "", owner):
+                raise ValueError("operation.agent_id contradicts the recorded author")
+            operation["agent_id"] = owner
+            if candidate.root_agent_id and operation.get("actor_scope") in {"root", "peer"}:
+                if (operation["actor_scope"] == "root") != (owner == candidate.root_agent_id):
+                    raise ValueError("operation.actor_scope contradicts the recorded author and root_agent_id")
         for key, target in (("content_ref", "content"), ("input_ref", "input_payload")):
             source_id = operation.get(key)
             if source_id not in (None, ""):
@@ -284,31 +264,7 @@ class LLMState:
         operation.update({key: str(self._raw_spans[span_index][source]) for key, source in _ENVELOPE.items() if source in self._raw_spans[span_index]})
         candidate.raw_spans.append(operation)
         candidate.source_spans.append(self._raw_spans[span_index])
-        self._metadata(candidate, delta.get("metadata", {}), span_index)
-        owner = SpanNormalizer.resolve_agent_id(self._raw_spans[span_index])
-        if owner and operation.get("agent_id") != owner:
-            raise ValueError("operation.agent_id must match the recorded author")
-        if owner and candidate.root_agent_id and operation.get("actor_scope") in {"root", "peer"}:
-            if (operation["actor_scope"] == "root") != (owner == candidate.root_agent_id):
-                raise ValueError("operation.actor_scope contradicts the recorded author and root_agent_id")
-        for instruction in self.instruction_sources(span_index):
-            text = self._sources[instruction["source_id"]][2]
-            matches = [f"fact:{i}" for i, fact in enumerate(candidate.evidence)
-                       if fact.fact_type == "policy_rule" and fact.content == text
-                       and (not owner or fact.agent_id == owner)]
-            if not matches or owner and (owner not in candidate.agents or not
-                    set(matches).intersection(candidate.agents[owner].contract_ids)):
-                raise ValueError(f"Capture instruction source {instruction['source_id']} as policy_rule "
-                                 "and link its fact ID in the observed agent's contract_ids")
-            if owner and owner == candidate.root_agent_id and not candidate.policy_text:
-                raise ValueError("Select the observed root instructions using metadata.policy_text_ref")
-        if operation.get("actor_scope") == "root" and not candidate.root_agent_id:
-            raise ValueError("A root operation requires metadata.root_agent_id")
-        if owner and owner == candidate.root_agent_id and SpanNormalizer.entity_type(self._raw_spans[span_index]) == "llm" and not operation.get("is_delegation"):
-            outputs = self.response_sources(span_index)
-            reference = delta.get("metadata", {}).get("final_answer_ref")
-            if outputs and self._source_id(reference, candidate) not in outputs:
-                raise ValueError("Record the current root output as a claim and select its source using metadata.final_answer_ref")
+        self._metadata(candidate, metadata, span_index)
         self._validate_refs(candidate)
         candidate.rebuild_runtime_indexes()
         if commit:
@@ -387,16 +343,6 @@ class LLMState:
         ctx.artifact_sources.setdefault(artifact_id, []).append(provenance)
 
     def _metadata(self, ctx, metadata, span_index):
-        if not isinstance(metadata, dict):
-            raise ValueError("metadata must be an object")
-        allowed = set(_METADATA_REFS) | {"source_ref", "root_agent_id", "delivery_span_index", "termination_span_index"}
-        if set(metadata) - allowed:
-            raise ValueError("Unknown metadata fields; use the declared metadata schema")
-        required = {"root_agent_id", "policy_text_ref", "root_request_ref", "final_answer_ref"}
-        if not required <= metadata.keys():
-            raise ValueError("Return all required metadata fields; use null for unchanged refs")
-        if metadata.get("root_agent_id") is not None:
-            ctx.root_agent_id = metadata["root_agent_id"]
         if metadata.get("source_ref") not in (None, ""):
             self._source(metadata["source_ref"], span_index, ctx)
         for key, attribute in _METADATA_REFS.items():
@@ -404,31 +350,21 @@ class LLMState:
                 continue
             source_id = self._source_id(metadata[key], ctx)
             source_ref, value = self._source(source_id, span_index)
-            owner = SpanNormalizer.resolve_agent_id(self._raw_spans[source_ref["span_index"]])
             if key in {"policy_text_ref", "final_answer_ref"}:
-                if not ctx.root_agent_id or owner and owner != ctx.root_agent_id:
-                    raise ValueError(f"{key} must reference the recorded root agent, not a peer")
-            if key == "policy_text_ref" and not any(fact.fact_type == "policy_rule"
-                    and fact.agent_id == ctx.root_agent_id and any(p.get("content_source_id") == source_id
-                        for p in ctx.artifact_sources.get(f"fact:{i}", []))
-                    for i, fact in enumerate(ctx.evidence)):
-                raise ValueError("policy_text_ref must select a recorded root policy_rule")
+                annotation = self._sources[source_id][3]
+                owner = annotation.get("agent_id")
+                direction = "input" if key == "policy_text_ref" else "output"
+                roles = {"system", "developer"} if key == "policy_text_ref" else {"assistant"}
+                if annotation.get("direction") not in (None, direction) or annotation.get("message_role") not in (None, *roles):
+                    raise ValueError(f"{key} contradicts the recorded source direction or message role")
+                if owner and ctx.root_agent_id and owner != ctx.root_agent_id:
+                    raise ValueError(f"{key} references an explicit peer author")
             if key == "final_answer_ref":
-                if source_id not in self.response_sources(source_ref["span_index"]):
-                    raise ValueError("final_answer_ref must select nonempty recorded output text, not input or an output wrapper")
-                attributes = self._raw_spans[source_ref["span_index"]].get("SpanAttributes", {})
-                kind = attributes.get("ioa_observe.span.kind") or attributes.get("traceloop.span.kind")
-                if kind and kind != "llm":
-                    raise ValueError("final_answer_ref must select an LLM response, not a tool or delegation result")
-                if not any(claim.agent_id == ctx.root_agent_id and any(
-                        p.get("content_source_id") == source_id for p in ctx.artifact_sources.get(f"claim:{i}", []))
-                        for i, claim in enumerate(ctx.claims)):
-                    raise ValueError("final_answer_ref must select a recorded root response claim")
                 ctx.latest_root_answer_span_index = source_ref["span_index"]
             setattr(ctx, attribute, value if key == "tool_definitions_ref" else _text(value))
             ctx.artifact_sources.setdefault(f"metadata:{attribute}", []).append({"source_ref": source_ref, "source_id": source_id, "observed_at_span_index": span_index})
         for key in ("delivery_span_index", "termination_span_index"):
-            if key in metadata:
+            if metadata.get(key) is not None:
                 if type(metadata[key]) is not int or not 0 <= metadata[key] <= span_index:
                     raise ValueError(f"Invalid {key}")
                 setattr(ctx, key, metadata[key])

@@ -21,7 +21,6 @@ from .base import (
 from .judge import (
     MetricJudge,
     build_context_payload,
-    build_delegation_context,
     build_operation_context,
 )
 from .metrics import aevaluate_high_level_metrics_batched
@@ -127,11 +126,12 @@ ambiguous.
             )
             if key in payload
         }
-        audits, _ = build_delegation_context(context)
+        audits = payload.get("delegation_audit", [])
         ownership_context["delegation_requests"] = [
             {
                 key: audit[key]
                 for key in (
+                    "artifact_id",
                     "delegation_id",
                     "operation_artifact_id",
                     "span_index",
@@ -258,7 +258,7 @@ class GoalAlignmentMetric(GoalAlignmentMetricV1):
             self.input_config,
             metric_name=self.name,
         )
-        audits, _ = build_delegation_context(context)
+        audits = payload.get("delegation_audit", [])
         goal_context = {
             key: payload.get(key)
             for key in (
@@ -272,7 +272,6 @@ class GoalAlignmentMetric(GoalAlignmentMetricV1):
                 "final_answer_artifact_id",
                 "final_answer_span_index",
                 "operations",
-                "work_ledger",
                 "coordination_events",
                 "recorded_source_spans",
             )
@@ -282,6 +281,7 @@ class GoalAlignmentMetric(GoalAlignmentMetricV1):
             {
                 key: audit[key]
                 for key in (
+                    "artifact_id",
                     "delegation_id",
                     "operation_artifact_id",
                     "span_index",
@@ -709,14 +709,7 @@ async def aevaluate_trajectory_metrics_batched(
         result.metadata["metric_code"] = code
         result.metadata["metric_layer"] = definition.layer
         result.metadata["metric_set"] = TRAJECTORY_METRIC_SET
-        result.metadata["definition_version"] = (
-            USER_CLARIFIED_METRIC_VERSION
-            if (
-                definition.implementation.definition_version
-                == USER_CLARIFIED_METRIC_VERSION
-            )
-            else TRAJECTORY_METRIC_SET
-        )
+        result.metadata["definition_version"] = definition.implementation.definition_version
         result.metadata["affects_trajectory_score"] = False
     return results
 

@@ -32,6 +32,17 @@ _CALL_ID_ATTRIBUTES = (
     "tool_call_id",
     "tool.call.id",
 )
+_ENTITY_INPUT_ATTRIBUTES = (
+    "traceloop.entity.input", "ioa_observe.entity.input", "input.value",
+)
+_ENTITY_OUTPUT_ATTRIBUTES = (
+    "traceloop.entity.output", "ioa_observe.entity.output", "output.value",
+)
+_AGENT_ID_ATTRIBUTES = (
+    "mas.agent.id", "agent.id", "gen_ai.agent.id", "ioa_observe.agent.id",
+)
+_SOURCE_INPUT_KEYS = (*_ENTITY_INPUT_ATTRIBUTES, "gen_ai.input.messages", "input", "input_payload")
+_SOURCE_OUTPUT_KEYS = (*_ENTITY_OUTPUT_ATTRIBUTES, "gen_ai.output.messages", "output", "output_payload")
 
 
 class SpanNormalizer:
@@ -61,7 +72,8 @@ class SpanNormalizer:
 
     @staticmethod
     def _infer_message_role(
-        message: Dict[str, Any], kwargs: Dict[str, Any], attrs: Dict[str, Any]
+        message: Dict[str, Any], kwargs: Dict[str, Any], attrs: Dict[str, Any],
+        default: str = "user",
     ) -> str:
         role = (
             kwargs.get("role")
@@ -77,7 +89,7 @@ class SpanNormalizer:
             return "user"
         if role_text in {"ai", "assistant"}:
             return "assistant"
-        if role_text in {"system", "tool"}:
+        if role_text in {"system", "developer", "tool"}:
             return role_text
 
         message_id = str(message.get("id", "")).lower()
@@ -89,7 +101,7 @@ class SpanNormalizer:
             return "system"
         if "toolmessage" in message_id:
             return "tool"
-        return "user"
+        return default
 
     @staticmethod
     def _extract_message_entry(message: Any) -> Optional[Dict[str, str]]:
@@ -201,20 +213,25 @@ class SpanNormalizer:
         return provider == "langgraph" and operation in {"execute_task", "execute_tool"}
 
     @staticmethod
-    def _agent_id_candidate(raw_span: Dict[str, Any]) -> str:
-        """Return an explicit agent identity recorded on one span, if any.
-
-        Dedicated MAS attributes are trusted as-is, and ``gen_ai.agent.name``
-        is accepted unless it names a framework component. The generic
-        ``agent_id`` attribute (and a top-level ``agent_id`` column) is accepted
-        only when it names an agent rather than a method path such as
-        ``moderator.invoke``.
-        """
+    def explicit_agent_id(raw_span: Dict[str, Any]) -> str:
+        """Return a recorded ID; display names alone do not establish identity."""
         attrs = raw_span.get("SpanAttributes", {}) or {}
-        for value in (attrs.get("mas.agent.id"), attrs.get("agent.id")):
-            text = str(value or "").strip()
-            if text and text.casefold() not in _UNKNOWN_AGENT_VALUES:
-                return text
+        if not isinstance(attrs, dict):
+            attrs = {}
+        for scope in (attrs, raw_span):
+            for key in _AGENT_ID_ATTRIBUTES:
+                text = str(scope.get(key) or "").strip()
+                if text and text.casefold() not in _UNKNOWN_AGENT_VALUES:
+                    return text
+        return ""
+
+    @classmethod
+    def _agent_id_candidate(cls, raw_span: Dict[str, Any]) -> str:
+        """Return an explicit ID, or an advisory non-framework agent name."""
+        explicit_id = cls.explicit_agent_id(raw_span)
+        if explicit_id:
+            return explicit_id
+        attrs = raw_span.get("SpanAttributes", {}) or {}
         for value, path_like_allowed in (
             (attrs.get("gen_ai.agent.name"), True),
             (attrs.get("agent_id"), False),
@@ -229,6 +246,67 @@ class SpanNormalizer:
             ):
                 return text
         return ""
+
+    @classmethod
+    def source_annotation(
+        cls, value: Any, path: List[str | int], parent: Any = None,
+        inherited: Optional[Dict[str, Any]] = None,
+        *, chat_payload: bool = False,
+    ) -> Dict[str, Any]:
+        """Annotate known payload structure without classifying its meaning.
+
+        Called while cataloging the original nodes, including decoded JSON
+        nodes. Missing annotations leave unfamiliar formats available.
+        Generic payloads carry message roles only on observed chat spans;
+        GenAI message containers declare their own message structure.
+        """
+        annotation = dict(inherited or {})
+        key = path[-1] if path else None
+        envelope_field = len(path) == 1 or len(path) == 2 and path[0] == "SpanAttributes"
+        payload_depth = 2 if path and path[0] == "SpanAttributes" else 1
+        payload = len(path) >= payload_depth and path[payload_depth - 1] in (*_SOURCE_INPUT_KEYS, *_SOURCE_OUTPUT_KEYS)
+        relative = path[payload_depth:] if payload else None
+        messages_payload = payload and (chat_payload or path[payload_depth - 1] in {"gen_ai.input.messages", "gen_ai.output.messages"})
+        if envelope_field:
+            if key in _SOURCE_INPUT_KEYS:
+                annotation["direction"] = "input"
+            elif key in _SOURCE_OUTPUT_KEYS:
+                annotation["direction"] = "output"
+        if (envelope_field or chat_payload and payload and len(relative) == 1) and isinstance(key, str) and key.startswith(("gen_ai.prompt.", "gen_ai.completion.")):
+            annotation.setdefault("direction", "input" if key.startswith("gen_ai.prompt.") else "output")
+            role_key = key.rsplit(".", 1)[0] + ".role"
+            if isinstance(parent, dict) and isinstance(parent.get(role_key), str):
+                role = cls._infer_message_role({"role": parent[role_key]}, {}, {}, default="")
+                if role:
+                    annotation["message_role"] = role
+        if isinstance(value, str):
+            value = cls._load_json_payload(value)
+        if isinstance(value, dict):
+            kwargs = value.get("kwargs") if isinstance(value.get("kwargs"), dict) else {}
+            attrs = value.get("attributes") if isinstance(value.get("attributes"), dict) else {}
+            message_node = (
+                messages_payload and (
+                    relative == [] and "role" in value
+                    or len(relative) == 1 and isinstance(relative[0], int)
+                    or len(relative) == 2 and relative[0] == "messages" and isinstance(relative[1], int)
+                )
+                or chat_payload and len(path) == 2 and path[0] == "messages" and isinstance(path[1], int)
+            )
+            if message_node and ("parts" in value or any("content" in scope for scope in (value, kwargs, attrs))):
+                message = {key: value.get(key) for key in ("role", "type")}
+                role = cls._infer_message_role(message, kwargs, attrs, default="")
+                if role:
+                    annotation["message_role"] = role
+                    owner = cls.explicit_agent_id(value)
+                    if owner:
+                        annotation["agent_id"] = owner
+                elif any("role" in scope for scope in (value, kwargs, attrs)):
+                    annotation.pop("message_role", None)
+            if not path:
+                owner = cls.explicit_agent_id(value)
+                if owner:
+                    annotation["agent_id"] = owner
+        return annotation
 
     @classmethod
     def resolve_agent_id(
@@ -365,21 +443,11 @@ class SpanNormalizer:
 
     @classmethod
     def _entity_input(cls, attrs: Dict[str, Any]) -> Any:
-        return cls._first_span_attribute(
-            attrs,
-            "traceloop.entity.input",
-            "ioa_observe.entity.input",
-            "input.value",
-        )
+        return cls._first_span_attribute(attrs, *_ENTITY_INPUT_ATTRIBUTES)
 
     @classmethod
     def _entity_output(cls, attrs: Dict[str, Any]) -> Any:
-        return cls._first_span_attribute(
-            attrs,
-            "traceloop.entity.output",
-            "ioa_observe.entity.output",
-            "output.value",
-        )
+        return cls._first_span_attribute(attrs, *_ENTITY_OUTPUT_ATTRIBUTES)
 
     @classmethod
     def _entity_name(cls, attrs: Dict[str, Any]) -> Any:
