@@ -45,7 +45,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/analysis/1.0.0-rc0> ;
-    owl:versionInfo "1.0.5" ;
+    owl:versionInfo "1.0.6" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
     rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft."@en .
 
@@ -240,3 +240,145 @@ mas:representativeProcessedSample rdf:type owl:DatatypeProperty, sh:PropertyShap
     rdfs:range xsd:string ;
     rdfs:comment "Processed/normalised form of the representative sample, if the detector produced one." .
 
+
+#################################################################
+#    L9 PROTOCOL REPORTS
+#
+#    L9 protocols (ACCORD, CONCORD, ...) are coordination protocols
+#    an agent system can follow. Two computed artefacts describe
+#    them for one Session:
+#
+#      L9Report                    which protocols were available to
+#                                  the session's agents and which were
+#                                  actually used. One per Session.
+#      L9ProtocolExecutionReport   how one protocol went in that
+#                                  Session: who took part, and the
+#                                  protocol's evaluation metrics (the
+#                                  MetricResults that measure it).
+#                                  One per Session and protocol.
+#
+#    Both hang off the Session with mas:reportsOn. They are not
+#    AnalysisElements (no dataType / aboutMetric): they describe one
+#    session, not a group or a metric.
+#################################################################
+
+mas:multiValued rdf:type owl:AnnotationProperty ;
+    rdfs:range xsd:boolean ;
+    rdfs:comment "Set to true on a datatype property that holds a list of values (a Neo4j list property) instead of one. Generated models type such a property as a list of its range." .
+
+mas:L9Report rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "analysis" ;
+    rdfs:comment "Session-level summary of the L9 protocols: which were enabled (available to the session's agents) and which were activated (actually used). Lists protocol names, so a new protocol adds an entry rather than new properties. One per Session." ;
+    skos:example "protocolsEnabled ['accord', 'concord'], protocolsActivated ['accord']." .
+
+mas:protocolsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:protocolsEnabled ;
+    sh:targetClass mas:L9Report ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9Report ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the L9 protocols that were enabled: available to at least one agent of the session (for example, listed among its skills)." .
+
+mas:protocolsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:protocolsActivated ;
+    sh:targetClass mas:L9Report ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9Report ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the L9 protocols that were activated: an agent actually used them (for example, called one of their skills)." .
+
+mas:L9ProtocolExecutionReport rdf:type owl:Class ;
+    rdfs:subClassOf mas:Element ;
+    mas:layer "analysis" ;
+    rdfs:comment "How one L9 protocol went in one Session: which agents had it and which used it, and the protocol's evaluation metrics, as MetricResults that measure this report. One per Session and protocol." ;
+    skos:example "The ACCORD execution of session s1: agents sre and db activated it; AccordConverged = 1." .
+
+mas:reportsOn rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:reportsOn ;
+    sh:targetClass mas:L9Report, mas:L9ProtocolExecutionReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain [ owl:unionOf ( mas:L9Report mas:L9ProtocolExecutionReport ) ] ;
+    rdfs:range mas:Session ;
+    rdfs:comment "The Session this L9 report describes. A report cannot exist without one." .
+
+mas:protocol rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:protocol ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Name of the L9 protocol this report is about, for example 'accord'." .
+
+mas:enabledEvidence rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:enabledEvidence ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "How we know the protocol was enabled: 'system_prompt' when an agent's prompt lists one of its skills, 'activation' when only a call to it shows it was there." .
+
+mas:skillsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:skillsEnabled ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the protocol's skills that were available to the session's agents." .
+
+mas:skillsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:skillsActivated ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the protocol's skills that agents actually called." .
+
+mas:agentsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:agentsEnabled ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the agents that had the protocol available." .
+
+mas:agentsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:agentsActivated ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    mas:multiValued true ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Names of the agents that took part in the protocol: they actually used it." .
+
+mas:metricCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:metricCount ;
+    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:range xsd:integer ;
+    rdfs:comment "Number of MetricResults currently measuring this report, from the protocol's latest evaluation." .
+
+mas:reportedAt rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:reportedAt ;
+    sh:targetClass mas:L9Report, mas:L9ProtocolExecutionReport ;
+    sh:minCount 1 ;
+    sh:severity sh:Violation ;
+    rdfs:domain [ owl:unionOf ( mas:L9Report mas:L9ProtocolExecutionReport ) ] ;
+    rdfs:range xsd:dateTime ;
+    rdfs:comment "When this report was last written." .

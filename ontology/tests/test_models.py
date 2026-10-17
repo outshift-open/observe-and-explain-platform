@@ -125,3 +125,43 @@ def test_node_inheritance_resolved_from_ontology_subclassing():
 def test_expected_core_node_classes_exist(module, cls_name):
     imported = __import__(f"oxp_ontology.models.nodes.{module}", fromlist=[cls_name])
     assert hasattr(imported, cls_name)
+
+
+def test_l9_report_lists_protocols_as_list_fields():
+    """mas:multiValued types a property as a list of its range."""
+    from datetime import datetime, timezone
+
+    from oxp_ontology.models.nodes.l9_report import L9Report
+
+    now = datetime.now(timezone.utc)
+    report = L9Report(
+        id="r", sessionId="s", reportedAt=now, protocolsEnabled=["accord"]
+    )
+    assert report.protocolsEnabled == ["accord"] and report.protocolsActivated == []
+    assert (
+        L9Report(id="r2", sessionId="s", reportedAt=now).protocolsEnabled
+        is not report.protocolsActivated
+    )
+
+
+def test_l9_protocol_execution_report_requires_its_protocol():
+    from datetime import datetime, timezone
+
+    from pydantic import ValidationError
+
+    from oxp_ontology.models.nodes.l9_protocol_execution_report import (
+        L9ProtocolExecutionReport,
+    )
+
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValidationError):
+        L9ProtocolExecutionReport(id="p", sessionId="s", reportedAt=now)
+    report = L9ProtocolExecutionReport(
+        id="p",
+        sessionId="s",
+        reportedAt=now,
+        protocol="accord",
+        agentsActivated=["sre"],
+        metricCount=3,
+    )
+    assert report.agentsActivated == ["sre"] and report.metricCount == 3

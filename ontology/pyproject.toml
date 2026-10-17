@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "rdflib>=6.0.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "oxp-ontology"
-version = "1.0.5"
+version = "1.0.6"
 description = "The MAS execution ontology for the Observe and eXplain Platform."
 readme = "PACKAGE_README.md"
 requires-python = ">=3.9"
@@ -48,6 +48,11 @@ verify = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/oxp_ontology"]
 
+# Generates the SHACL shapes and the KG models when building from a source checkout
+# (see hatch_build.py); they are not committed.
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
 [dependency-groups]
 dev = [
     "pydantic>=2.13.5",
@@ -57,6 +62,7 @@ dev = [
 
 [tool.hatch.build]
 include = [
+    "hatch_build.py",
     "src/oxp_ontology/*.ttl",
     "src/oxp_ontology/__init__.py",
     "src/oxp_ontology/validation.py",

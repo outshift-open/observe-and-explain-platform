@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versioning starts at `1.0.0` with this open-source release.
 
+## [1.0.6] - 2026-10-18
+
+### Added
+
+- `analysis-ontology.ttl`: `L9Report` (which L9 protocols were enabled and which activated in a session, as
+  `protocolsEnabled` / `protocolsActivated` lists) and `L9ProtocolExecutionReport` (how one protocol went in
+  a session: `protocol`, the agents and skills that had it and used it, `metricCount`), both linked to their
+  `Session` by `reportsOn`. Reports carry `sessionId` and `reportedAt`.
+- `metrics-ontology.ttl`: `measures` may now target an `L9ProtocolExecutionReport`, so a protocol's evaluation
+  metrics are `MetricResult`s attached to its report.
+- `mas:multiValued` annotation: marks a datatype property as a list. `scripts/generate_models.py` types such a
+  property as a list of its range.
+- `hatch_build.py`: a build hook that generates `mas-shapes.ttl` and the KG models when the package is built from
+  a source checkout, so `{ git = "...", subdirectory = "ontology" }` and `pip install ./ontology` give a complete
+  package, not only the CI-built wheel. Built from an sdist (scripts absent, files already inside) it does nothing.
+
 ## [1.0.5] - 2026-10-12
 
 ### Added

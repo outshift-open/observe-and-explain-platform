@@ -5,8 +5,10 @@ import os
 import re
 import textwrap
 
-from rdflib import OWL, RDF, RDFS, XSD, Graph
+from rdflib import OWL, RDF, RDFS, XSD, Graph, Namespace
 from rdflib.namespace import SH
+
+MAS = Namespace("https://outshift-open.github.io/oxp-ontology/mas#")
 
 # Map XSD types to Python type hints
 XSD_TYPE_MAP = {
@@ -97,6 +99,12 @@ def get_property_ranges(g, prop):
 def applies_to_class(domain_names, class_name):
     """Return whether a property domain applies to a generated class name."""
     return "Thing" in domain_names or class_name in domain_names
+
+
+def is_multi_valued(g, prop):
+    """A datatype property annotated ``mas:multiValued true`` holds a list of its range."""
+    value = g.value(prop, MAS.multiValued)
+    return value is not None and str(value).lower() == "true"
 
 
 def format_comment_lines(text, indent="    "):
@@ -196,6 +204,9 @@ def generate_robust_pydantic_models(ttl_path, output_dir=None):
             if prop_fragment and applies_to_class(domain_names, name):
                 range_node = g.value(prop, RDFS.range)
                 py_type = get_python_type(range_node)
+                default = TYPE_SAFE_DEFAULTS.get(py_type, "None")
+                if is_multi_valued(g, prop):
+                    py_type, default = f"list[{py_type}]", TYPE_SAFE_DEFAULTS["list"]
                 prop_comment = g.value(prop, RDFS.comment)
                 description = (
                     str(prop_comment)
@@ -207,7 +218,7 @@ def generate_robust_pydantic_models(ttl_path, output_dir=None):
                     prop_fragment,
                     py_type,
                     is_required(g, prop),
-                    TYPE_SAFE_DEFAULTS.get(py_type, "None"),
+                    default,
                     description,
                 )
 

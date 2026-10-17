@@ -222,6 +222,70 @@ class TestOntologyValidity:
         assert "agent_spans[0] has mismatched sessionId" in report.issues
 
 
+class TestL9ReportsOntology:
+    """The L9 protocol reports and how metrics attach to them."""
+
+    @staticmethod
+    def _graph():
+        from rdflib import Graph
+
+        g = Graph()
+        for name in ("mas", "metrics", "analysis"):
+            g.parse(get_ontology_path(name), format="turtle")
+        return g
+
+    def test_report_classes_are_declared(self):
+        from rdflib import OWL, RDF, RDFS, Namespace
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        for cls in (mas.L9Report, mas.L9ProtocolExecutionReport):
+            assert (cls, RDF.type, OWL.Class) in g
+            assert (cls, RDFS.subClassOf, mas.Element) in g
+
+    def test_reports_hang_off_a_session(self):
+        from rdflib import RDFS, Namespace
+        from rdflib.namespace import SH
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        assert (mas.reportsOn, RDFS.range, mas.Session) in g
+        assert next(g.objects(mas.reportsOn, SH.minCount)).toPython() == 1
+
+    def test_a_metric_result_can_measure_a_protocol_execution_report(self):
+        from rdflib import OWL, RDFS, Namespace
+        from rdflib.collection import Collection
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        union = next(g.objects(mas.measures, RDFS.range))
+        members = set(Collection(g, next(g.objects(union, OWL.unionOf))))
+        assert members == {mas.ExecutionElement, mas.L9ProtocolExecutionReport}
+
+    def test_protocol_lists_are_marked_multi_valued(self):
+        from rdflib import Namespace
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        for prop in (
+            "protocolsEnabled",
+            "protocolsActivated",
+            "agentsEnabled",
+            "agentsActivated",
+            "skillsEnabled",
+            "skillsActivated",
+        ):
+            assert next(g.objects(mas[prop], mas.multiValued)).toPython() is True
+
+
 class TestPackageIntegration:
     """Test package installation and imports"""
 
