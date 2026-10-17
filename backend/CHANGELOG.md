@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **L9 protocol reports.** `oxp.providers.OXPL9ReportProvider` writes, through the ontology models, an
+  `L9Report` per session (`protocolsEnabled` / `protocolsActivated`: which L9 protocols were available and
+  which were used) and an `L9ProtocolExecutionReport` per session and protocol (the agents and skills that had
+  it and used it, and its evaluation metrics), both linked to the `Session` by `reportsOn`.
+  `save_protocol_execution_metrics` stores a protocol's metrics as `MetricResult` nodes that `measure` its
+  execution report (the report's earlier results are replaced), via the new `protocol_execution_report` target
+  of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.l9_graph`.
+  Requires `oxp-ontology>=1.0.6`.
+
 ### Changed
 
 - **Breaking: metrics are stored as the ontology's `Metric` + `MetricResult`.** A `MetricResult`

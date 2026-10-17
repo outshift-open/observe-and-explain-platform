@@ -52,7 +52,7 @@ _UNITS: dict[str, tuple[str, str]] = {
     "SCALAR": ("dimensionless", ""),
 }
 
-Target = Literal["session", "execution", "call", "any"]
+Target = Literal["session", "execution", "call", "any", "protocol_execution_report"]
 
 
 def _digest(*parts: str) -> str:
@@ -137,6 +137,8 @@ _TARGET_MATCH: dict[str, str] = {
         f"MATCH (t:{_EXECUTION_LABELS} {{id: $resource_id}})\n"
         "    WHERE $session_id IS NULL OR t.sessionId = $session_id"
     ),
+    # An L9 protocol execution report by its own id: the protocol's evaluation metrics measure it.
+    "protocol_execution_report": "MATCH (t:L9ProtocolExecutionReport {id: $resource_id})",
     "any": (
         "OPTIONAL MATCH (s:Session {sessionId: $resource_id})\n"
         f"    OPTIONAL MATCH (e:{_EXECUTION_LABELS} {{spanId: $resource_id}})\n"
@@ -157,7 +159,8 @@ def write_metric_result_query(
 
     ``target`` says what ``resource_id`` is: a ``session`` id, an ``execution``
     element's span id or a ``call`` node's id (both optionally within
-    ``session_id``), or ``any`` session or span id.
+    ``session_id``), ``any`` session or span id, or a ``protocol_execution_report``
+    by its id.
     Nothing is written if the measured node does not exist.
     """
     query = f"""
