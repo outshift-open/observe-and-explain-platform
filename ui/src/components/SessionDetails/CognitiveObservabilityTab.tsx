@@ -5,21 +5,12 @@
 
 import { useMemo } from 'react';
 import { useParams } from 'react-router';
-import {
-  Banner,
-  Divider,
-  EmptyState,
-  OverflowTooltip,
-  Skeleton
-} from '@open-ui-kit/core';
-import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
-import {
-  Box,
-  LinearProgress,
-  Stack,
-  Typography,
-  useTheme
-} from '@mui/material';
+import { Banner, EmptyState, Skeleton } from '@open-ui-kit/core';
+import { Stack, Typography } from '@mui/material';
+// Cognitive metrics are hidden for now; the code is kept commented out to be restored later.
+// import { Divider, OverflowTooltip } from '@open-ui-kit/core';
+// import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
+// import { Box, LinearProgress, useTheme } from '@mui/material';
 import {
   RemediationTags,
   ScoreSeverityBadgeLabel,
@@ -27,14 +18,13 @@ import {
 } from '@/components';
 import { useSessionsWithCognitiveObservability } from '@/api/oxpApi';
 import { useTimeRangeStore } from '@/store';
-import {
-  COGNITIVE_METRIC_GROUPS,
-  FAILURE_CONFIDENCE_THRESHOLD
-} from '@/common/cognitiveFailures';
-import { getScoreColor } from '@/utils/metrics';
-import { CognitiveObservabilityMetric, Unit } from '@/types/oxp.type';
+import { FAILURE_CONFIDENCE_THRESHOLD } from '@/common/cognitiveFailures';
+// import { COGNITIVE_METRIC_GROUPS } from '@/common/cognitiveFailures';
+// import { getScoreColor } from '@/utils/metrics';
+// import { CognitiveObservabilityMetric, Unit } from '@/types/oxp.type';
 import { COGNITIVE_FAILURE_DESCRIPTIONS } from '@/common/cognitiveFailures';
 
+/*
 const toScore = (metric: CognitiveObservabilityMetric): number =>
   metric.value.unit === Unit.Percentage
     ? metric.value.value * 100
@@ -42,11 +32,12 @@ const toScore = (metric: CognitiveObservabilityMetric): number =>
 
 const average = (scores: number[]): number =>
   scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+*/
 
 const formatPercent = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
 export const CognitiveObservabilityTab = () => {
-  const theme = useTheme();
+  // const theme = useTheme();
   const { sessionId, applicationId } = useParams();
   const { startDate, endDate } = useTimeRangeStore();
 
@@ -74,6 +65,7 @@ export const CognitiveObservabilityTab = () => {
     (failure) => failure.confidence > FAILURE_CONFIDENCE_THRESHOLD
   ).length;
 
+  /*
   // Metrics split into the configured groups; metrics outside every group go
   // into an extra "Other" column so none is hidden.
   const metricGroups = useMemo(() => {
@@ -109,6 +101,7 @@ export const CognitiveObservabilityTab = () => {
         ]
       : groups;
   }, [session?.cognitiveObservabilityMetrics]);
+  */
 
   if (isLoading) {
     return (
@@ -190,6 +183,7 @@ export const CognitiveObservabilityTab = () => {
         )}
       </Stack>
 
+      {/*
       <Stack direction="column" gap="8px">
         <Typography variant={'h6'}>Cognitive Metrics</Typography>
         {metricGroups.every((group) => group.metrics.length === 0) ? (
@@ -301,6 +295,7 @@ export const CognitiveObservabilityTab = () => {
           </Stack>
         )}
       </Stack>
+      */}
     </Stack>
   );
 };

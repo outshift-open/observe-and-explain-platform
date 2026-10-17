@@ -45,7 +45,7 @@ const TopBar = () => {
               color: theme.palette.vars.baseTextStrong
             }}
           >
-            OXP
+            SCOPE
           </Typography>
         </Box>
       </Toolbar>
