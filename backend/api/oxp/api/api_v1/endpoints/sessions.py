@@ -142,7 +142,7 @@ def get_session_l9_protocols(
     kg_client=Depends(_kg_client),  # noqa: B008
     redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
 ) -> Any:
-    """Return the L9 protocols of a session (one report per protocol)."""
+    """Return the L9 protocols of a session, with the metrics of each activated protocol."""
     key = make_cache_key("sessions:l9_protocols", {"session": session_id})
     return cached(
         redis_client=redis_client,

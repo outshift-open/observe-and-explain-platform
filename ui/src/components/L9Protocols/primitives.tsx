@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import {
   Box,
+  Collapse,
   Stack,
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
   Typography,
   useTheme
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import InfoOutlineIcon from '@mui/icons-material/InfoOutline';
 import { GeneralSize, Tag, Tooltip } from '@open-ui-kit/core';
 import { L9Tone, getVerdictTone, humanizeLabel } from '@/common/l9Protocols';
@@ -260,6 +262,7 @@ export const BlockTitle = ({
   </Stack>
 );
 
+// Titled block that can be collapsed, open by default.
 export const SubSection = ({
   title,
   description,
@@ -270,10 +273,10 @@ export const SubSection = ({
   children: ReactNode;
 }) => {
   const theme = useTheme();
+  const [expanded, setExpanded] = useState(true);
   return (
     <Stack
       direction="column"
-      gap="12px"
       sx={{
         padding: '16px',
         borderRadius: '8px',
@@ -281,19 +284,49 @@ export const SubSection = ({
       }}
     >
       <Stack direction="row" alignItems="center" gap="6px">
-        <Typography
-          variant={'captionSemibold'}
-          sx={{
-            color: theme.palette.vars.baseTextWeak,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em'
+        <Stack
+          direction="row"
+          alignItems="center"
+          gap="6px"
+          role="button"
+          tabIndex={0}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setExpanded((value) => !value);
+            }
           }}
+          sx={{ cursor: 'pointer', flex: 1, userSelect: 'none' }}
         >
-          {title}
-        </Typography>
+          <ExpandMoreIcon
+            sx={{
+              width: 18,
+              height: 18,
+              color: theme.palette.vars.baseTextWeak,
+              transform: expanded ? 'none' : 'rotate(-90deg)',
+              transition: 'transform 150ms'
+            }}
+          />
+          <Typography
+            variant={'captionSemibold'}
+            sx={{
+              color: theme.palette.vars.baseTextWeak,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em'
+            }}
+          >
+            {title}
+          </Typography>
+        </Stack>
         {description && <InfoTooltip description={description} />}
       </Stack>
-      {children}
+      <Collapse in={expanded} unmountOnExit>
+        <Stack direction="column" gap="12px" sx={{ paddingTop: '12px' }}>
+          {children}
+        </Stack>
+      </Collapse>
     </Stack>
   );
 };

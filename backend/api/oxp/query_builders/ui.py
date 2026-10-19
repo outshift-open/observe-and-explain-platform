@@ -3195,16 +3195,38 @@ def neo4j_sessions_with_cognitive_observability_query(
 
 
 def neo4j_session_l9_reports_query(*, session_id: str):
-    """Build a Neo4j query returning the ``L9Report`` nodes of a session.
+    """Build a Neo4j query returning the L9 reports of a session.
 
-    One row with ``found`` (whether the session exists) and ``reports`` (the
-    raw properties of its L9 reports, one per protocol).
+    One row with ``found`` (whether the session exists), ``l9Reports`` (the properties of the
+    session's ``L9Report``: protocols enabled and activated) and ``executionReports`` (one entry
+    per ``L9ProtocolExecutionReport``: its ``report`` properties and its ``metrics``, the
+    ``MetricResult`` nodes that measure it, with their ``Metric`` definition).
     """
     stmt = """
     OPTIONAL MATCH (s:Session {sessionId: $session_id})
-    OPTIONAL MATCH (s)-[]-(r:L9Report)
-    RETURN
-        s IS NOT NULL AS found,
-        [x IN collect(DISTINCT properties(r)) WHERE x IS NOT NULL] AS reports
+    CALL (s) {
+        OPTIONAL MATCH (r:L9Report)-[:reportsOn]->(s)
+        RETURN [x IN collect(DISTINCT properties(r)) WHERE x IS NOT NULL] AS l9Reports
+    }
+    CALL (s) {
+        OPTIONAL MATCH (p:L9ProtocolExecutionReport)-[:reportsOn]->(s)
+        CALL (p) {
+            OPTIONAL MATCH (m:MetricResult)-[:measures]->(p)
+            OPTIONAL MATCH (m)-[:ofMetricType]->(d:Metric)
+            RETURN [x IN collect(DISTINCT CASE WHEN m IS NULL THEN NULL ELSE {
+                name: coalesce(d.name, m.name),
+                result: m.result,
+                reasoning: m.reasoning,
+                timestamp: m.timestamp,
+                provider: d.metricProvider,
+                unit: d.unit
+            } END) WHERE x IS NOT NULL] AS metrics
+        }
+        RETURN [x IN collect(CASE WHEN p IS NULL THEN NULL ELSE {
+            report: properties(p),
+            metrics: metrics
+        } END) WHERE x IS NOT NULL] AS executionReports
+    }
+    RETURN s IS NOT NULL AS found, l9Reports, executionReports
     """
     return stmt, {"session_id": session_id}

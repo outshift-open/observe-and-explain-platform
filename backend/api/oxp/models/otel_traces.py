@@ -361,8 +361,8 @@ class SessionsWithCognitiveObservabilityResponse(BaseModel):
 class SessionL9ProtocolsResponse(BaseModel):
     """Response body for ``GET /sessions/{session_id}/l9-protocols``.
 
-    Each protocol is a camelCase dict (``protocol``, ``enabled``, ``activated``
-    and the metric sections of the protocol) as consumed by the UI.
+    Each protocol is a camelCase dict (``protocol``, ``enabled``, ``activated``, the agents and
+    skills that had / used it, and its ``metrics``) as consumed by the UI.
     """
 
     sessionId: str

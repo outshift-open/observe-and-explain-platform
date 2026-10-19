@@ -1005,6 +1005,23 @@ export interface L9Bound {
   bound?: number | null;
 }
 
+// One evaluation metric of an activated protocol, as stored in the KG. The
+// protocol-specific meaning (label, format) lives in `common/l9Metrics.ts`.
+export interface L9Metric {
+  name: string;
+  // Grouping chosen by the API: 'convergence', 'contract', 'cost', 'other'...
+  section: string;
+  // Numeric result; null / absent means "no data", never zero.
+  value?: number | null;
+  // Free text explaining the value.
+  reasoning?: string;
+  // Structured explanation, when the API could parse it.
+  details?: unknown;
+  provider?: string;
+  unit?: string;
+  timestamp?: string;
+}
+
 export interface L9ProtocolBase {
   // Protocol identifier, e.g. 'L9-CONCORD'.
   protocol: string;
@@ -1018,6 +1035,16 @@ export interface L9ProtocolBase {
   activatedAt?: string | null;
   // Absent: not tracked for this protocol. null: tracked but no data.
   expected?: L9ExpectedActivation | null;
+  // Execution report of an activated protocol: who had it, who used it.
+  enabledEvidence?: string | null;
+  agentsEnabled?: string[] | null;
+  agentsActivated?: string[] | null;
+  skillsEnabled?: string[] | null;
+  skillsActivated?: string[] | null;
+  reportedAt?: string | null;
+  // Generic metrics list. When present, it is rendered instead of the
+  // protocol's dedicated sections.
+  metrics?: L9Metric[] | null;
 }
 
 // Extensible: the reference doc names the success state both `COMMIT` and

@@ -15,6 +15,7 @@ import { L9Protocol } from '@/types/oxp.type';
 import { ActivationSection } from './ActivationSection';
 import { ConcordDetails } from './ConcordDetails';
 import { AccordDetails } from './AccordDetails';
+import { MetricsView, hasMetrics } from './MetricsView';
 import { InfoTooltip, StatusTag } from './primitives';
 
 // What a protocol view can know about the other protocols of the session.
@@ -35,8 +36,9 @@ const defineView =
   (protocol, context) =>
     matches(protocol) ? render(protocol, context) : null;
 
-// Protocols with a dedicated metrics view. A protocol that is not registered
-// here is still listed, with its activation only.
+// Protocols with a dedicated metrics view, used when the API did not return a
+// generic `metrics` list. A protocol that is not registered here is still
+// listed, with its activation only.
 const PROTOCOL_VIEWS: ProtocolView[] = [
   defineView(isConcordProtocol, (protocol) => (
     <ConcordDetails protocol={protocol} />
@@ -58,11 +60,15 @@ export const ProtocolSection = ({
 }) => {
   const name = protocol.displayName ?? protocol.protocol;
 
-  const details = protocol.activated
-    ? PROTOCOL_VIEWS.map((view) => view(protocol, { activatedProtocols })).find(
-        (node) => node !== null
-      )
-    : null;
+  // The metrics list returned by the API takes precedence over the dedicated
+  // views, which expect structured sections.
+  const details = !protocol.activated ? null : hasMetrics(protocol) ? (
+    <MetricsView protocol={protocol} />
+  ) : (
+    PROTOCOL_VIEWS.map((view) => view(protocol, { activatedProtocols })).find(
+      (node) => node !== null
+    )
+  );
 
   return (
     <Accordion
@@ -79,10 +85,16 @@ export const ProtocolSection = ({
         ) : undefined
       }
       endSlot={
-        <StatusTag
-          label={protocol.enabled ? 'Enabled' : 'Disabled'}
-          tone={protocol.enabled ? 'positive' : 'neutral'}
-        />
+        <Stack direction="row" gap="8px">
+          <StatusTag
+            label={protocol.enabled ? 'Enabled' : 'Disabled'}
+            tone={protocol.enabled ? 'positive' : 'neutral'}
+          />
+          <StatusTag
+            label={protocol.activated ? 'Activated' : 'Not activated'}
+            tone={protocol.activated ? 'positive' : 'negative'}
+          />
+        </Stack>
       }
     >
       <Stack direction="column" gap="12px">

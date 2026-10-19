@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   execution report (the report's earlier results are replaced), via the new `protocol_execution_report` target
   of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.l9_graph`.
   Requires `oxp-ontology>=1.0.6`.
+- **L9 protocols read API.** `GET /sessions/{id}/l9-protocols` reads the session's `L9Report` and
+  `L9ProtocolExecutionReport` nodes and returns, per protocol (`L9-ACCORD`...), `enabled` / `activated`, the
+  agents and skills that had / used it, and a generic `metrics` list (`name`, `section`, `value`, `reasoning`
+  or parsed `details`, `provider`, `unit`, `timestamp`). `sessions-with-l9-protocols` returns each session's
+  enabled / activated protocols from its `L9Report`; its `concord` summary is no longer filled.
 
 ### Changed
 
