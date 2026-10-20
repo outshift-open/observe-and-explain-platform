@@ -21,7 +21,7 @@ from oxp.models.otel_traces import (
     GraphResponse,
     ImpactAssessmentResponse,
     LatentSpaceResponse,
-    SessionL9ProtocolsResponse,
+    SessionCognitionProtocolsResponse,
     SessionSpansResponse,
     SessionSummaryResponse,
     TrajectoryResponse,
@@ -136,18 +136,21 @@ def get_session_impact_assessment(
     )
 
 
-@router.get("/{session_id}/l9-protocols", response_model=SessionL9ProtocolsResponse)
-def get_session_l9_protocols(
+@router.get(
+    "/{session_id}/cognition-protocols",
+    response_model=SessionCognitionProtocolsResponse,
+)
+def get_session_cognition_protocols(
     session_id: str,
     kg_client=Depends(_kg_client),  # noqa: B008
     redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
 ) -> Any:
-    """Return the L9 protocols of a session, with the metrics of each activated protocol."""
-    key = make_cache_key("sessions:l9_protocols", {"session": session_id})
+    """Return the Cognition protocols of a session, with the metrics of each activated protocol."""
+    key = make_cache_key("sessions:cognition_protocols", {"session": session_id})
     return cached(
         redis_client=redis_client,
         key=key,
-        fetch=lambda: kg_client.get_session_l9_protocols(session_id=session_id),
+        fetch=lambda: kg_client.get_session_cognition_protocols(session_id=session_id),
         ttl=settings.CACHE_TTL_SECONDS,
         enabled=settings.CACHE_ENABLED,
     )

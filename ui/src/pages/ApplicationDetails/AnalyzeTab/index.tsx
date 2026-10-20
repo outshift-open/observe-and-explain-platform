@@ -23,7 +23,7 @@ import {
   SemanticGroupsInsightsTable
 } from '@/components';
 import CognitiveObservability from '@/components/CognitiveObservability';
-import L9ProtocolsComparison from '@/components/L9ProtocolsComparison';
+import CognitionProtocolsComparison from '@/components/CognitionProtocolsComparison';
 import { FeatureFlagKey, getFeatureFlags } from '@/config/featureFlags';
 
 const ANALYZE_TABS = [
@@ -32,7 +32,7 @@ const ANALYZE_TABS = [
   'What resources they are using',
   'How they are reasoning',
   'Cognitive observability',
-  'L9 protocols'
+  'Cognition protocols'
 ] as const;
 
 type AnalyzeTabName = (typeof ANALYZE_TABS)[number];
@@ -45,7 +45,7 @@ const ANALYZE_TAB_FLAGS: Partial<Record<AnalyzeTabName, FeatureFlagKey>> = {
   'What resources they are using': 'waste_estimation',
   'How they are reasoning': 'neurosymbolic_eval',
   'Cognitive observability': 'cognitive_observability',
-  'L9 protocols': 'l9_protocols'
+  'Cognition protocols': 'cognition_protocols'
 };
 
 const ANALYZE_TAB_META: Record<
@@ -72,8 +72,8 @@ const ANALYZE_TAB_META: Record<
     label: 'Cognitive observability',
     icon: VisibilityOutlinedIcon
   },
-  'L9 protocols': {
-    label: 'L9 protocols',
+  'Cognition protocols': {
+    label: 'Cognition protocols',
     icon: CompareArrowsOutlinedIcon
   }
 };
@@ -90,7 +90,7 @@ const ANALYZE_TAB_SECTIONS: { title: string; tabs: AnalyzeTabName[] }[] = [
   },
   {
     title: 'Performance',
-    tabs: ['How they are failing', 'Cognitive observability', 'L9 protocols']
+    tabs: ['How they are failing', 'Cognitive observability', 'Cognition protocols']
   }
 ];
 
@@ -243,8 +243,8 @@ const AnalyzeTabContent = memo(({ tab }: { tab: AnalyzeTabName }) => {
       return <ApplicationReasoningPathGraph masName={applicationId ?? ''} />;
     case 'Cognitive observability':
       return <CognitiveObservability />;
-    case 'L9 protocols':
-      return <L9ProtocolsComparison />;
+    case 'Cognition protocols':
+      return <CognitionProtocolsComparison />;
   }
 });
 

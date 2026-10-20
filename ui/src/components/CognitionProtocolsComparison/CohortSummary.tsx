@@ -9,10 +9,10 @@ import { Cohort, NO_PROTOCOL_COHORT } from './utils';
 
 const getCohortDescription = (cohort: Cohort): string => {
   if (cohort.label === NO_PROTOCOL_COHORT) {
-    return 'Sessions where no L9 protocol was enabled.';
+    return 'Sessions where no Cognition protocol was enabled.';
   }
   if (cohort.activatedCount === 0) {
-    return 'Sessions where an L9 protocol was enabled but never activated.';
+    return 'Sessions where a Cognition protocol was enabled but never activated.';
   }
   return 'Sessions where exactly these protocols were activated.';
 };

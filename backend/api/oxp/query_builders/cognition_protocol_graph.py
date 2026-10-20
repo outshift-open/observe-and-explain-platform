@@ -1,26 +1,26 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-"""How L9 protocol reports are stored in the knowledge graph.
+"""How Cognition protocol reports are stored in the knowledge graph.
 
 ::
 
-    (r:L9Report {id, sessionId, protocolsEnabled, protocolsActivated, reportedAt})
+    (r:CognitionProtocolReport {id, sessionId, protocolsEnabled, protocolsActivated, reportedAt})
         -[:reportsOn]-> (s:Session)
-    (p:L9ProtocolExecutionReport {id, sessionId, protocol, enabledEvidence, skillsEnabled,
+    (p:CognitionProtocolExecutionReport {id, sessionId, protocol, enabledEvidence, skillsEnabled,
                                   skillsActivated, agentsEnabled, agentsActivated,
                                   metricCount, reportedAt})
         -[:reportsOn]-> (s:Session)
-    (m:MetricResult) -[:measures]-> (p:L9ProtocolExecutionReport)
+    (m:MetricResult) -[:measures]-> (p:CognitionProtocolExecutionReport)
 
-An ``L9Report`` says which L9 protocols were enabled and which activated in a
+An ``CognitionProtocolReport`` says which Cognition protocols were enabled and which activated in a
 session: lists of protocol names, so a new protocol adds an entry, not a
-property. An ``L9ProtocolExecutionReport`` is everything about one protocol in
+property. An ``CognitionProtocolExecutionReport`` is everything about one protocol in
 one session: who had it, who used it, and its evaluation metrics (see
 ``metric_graph``, which writes the ``MetricResult`` nodes that measure it).
 
 Both are keyed by session (and protocol), so writing again overwrites. The node
 properties are exactly the fields of the models generated from the ontology
-(``oxp_ontology.models.nodes.L9Report`` / ``L9ProtocolExecutionReport``); every
+(``oxp_ontology.models.nodes.CognitionProtocolReport`` / ``CognitionProtocolExecutionReport``); every
 write is validated against them. Different writers fill different properties of
 the same protocol report (who took part, the metrics), so each builder returns
 only the properties its writer owns and the others are left as they are.
@@ -33,13 +33,17 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
-from oxp_ontology.models.nodes import L9ProtocolExecutionReport as ProtocolReportModel
-from oxp_ontology.models.nodes import L9Report as L9ReportModel
+from oxp_ontology.models.nodes import (
+    CognitionProtocolExecutionReport as ProtocolReportModel,
+)
+from oxp_ontology.models.nodes import (
+    CognitionProtocolReport as CognitionProtocolReportModel,
+)
 
 QueryPair = tuple[str, dict[str, Any]]
 
-L9_REPORT = "L9Report"
-L9_PROTOCOL_EXECUTION_REPORT = "L9ProtocolExecutionReport"
+COGNITION_PROTOCOL_REPORT = "CognitionProtocolReport"
+COGNITION_PROTOCOL_EXECUTION_REPORT = "CognitionProtocolExecutionReport"
 
 _PARTICIPATION_FIELDS = {
     "id",
@@ -60,30 +64,30 @@ def _digest(*parts: str) -> str:
     return hashlib.sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
-def l9_report_id(session_id: str) -> str:
-    """Id of the ``L9Report`` of a session."""
-    return f"l9report:{_digest(session_id)}"
+def cognition_protocol_report_id(session_id: str) -> str:
+    """Id of the ``CognitionProtocolReport`` of a session."""
+    return f"cognitionprotocolreport:{_digest(session_id)}"
 
 
 def protocol_execution_report_id(session_id: str, protocol: str) -> str:
-    """Id of the ``L9ProtocolExecutionReport`` of a protocol in a session."""
-    return f"l9protocolexecutionreport:{_digest(protocol, session_id)}"
+    """Id of the ``CognitionProtocolExecutionReport`` of a protocol in a session."""
+    return f"cognitionprotocolexecutionreport:{_digest(protocol, session_id)}"
 
 
 def _names(values: Iterable[str]) -> list[str]:
     return sorted({str(v) for v in values})
 
 
-def l9_report_properties(
+def cognition_protocol_report_properties(
     session_id: str,
     protocols_enabled: Iterable[str],
     protocols_activated: Iterable[str],
     reported_at: datetime | None = None,
 ) -> dict[str, Any]:
-    """Properties of the ontology ``L9Report`` (validated against the model)."""
-    return L9ReportModel(
-        id=l9_report_id(session_id),
-        name="L9 report",
+    """Properties of the ontology ``CognitionProtocolReport`` (validated against the model)."""
+    return CognitionProtocolReportModel(
+        id=cognition_protocol_report_id(session_id),
+        name="Cognition protocol report",
         sessionId=session_id,
         protocolsEnabled=_names(protocols_enabled),
         protocolsActivated=_names(protocols_activated),
@@ -144,11 +148,13 @@ def session_exists_query(session_id: str) -> QueryPair:
     )
 
 
-def write_l9_report_query(session_id: str, props: dict[str, Any]) -> QueryPair:
-    """MERGE the session's ``L9Report`` and link it to the session. Nothing is written if the session is missing."""
+def write_cognition_protocol_report_query(
+    session_id: str, props: dict[str, Any]
+) -> QueryPair:
+    """MERGE the session's ``CognitionProtocolReport`` and link it to the session. Nothing is written if the session is missing."""
     query = f"""
     MATCH (s:Session {{sessionId: $session_id}})
-    MERGE (r:{L9_REPORT} {{id: $props.id}})
+    MERGE (r:{COGNITION_PROTOCOL_REPORT} {{id: $props.id}})
     SET r += $props
     MERGE (r)-[:reportsOn]->(s)
     RETURN r.id AS id
@@ -167,7 +173,7 @@ def write_protocol_execution_report_query(
     """
     query = f"""
     MATCH (s:Session {{sessionId: $session_id}})
-    MERGE (p:{L9_PROTOCOL_EXECUTION_REPORT} {{id: $props.id}})
+    MERGE (p:{COGNITION_PROTOCOL_EXECUTION_REPORT} {{id: $props.id}})
     SET p += $props
     MERGE (p)-[:reportsOn]->(s)
     RETURN p.id AS id
@@ -178,7 +184,7 @@ def write_protocol_execution_report_query(
 def clear_protocol_execution_report_metrics_query(report_id: str) -> QueryPair:
     """Delete the metric results measuring a protocol execution report (the ``Metric`` definitions stay)."""
     query = f"""
-    MATCH (r:MetricResult)-[:measures]->(p:{L9_PROTOCOL_EXECUTION_REPORT} {{id: $report_id}})
+    MATCH (r:MetricResult)-[:measures]->(p:{COGNITION_PROTOCOL_EXECUTION_REPORT} {{id: $report_id}})
     DETACH DELETE r
     RETURN count(r) AS deleted
     """

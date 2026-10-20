@@ -1,6 +1,6 @@
-import { SessionL9Protocols } from '@/types/oxp.type';
+import { SessionCognitionProtocols } from '@/types/oxp.type';
 
-// Mocked L9 protocols per session. Sessions that are not listed have no L9
+// Mocked Cognition protocols per session. Sessions that are not listed have no Cognition
 // protocol at all (empty `protocols` list). Scenarios:
 //  - 4493f565: CONCORD (COMMIT) and ACCORD, both activated, with handoff
 //  - 41114179: CONCORD ending in BEST_EFFORT with a shortfall
@@ -8,7 +8,7 @@ import { SessionL9Protocols } from '@/types/oxp.type';
 //              without ground truth
 //  - 65d1c926: CONCORD (COMMIT) with a lot of missing metrics
 //  - 5980fc14: ACCORD enabled but not activated
-export const mockSessionL9Protocols: Record<string, SessionL9Protocols> = {
+export const mockSessionCognitionProtocols: Record<string, SessionCognitionProtocols> = {
   '4493f565-d069-47ec-9a6c-5df6dc8f31b7': {
     sessionId: '4493f565-d069-47ec-9a6c-5df6dc8f31b7',
     protocols: [

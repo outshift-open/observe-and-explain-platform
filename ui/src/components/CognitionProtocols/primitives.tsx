@@ -19,8 +19,8 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import InfoOutlineIcon from '@mui/icons-material/InfoOutline';
 import { GeneralSize, Tag, Tooltip } from '@open-ui-kit/core';
-import { L9Tone, getVerdictTone, humanizeLabel } from '@/common/l9Protocols';
-import { L9Check, L9Verdict } from '@/types/oxp.type';
+import { CognitionTone, getVerdictTone, humanizeLabel } from '@/common/cognitionProtocols';
+import { CognitionCheck, CognitionVerdict } from '@/types/oxp.type';
 
 export const NO_DATA = 'N/A';
 
@@ -70,7 +70,7 @@ export const NotAvailable = ({ text = NO_DATA }: { text?: string }) => {
 
 const useToneColor = () => {
   const theme = useTheme();
-  return (tone: L9Tone): string => {
+  return (tone: CognitionTone): string => {
     switch (tone) {
       case 'positive':
         return theme.palette.vars.successIconDefault;
@@ -91,7 +91,7 @@ export const StatusTag = ({
   tone = 'neutral'
 }: {
   label: string;
-  tone?: L9Tone;
+  tone?: CognitionTone;
 }) => {
   const theme = useTheme();
   const getColor = useToneColor();
@@ -123,8 +123,8 @@ export const YesNoTag = ({
   noTone = 'neutral'
 }: {
   value?: boolean | null;
-  yesTone?: L9Tone;
-  noTone?: L9Tone;
+  yesTone?: CognitionTone;
+  noTone?: CognitionTone;
 }) =>
   isMissing(value) ? (
     <NotAvailable />
@@ -170,7 +170,7 @@ export const CheckResult = ({
   check,
   failuresLabel = 'Failed'
 }: {
-  check?: L9Check | null;
+  check?: CognitionCheck | null;
   failuresLabel?: string;
 }) => {
   if (!check) return <NotAvailable />;
@@ -193,7 +193,7 @@ export const VerdictResult = ({
   verdict,
   itemsLabel
 }: {
-  verdict?: L9Verdict | null;
+  verdict?: CognitionVerdict | null;
   itemsLabel?: string;
 }) => {
   if (!verdict?.label) return <NotAvailable />;

@@ -9,19 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **L9 protocol reports.** `oxp.providers.OXPL9ReportProvider` writes, through the ontology models, an
-  `L9Report` per session (`protocolsEnabled` / `protocolsActivated`: which L9 protocols were available and
-  which were used) and an `L9ProtocolExecutionReport` per session and protocol (the agents and skills that had
+- **Cognition protocol reports.** `oxp.providers.OXPCognitionProtocolReportProvider` writes, through the ontology models, an
+  `CognitionProtocolReport` per session (`protocolsEnabled` / `protocolsActivated`: which Cognition protocols were available and
+  which were used) and a `CognitionProtocolExecutionReport` per session and protocol (the agents and skills that had
   it and used it, and its evaluation metrics), both linked to the `Session` by `reportsOn`.
   `save_protocol_execution_metrics` stores a protocol's metrics as `MetricResult` nodes that `measure` its
   execution report (the report's earlier results are replaced), via the new `protocol_execution_report` target
-  of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.l9_graph`.
+  of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.cognition_protocol_graph`.
   Requires `oxp-ontology>=1.0.6`.
-- **L9 protocols read API.** `GET /sessions/{id}/l9-protocols` reads the session's `L9Report` and
-  `L9ProtocolExecutionReport` nodes and returns, per protocol (`L9-ACCORD`...), `enabled` / `activated`, the
+- **Cognition protocols read API.** `GET /sessions/{id}/cognition-protocols` reads the session's `CognitionProtocolReport` and
+  `CognitionProtocolExecutionReport` nodes and returns, per protocol (`L9-ACCORD`...), `enabled` / `activated`, the
   agents and skills that had / used it, and a generic `metrics` list (`name`, `section`, `value`, `reasoning`
-  or parsed `details`, `provider`, `unit`, `timestamp`). `sessions-with-l9-protocols` returns each session's
-  enabled / activated protocols from its `L9Report`; its `concord` summary is no longer filled.
+  or parsed `details`, `provider`, `unit`, `timestamp`). `sessions-with-cognition-protocols` returns each session's
+  enabled / activated protocols from its `CognitionProtocolReport`; its `concord` summary is no longer filled.
 
 ### Changed
 

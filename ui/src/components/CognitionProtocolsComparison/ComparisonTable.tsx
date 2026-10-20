@@ -8,7 +8,7 @@ import {
   InfoTooltip,
   NotAvailable,
   SimpleTable
-} from '../L9Protocols/primitives';
+} from '../CognitionProtocols/primitives';
 import {
   Cohort,
   MetricKind,

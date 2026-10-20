@@ -12,7 +12,7 @@ import { ExecutionTreeTab } from './ExecutionTreeTab';
 import { ConversationTab } from './ConversationTab';
 import { SessionAnalysisTab } from './SessionAnalysisTab';
 import { CognitiveObservabilityTab } from './CognitiveObservabilityTab';
-import { L9ProtocolsTab } from './L9ProtocolsTab';
+import { CognitionProtocolsTab } from './CognitionProtocolsTab';
 import { useApplicationSessionsWithStatefulEval } from '@/api/oxpApi';
 import { DEFAULT_START_DATE, DEFAULT_END_DATE } from '@/common';
 import { SessionWithStatefulEval } from '@/types/oxp.type';
@@ -23,7 +23,7 @@ export const SESSION_TAB_KEYS = [
   'overview',
   'analysis',
   'cognitive-observability',
-  'l9-protocols',
+  'cognition-protocols',
   'reasoning-path',
   'execution-graph',
   'conversation'
@@ -67,7 +67,7 @@ const SessionDetails = ({
   const cognitiveObservabilityEnabled = useFeatureFlag(
     'cognitive_observability'
   );
-  const l9ProtocolsEnabled = useFeatureFlag('l9_protocols');
+  const cognitionProtocolsEnabled = useFeatureFlag('cognition_protocols');
   const [isReasoningPathTabVisible, setIsReasoningPathTabVisible] =
     useState<boolean>(false);
 
@@ -119,10 +119,10 @@ const SessionDetails = ({
         render: () => <CognitiveObservabilityTab />
       },
       {
-        key: 'l9-protocols',
-        label: 'L9 Protocols',
-        visible: l9ProtocolsEnabled,
-        render: () => <L9ProtocolsTab />
+        key: 'cognition-protocols',
+        label: 'Cognition Protocols',
+        visible: cognitionProtocolsEnabled,
+        render: () => <CognitionProtocolsTab />
       },
       {
         key: 'reasoning-path',
@@ -150,7 +150,7 @@ const SessionDetails = ({
       isReasoningPathTabVisible,
       sessionId,
       cognitiveObservabilityEnabled,
-      l9ProtocolsEnabled
+      cognitionProtocolsEnabled
     ]
   );
 

@@ -5,16 +5,16 @@
 
 import { useMemo } from 'react';
 import { Stack } from '@mui/material';
-import { L9Protocol } from '@/types/oxp.type';
+import { CognitionProtocol } from '@/types/oxp.type';
 import { ProtocolSection } from './ProtocolSection';
 
 // A protocol is listed when it applies to the session. A protocol that was
 // expected but is not enabled is listed too, so a missed activation is visible.
-const isListed = (protocol: L9Protocol) =>
+const isListed = (protocol: CognitionProtocol) =>
   protocol.enabled || protocol.expected?.expected === true;
 
 // Renders the protocols provided by the API, in the order they are provided.
-export const L9Protocols = ({ protocols }: { protocols: L9Protocol[] }) => {
+export const CognitionProtocols = ({ protocols }: { protocols: CognitionProtocol[] }) => {
   const listed = useMemo(() => protocols.filter(isListed), [protocols]);
   const activatedProtocols = useMemo(
     () => new Set(listed.filter((p) => p.activated).map((p) => p.protocol)),
@@ -34,5 +34,5 @@ export const L9Protocols = ({ protocols }: { protocols: L9Protocol[] }) => {
   );
 };
 
-export const hasListedProtocols = (protocols: L9Protocol[]) =>
+export const hasListedProtocols = (protocols: CognitionProtocol[]) =>
   protocols.some(isListed);

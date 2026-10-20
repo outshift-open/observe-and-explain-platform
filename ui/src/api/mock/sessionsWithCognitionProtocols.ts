@@ -1,10 +1,10 @@
-import { isConcordProtocol } from '@/common/l9Protocols';
+import { isConcordProtocol } from '@/common/cognitionProtocols';
 import {
-  SessionsWithL9Protocols,
-  SessionWithL9Protocols
+  SessionsWithCognitionProtocols,
+  SessionWithCognitionProtocols
 } from '@/types/oxp.type';
 import { mockSessionsWithCognitiveObservability } from './sessionsWithCognitiveObservability';
-import { mockSessionL9Protocols } from './sessionL9Protocols';
+import { mockSessionCognitionProtocols } from './sessionCognitionProtocols';
 
 // The sre-triage application: an orchestrator and five specialists, all running
 // on the same model.
@@ -19,12 +19,12 @@ const SRE_TRIAGE_AGENTS = [
 const SRE_TRIAGE_LLM = 'vertex_ai/gemini-2.5-flash';
 
 // The usage of a session includes the usage of its protocols, so it cannot be
-// lower than what the per-session L9 mock reports for them. For the sessions
+// lower than what the per-session Cognition protocol mock reports for them. For the sessions
 // where the cognitive observability mock is lower, the usage is overridden here
 // (the protocols' usage plus the usage of the agents' own work).
 const SESSION_USAGE_OVERRIDES: Record<
   string,
-  Partial<Pick<SessionWithL9Protocols, 'tokens' | 'cost' | 'duration'>>
+  Partial<Pick<SessionWithCognitionProtocols, 'tokens' | 'cost' | 'duration'>>
 > = {
   // ACCORD (8,340 tokens, $0.0412) + CONCORD (18,840 tokens, $0.0987)
   '4493f565-d069-47ec-9a6c-5df6dc8f31b7': {
@@ -36,13 +36,13 @@ const SESSION_USAGE_OVERRIDES: Record<
   '41114179-2600-4073-a51d-0150651f2ae8': { tokens: 41800, cost: 0.479 }
 };
 
-// The sessions of the cognitive observability mock, each with its L9 protocol
-// status taken from the per-session L9 mock, so that both views stay
-// consistent. Sessions without an entry in the L9 mock have no L9 protocol.
-const toSessionWithL9Protocols = (
+// The sessions of the cognitive observability mock, each with its Cognition protocol
+// status taken from the per-session Cognition protocol mock, so that both views stay
+// consistent. Sessions without an entry in the Cognition protocol mock have no Cognition protocol.
+const toSessionWithCognitionProtocols = (
   session: (typeof mockSessionsWithCognitiveObservability.sessions)[number]
-): SessionWithL9Protocols => {
-  const protocols = mockSessionL9Protocols[session.sessionId]?.protocols ?? [];
+): SessionWithCognitionProtocols => {
+  const protocols = mockSessionCognitionProtocols[session.sessionId]?.protocols ?? [];
   const concord = protocols.find(isConcordProtocol);
   const scores = concord?.outcome?.agentScores ?? [];
 
@@ -65,7 +65,7 @@ const toSessionWithL9Protocols = (
     ...SESSION_USAGE_OVERRIDES[session.sessionId],
     cognitiveObservabilityMetrics: session.cognitiveObservabilityMetrics,
     cognitiveFailures: session.cognitiveFailures,
-    l9Protocols: protocols.map(({ protocol, enabled, activated }) => ({
+    cognitionProtocols: protocols.map(({ protocol, enabled, activated }) => ({
       protocol,
       enabled,
       activated
@@ -81,8 +81,8 @@ const toSessionWithL9Protocols = (
   };
 };
 
-export const mockSessionsWithL9Protocols: SessionsWithL9Protocols = {
+export const mockSessionsWithCognitionProtocols: SessionsWithCognitionProtocols = {
   sessions: mockSessionsWithCognitiveObservability.sessions.map(
-    toSessionWithL9Protocols
+    toSessionWithCognitionProtocols
   )
 };

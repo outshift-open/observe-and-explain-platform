@@ -355,11 +355,11 @@ class SessionsWithCognitiveObservabilityResponse(BaseModel):
     sessions: list[CognitiveSessionItem] = []
 
 
-# ── L9 protocols models ───────────────────────────────────────────────────────
+# ── Cognition protocols models ───────────────────────────────────────────────────────
 
 
-class SessionL9ProtocolsResponse(BaseModel):
-    """Response body for ``GET /sessions/{session_id}/l9-protocols``.
+class SessionCognitionProtocolsResponse(BaseModel):
+    """Response body for ``GET /sessions/{session_id}/cognition-protocols``.
 
     Each protocol is a camelCase dict (``protocol``, ``enabled``, ``activated``, the agents and
     skills that had / used it, and its ``metrics``) as consumed by the UI.
@@ -369,7 +369,7 @@ class SessionL9ProtocolsResponse(BaseModel):
     protocols: list[dict[str, Any]] = []
 
 
-class SessionL9ProtocolStatus(BaseModel):
+class SessionCognitionProtocolStatus(BaseModel):
     """Whether a protocol was enabled / activated in a session."""
 
     protocol: str
@@ -377,18 +377,18 @@ class SessionL9ProtocolStatus(BaseModel):
     activated: bool
 
 
-class SessionWithL9ProtocolsItem(CognitiveSessionItem):
-    """A session with its L9 protocol status and cognitive observability."""
+class SessionWithCognitionProtocolsItem(CognitiveSessionItem):
+    """A session with its Cognition protocol status and cognitive observability."""
 
-    l9Protocols: list[SessionL9ProtocolStatus] = []
+    cognitionProtocols: list[SessionCognitionProtocolStatus] = []
     # Only for sessions where CONCORD was activated.
     concord: dict[str, Any] | None = None
 
 
-class SessionsWithL9ProtocolsResponse(BaseModel):
-    """Response body for ``sessions-with-l9-protocols``."""
+class SessionsWithCognitionProtocolsResponse(BaseModel):
+    """Response body for ``sessions-with-cognition-protocols``."""
 
-    sessions: list[SessionWithL9ProtocolsItem] = []
+    sessions: list[SessionWithCognitionProtocolsItem] = []
 
 
 # ── Application General Charts models ─────────────────────────────────────────

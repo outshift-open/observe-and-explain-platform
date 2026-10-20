@@ -6,12 +6,12 @@
 import { useParams } from 'react-router';
 import { Stack } from '@mui/material';
 import { Banner, EmptyState, Skeleton } from '@open-ui-kit/core';
-import { useSessionL9Protocols } from '@/api/oxpApi';
-import { L9Protocols, hasListedProtocols } from '../L9Protocols';
+import { useSessionCognitionProtocols } from '@/api/oxpApi';
+import { CognitionProtocols, hasListedProtocols } from '../CognitionProtocols';
 
-export const L9ProtocolsTab = () => {
+export const CognitionProtocolsTab = () => {
   const { sessionId } = useParams();
-  const { data, isLoading, isError } = useSessionL9Protocols(sessionId);
+  const { data, isLoading, isError } = useSessionCognitionProtocols(sessionId);
 
   if (isLoading) {
     return (
@@ -25,7 +25,7 @@ export const L9ProtocolsTab = () => {
 
   if (isError) {
     return (
-      <Banner status="negative" text="Failed to load L9 protocols data." />
+      <Banner status="negative" text="Failed to load Cognition protocols data." />
     );
   }
 
@@ -34,7 +34,7 @@ export const L9ProtocolsTab = () => {
   if (!hasListedProtocols(protocols)) {
     return (
       <EmptyState
-        title="No L9 protocols in this session"
+        title="No Cognition protocols in this session"
         description="Neither a protocol was enabled nor expected for this session."
       />
     );
@@ -42,7 +42,7 @@ export const L9ProtocolsTab = () => {
 
   return (
     <Stack direction="column" sx={{ paddingTop: '16px' }}>
-      <L9Protocols protocols={protocols} />
+      <CognitionProtocols protocols={protocols} />
     </Stack>
   );
 };

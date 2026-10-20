@@ -4,7 +4,7 @@
  */
 
 import { Stack, Typography } from '@mui/material';
-import { L9Protocol } from '@/types/oxp.type';
+import { CognitionProtocol } from '@/types/oxp.type';
 import {
   MetricRow,
   NotAvailable,
@@ -15,7 +15,7 @@ import {
 
 // Activation is shown for every protocol, activated or not. `expected` is only
 // shown for protocols that track it (absent = not tracked).
-export const ActivationSection = ({ protocol }: { protocol: L9Protocol }) => {
+export const ActivationSection = ({ protocol }: { protocol: CognitionProtocol }) => {
   const tracksExpected = protocol.expected !== undefined;
 
   return (

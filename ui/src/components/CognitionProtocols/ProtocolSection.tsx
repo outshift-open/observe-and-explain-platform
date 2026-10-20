@@ -7,11 +7,11 @@ import { ReactNode } from 'react';
 import { Stack, Typography } from '@mui/material';
 import { Accordion } from '@open-ui-kit/core';
 import {
-  L9_CONCORD,
+  COGNITION_CONCORD,
   isAccordProtocol,
   isConcordProtocol
-} from '@/common/l9Protocols';
-import { L9Protocol } from '@/types/oxp.type';
+} from '@/common/cognitionProtocols';
+import { CognitionProtocol } from '@/types/oxp.type';
 import { ActivationSection } from './ActivationSection';
 import { ConcordDetails } from './ConcordDetails';
 import { AccordDetails } from './AccordDetails';
@@ -19,19 +19,19 @@ import { MetricsView, hasMetrics } from './MetricsView';
 import { InfoTooltip, StatusTag } from './primitives';
 
 // What a protocol view can know about the other protocols of the session.
-interface L9ViewContext {
+interface CognitionViewContext {
   activatedProtocols: Set<string>;
 }
 
 type ProtocolView = (
-  protocol: L9Protocol,
-  context: L9ViewContext
+  protocol: CognitionProtocol,
+  context: CognitionViewContext
 ) => ReactNode | null;
 
 const defineView =
-  <T extends L9Protocol>(
-    matches: (protocol: L9Protocol) => protocol is T,
-    render: (protocol: T, context: L9ViewContext) => ReactNode
+  <T extends CognitionProtocol>(
+    matches: (protocol: CognitionProtocol) => protocol is T,
+    render: (protocol: T, context: CognitionViewContext) => ReactNode
   ): ProtocolView =>
   (protocol, context) =>
     matches(protocol) ? render(protocol, context) : null;
@@ -46,7 +46,7 @@ const PROTOCOL_VIEWS: ProtocolView[] = [
   defineView(isAccordProtocol, (protocol, context) => (
     <AccordDetails
       protocol={protocol}
-      concordActivated={context.activatedProtocols.has(L9_CONCORD)}
+      concordActivated={context.activatedProtocols.has(COGNITION_CONCORD)}
     />
   ))
 ];
@@ -55,7 +55,7 @@ export const ProtocolSection = ({
   protocol,
   activatedProtocols
 }: {
-  protocol: L9Protocol;
+  protocol: CognitionProtocol;
   activatedProtocols: Set<string>;
 }) => {
   const name = protocol.displayName ?? protocol.protocol;

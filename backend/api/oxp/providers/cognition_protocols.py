@@ -1,9 +1,9 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-"""Provider for the L9 protocol reports of a session.
+"""Provider for the Cognition protocol reports of a session.
 
-* ``L9Report``: which L9 protocols were enabled and which were activated.
-* ``L9ProtocolExecutionReport``: one protocol's run in the session: the agents and skills
+* ``CognitionProtocolReport``: which Cognition protocols were enabled and which were activated.
+* ``CognitionProtocolExecutionReport``: one protocol's run in the session: the agents and skills
   that took part, and the protocol's evaluation metrics, stored as ``MetricResult`` nodes
   that measure the report.
 
@@ -20,13 +20,13 @@ from oxp.connectors.base import Connector
 from oxp.interfaces.models import MetricResult
 from oxp.providers._graph import _graph_properties
 from oxp.providers.kg import _resolve_connector
-from oxp.query_builders import l9_graph, metric_graph
+from oxp.query_builders import cognition_protocol_graph, metric_graph
 
 logger = logging.getLogger(__name__)
 
 
-class OXPL9ReportProvider:
-    """Neo4j-backed writer of ``L9Report`` and ``L9ProtocolExecutionReport`` nodes."""
+class OXPCognitionProtocolReportProvider:
+    """Neo4j-backed writer of ``CognitionProtocolReport`` and ``CognitionProtocolExecutionReport`` nodes."""
 
     def __init__(
         self,
@@ -38,20 +38,23 @@ class OXPL9ReportProvider:
         self._db = _resolve_connector(db, connector)
 
     def _session_exists(self, session_id: str) -> bool:
-        rows = self._db.execute(*l9_graph.session_exists_query(session_id))
+        rows = self._db.execute(
+            *cognition_protocol_graph.session_exists_query(session_id)
+        )
         if not rows:
             logger.warning(
-                "No Session %s in the graph; L9 report not written", session_id
+                "No Session %s in the graph; Cognition protocol report not written",
+                session_id,
             )
         return bool(rows)
 
-    def save_l9_report(
+    def save_cognition_protocol_report(
         self,
         session_id: str,
         protocols_enabled: Iterable[str],
         protocols_activated: Iterable[str],
     ) -> bool:
-        """Store the session's ``L9Report``: the protocols enabled and those activated.
+        """Store the session's ``CognitionProtocolReport``: the protocols enabled and those activated.
 
         False (nothing written) if the session is not in the graph or the report fails
         validation against the ontology.
@@ -59,12 +62,18 @@ class OXPL9ReportProvider:
         if not self._session_exists(session_id):
             return False
         try:
-            props = l9_graph.l9_report_properties(
+            props = cognition_protocol_graph.cognition_protocol_report_properties(
                 session_id, protocols_enabled, protocols_activated
             )
-            self._db.execute_command(*l9_graph.write_l9_report_query(session_id, props))
+            self._db.execute_command(
+                *cognition_protocol_graph.write_cognition_protocol_report_query(
+                    session_id, props
+                )
+            )
         except Exception as exc:
-            logger.error("save_l9_report failed for %s: %s", session_id, exc)
+            logger.error(
+                "save_cognition_protocol_report failed for %s: %s", session_id, exc
+            )
             return False
         return True
 
@@ -86,7 +95,7 @@ class OXPL9ReportProvider:
         if not self._session_exists(session_id):
             return False
         try:
-            props = l9_graph.protocol_participation_properties(
+            props = cognition_protocol_graph.protocol_participation_properties(
                 session_id,
                 protocol,
                 enabled_evidence=enabled_evidence,
@@ -96,7 +105,9 @@ class OXPL9ReportProvider:
                 agents_activated=agents_activated,
             )
             self._db.execute_command(
-                *l9_graph.write_protocol_execution_report_query(session_id, props)
+                *cognition_protocol_graph.write_protocol_execution_report_query(
+                    session_id, props
+                )
             )
         except Exception as exc:
             logger.error(
@@ -127,7 +138,9 @@ class OXPL9ReportProvider:
         if not self._session_exists(session_id):
             return False
 
-        report_id = l9_graph.protocol_execution_report_id(session_id, protocol)
+        report_id = cognition_protocol_graph.protocol_execution_report_id(
+            session_id, protocol
+        )
         rows = []
         for m in stored:
             graph = _graph_properties(m, report_id)
@@ -135,14 +148,18 @@ class OXPL9ReportProvider:
                 return False
             rows.append(graph)
         try:
-            props = l9_graph.protocol_metrics_properties(
+            props = cognition_protocol_graph.protocol_metrics_properties(
                 session_id, protocol, len(rows)
             )
             self._db.execute_command(
-                *l9_graph.write_protocol_execution_report_query(session_id, props)
+                *cognition_protocol_graph.write_protocol_execution_report_query(
+                    session_id, props
+                )
             )
             self._db.execute_command(
-                *l9_graph.clear_protocol_execution_report_metrics_query(report_id)
+                *cognition_protocol_graph.clear_protocol_execution_report_metrics_query(
+                    report_id
+                )
             )
             for definition, result in rows:
                 self._db.execute_command(

@@ -4,8 +4,8 @@
  */
 
 import { Stack, Typography } from '@mui/material';
-import { ACCORD_PHASE_ORDER } from '@/common/l9Protocols';
-import { L9AccordProtocol } from '@/types/oxp.type';
+import { ACCORD_PHASE_ORDER } from '@/common/cognitionProtocols';
+import { CognitionAccordProtocol } from '@/types/oxp.type';
 import { UsageSummaryTable } from './UsageTables';
 import {
   BlockTitle,
@@ -24,7 +24,7 @@ import {
 
 const NO_GROUND_TRUTH = 'N/A (no ground truth for this session)';
 
-const Convergence = ({ protocol }: { protocol: L9AccordProtocol }) => {
+const Convergence = ({ protocol }: { protocol: CognitionAccordProtocol }) => {
   const lockedFrame = protocol.convergence?.lockedFrame;
   const rounds = protocol.convergence?.roundsPerPhase ?? [];
 
@@ -78,7 +78,7 @@ const Convergence = ({ protocol }: { protocol: L9AccordProtocol }) => {
   );
 };
 
-const Correctness = ({ protocol }: { protocol: L9AccordProtocol }) => {
+const Correctness = ({ protocol }: { protocol: CognitionAccordProtocol }) => {
   const coverage = protocol.correctness?.issueCoverage;
   const missed = coverage?.missedIssues ?? [];
   const definitions = protocol.correctness?.definitionsFromAllAgents;
@@ -135,7 +135,7 @@ const Correctness = ({ protocol }: { protocol: L9AccordProtocol }) => {
   );
 };
 
-const Cost = ({ protocol }: { protocol: L9AccordProtocol }) => (
+const Cost = ({ protocol }: { protocol: CognitionAccordProtocol }) => (
   <SubSection
     title="Cost"
     description="Tokens and cost used by ACCORD in this session. The shared glossary also stays in every agent's working context for the rest of the run, which adds cost beyond the init exchange."
@@ -148,7 +148,7 @@ const Benefits = ({
   protocol,
   concordActivated
 }: {
-  protocol: L9AccordProtocol;
+  protocol: CognitionAccordProtocol;
   concordActivated: boolean;
 }) => {
   const benefits = protocol.benefits;
@@ -199,7 +199,7 @@ export const AccordDetails = ({
   protocol,
   concordActivated
 }: {
-  protocol: L9AccordProtocol;
+  protocol: CognitionAccordProtocol;
   // The handoff metric is only relevant when CONCORD also ran.
   concordActivated: boolean;
 }) => (

@@ -15,5 +15,5 @@ data:
   VITE_FF_WASTE_ESTIMATION: {{ .Values.featureFlags.wasteEstimation | quote }}
   VITE_FF_NEUROSYMBOLIC_EVAL: {{ .Values.featureFlags.neurosymbolicEval | quote }}
   VITE_FF_COGNITIVE_OBSERVABILITY: {{ .Values.featureFlags.cognitiveObservability | quote }}
-  VITE_FF_L9_PROTOCOLS: {{ .Values.featureFlags.l9Protocols | quote }}
+  VITE_FF_COGNITION_PROTOCOLS: {{ .Values.featureFlags.cognitionProtocols | quote }}
 {{- end }}

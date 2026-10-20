@@ -3164,7 +3164,7 @@ def neo4j_sessions_with_cognitive_observability_query(
         tokens,
         sessionMetrics,
         [x IN collect(DISTINCT properties(f)) WHERE x IS NOT NULL] AS failures
-    OPTIONAL MATCH (s)-[]-(l9:L9Report)
+    OPTIONAL MATCH (s)-[]-(cpr:CognitionProtocolReport)
     WITH
         s,
         cost,
@@ -3173,7 +3173,7 @@ def neo4j_sessions_with_cognitive_observability_query(
         tokens,
         sessionMetrics,
         failures,
-        [x IN collect(DISTINCT properties(l9)) WHERE x IS NOT NULL] AS l9Reports
+        [x IN collect(DISTINCT properties(cpr)) WHERE x IS NOT NULL] AS cognitionProtocolReports
     RETURN
         s.sessionId AS sessionId,
         s.startTime AS startTime,
@@ -3183,7 +3183,7 @@ def neo4j_sessions_with_cognitive_observability_query(
         tokens,
         sessionMetrics,
         failures,
-        l9Reports
+        cognitionProtocolReports
     ORDER BY s.startTime DESC
     """
     return stmt, {
@@ -3194,22 +3194,22 @@ def neo4j_sessions_with_cognitive_observability_query(
     }
 
 
-def neo4j_session_l9_reports_query(*, session_id: str):
-    """Build a Neo4j query returning the L9 reports of a session.
+def neo4j_session_cognition_protocol_reports_query(*, session_id: str):
+    """Build a Neo4j query returning the Cognition protocol reports of a session.
 
-    One row with ``found`` (whether the session exists), ``l9Reports`` (the properties of the
-    session's ``L9Report``: protocols enabled and activated) and ``executionReports`` (one entry
-    per ``L9ProtocolExecutionReport``: its ``report`` properties and its ``metrics``, the
+    One row with ``found`` (whether the session exists), ``cognitionProtocolReports`` (the properties of the
+    session's ``CognitionProtocolReport``: protocols enabled and activated) and ``executionReports`` (one entry
+    per ``CognitionProtocolExecutionReport``: its ``report`` properties and its ``metrics``, the
     ``MetricResult`` nodes that measure it, with their ``Metric`` definition).
     """
     stmt = """
     OPTIONAL MATCH (s:Session {sessionId: $session_id})
     CALL (s) {
-        OPTIONAL MATCH (r:L9Report)-[:reportsOn]->(s)
-        RETURN [x IN collect(DISTINCT properties(r)) WHERE x IS NOT NULL] AS l9Reports
+        OPTIONAL MATCH (r:CognitionProtocolReport)-[:reportsOn]->(s)
+        RETURN [x IN collect(DISTINCT properties(r)) WHERE x IS NOT NULL] AS cognitionProtocolReports
     }
     CALL (s) {
-        OPTIONAL MATCH (p:L9ProtocolExecutionReport)-[:reportsOn]->(s)
+        OPTIONAL MATCH (p:CognitionProtocolExecutionReport)-[:reportsOn]->(s)
         CALL (p) {
             OPTIONAL MATCH (m:MetricResult)-[:measures]->(p)
             OPTIONAL MATCH (m)-[:ofMetricType]->(d:Metric)
@@ -3227,6 +3227,6 @@ def neo4j_session_l9_reports_query(*, session_id: str):
             metrics: metrics
         } END) WHERE x IS NOT NULL] AS executionReports
     }
-    RETURN s IS NOT NULL AS found, l9Reports, executionReports
+    RETURN s IS NOT NULL AS found, cognitionProtocolReports, executionReports
     """
     return stmt, {"session_id": session_id}

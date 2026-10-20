@@ -39,9 +39,9 @@ from oxp.client.sessions import (
     _get_session_trajectory,
     _get_sessions,
 )
-from oxp.client.l9_protocols import (
-    _get_application_sessions_with_l9_protocols,
-    _get_session_l9_protocols,
+from oxp.client.cognition_protocols import (
+    _get_application_sessions_with_cognition_protocols,
+    _get_session_cognition_protocols,
 )
 from oxp.client.agentic_protocols import (
     _get_agentic_protocols_metrics,
@@ -64,8 +64,8 @@ from oxp.models.otel_traces import (
     MonitorApplicationLevelData,
     MonitorByApplicationResponse,
     SemanticgroupsResponse,
-    SessionL9ProtocolsResponse,
-    SessionsWithL9ProtocolsResponse,
+    SessionCognitionProtocolsResponse,
+    SessionsWithCognitionProtocolsResponse,
     SessionsWithCognitiveObservabilityResponse,
     SpanDetailsResponse,
     TracesResponse,
@@ -442,21 +442,23 @@ class UIClient:
             session_id=session_id,
         )
 
-    def get_session_l9_protocols(
+    def get_session_cognition_protocols(
         self, *, session_id: str
-    ) -> SessionL9ProtocolsResponse:
-        """Return the L9 protocols of a session, with their metrics."""
-        return _get_session_l9_protocols(self.db, self._dialect, session_id=session_id)
+    ) -> SessionCognitionProtocolsResponse:
+        """Return the Cognition protocols of a session, with their metrics."""
+        return _get_session_cognition_protocols(
+            self.db, self._dialect, session_id=session_id
+        )
 
-    def get_application_sessions_with_l9_protocols(
+    def get_application_sessions_with_cognition_protocols(
         self,
         *,
         application_id: str,
         start_time: str = "",
         end_time: str = "",
-    ) -> SessionsWithL9ProtocolsResponse:
-        """Return sessions with their L9 protocol status."""
-        return _get_application_sessions_with_l9_protocols(
+    ) -> SessionsWithCognitionProtocolsResponse:
+        """Return sessions with their Cognition protocol status."""
+        return _get_application_sessions_with_cognition_protocols(
             self.db,
             self._dialect,
             application_id=application_id,

@@ -18,36 +18,36 @@ import { Tooltip } from '@open-ui-kit/core';
 import { format } from 'date-fns';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PATHS } from '@/routes/routes';
-import { SessionWithL9Protocols } from '@/types/oxp.type';
+import { SessionWithCognitionProtocols } from '@/types/oxp.type';
 import {
   NotAvailable,
   StatusTag,
   formatCount
-} from '../L9Protocols/primitives';
+} from '../CognitionProtocols/primitives';
 import { shortProtocolName } from './utils';
 
-const HEADERS = ['Session ID', 'Timestamp', 'L9 protocols', 'Tokens', ''];
+const HEADERS = ['Session ID', 'Timestamp', 'Cognition protocols', 'Tokens', ''];
 
-// The sessions with an L9 protocol, each linking to its L9 Protocols tab.
+// The sessions with a Cognition protocol, each linking to its Cognition Protocols tab.
 export const SessionsTable = ({
   sessions
 }: {
-  sessions: SessionWithL9Protocols[];
+  sessions: SessionWithCognitionProtocols[];
 }) => {
   const theme = useTheme();
   const navigate = useNavigate();
   const { applicationId } = useParams();
 
   if (sessions.length === 0) {
-    return <NotAvailable text="No sessions with an L9 protocol" />;
+    return <NotAvailable text="No sessions with a Cognition protocol" />;
   }
 
-  const onSessionClick = (session: SessionWithL9Protocols) => {
+  const onSessionClick = (session: SessionWithCognitionProtocols) => {
     navigate(
       PATHS.applicationCollectSessionTab
         .replace(':applicationId', applicationId ?? '')
         .replace(':sessionId', encodeURIComponent(session.sessionId))
-        .replace(':sessionTab', 'l9-protocols')
+        .replace(':sessionTab', 'cognition-protocols')
     );
   };
 
@@ -104,7 +104,7 @@ export const SessionsTable = ({
             </TableCell>
             <TableCell>
               <Stack direction="row" gap="6px" flexWrap="wrap">
-                {(session.l9Protocols ?? [])
+                {(session.cognitionProtocols ?? [])
                   .filter((protocol) => protocol.enabled || protocol.activated)
                   .map((protocol) => (
                     <StatusTag

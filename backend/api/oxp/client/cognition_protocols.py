@@ -1,9 +1,9 @@
-"""L9-protocol implementations for :class:`UIClient`.
+"""Cognition protocol implementations for :class:`UIClient`.
 
-L9 protocols are stored in the KG as (see ``oxp.query_builders.l9_graph``):
+Cognition protocols are stored in the KG as (see ``oxp.query_builders.cognition_protocol_graph``):
 
-* one ``L9Report`` per session, listing the protocols enabled and those activated;
-* one ``L9ProtocolExecutionReport`` per activated protocol and session: the agents and skills
+* one ``CognitionProtocolReport`` per session, listing the protocols enabled and those activated;
+* one ``CognitionProtocolExecutionReport`` per activated protocol and session: the agents and skills
   that had / used the protocol, plus the protocol's evaluation metrics, stored as
   ``MetricResult`` nodes that measure the report.
 
@@ -27,9 +27,9 @@ from oxp.client.utils import parse_epoch_range
 from oxp.connectors.base import Connector
 from oxp.core.exceptions import DatabaseError, NotFoundError
 from oxp.models.otel_traces import (
-    SessionL9ProtocolsResponse,
-    SessionsWithL9ProtocolsResponse,
-    SessionWithL9ProtocolsItem,
+    SessionCognitionProtocolsResponse,
+    SessionsWithCognitionProtocolsResponse,
+    SessionWithCognitionProtocolsItem,
 )
 from oxp.query_builders import ui as ui_queries
 from oxp.query_builders.types import Dialect
@@ -98,7 +98,7 @@ _METRIC_SECTIONS = {
 
 
 def _normalize_protocol(name: object) -> str:
-    """``accord`` / ``L9_ACCORD`` / ``L9-ACCORD`` -> ``L9-ACCORD``."""
+    """``accord`` / ``COGNITION_ACCORD`` / ``L9-ACCORD`` -> ``L9-ACCORD``."""
     text = str(name).strip().upper().replace("_", "-").replace(" ", "-")
     return text if text.startswith("L9-") else f"L9-{text}"
 
@@ -110,9 +110,11 @@ def _names(raw: object) -> set[str]:
     return {_normalize_protocol(n) for n in raw if n}
 
 
-def _protocol_statuses(l9_reports: object) -> dict[str, dict[str, bool]]:
-    """``{protocol: {enabled, activated}}`` from the session's ``L9Report`` (latest wins)."""
-    reports = [r for r in (l9_reports or []) if isinstance(r, dict)]
+def _protocol_statuses(
+    cognition_protocol_reports: object,
+) -> dict[str, dict[str, bool]]:
+    """``{protocol: {enabled, activated}}`` from the session's ``CognitionProtocolReport`` (latest wins)."""
+    reports = [r for r in (cognition_protocol_reports or []) if isinstance(r, dict)]
     reports.sort(key=lambda r: str(r.get("reportedAt") or ""))
     statuses: dict[str, dict[str, bool]] = {}
     for report in reports:
@@ -181,12 +183,12 @@ def _build_metric(raw: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _build_protocols(
-    l9_reports: object, execution_reports: object
+    cognition_protocol_reports: object, execution_reports: object
 ) -> list[dict[str, Any]]:
     """One protocol per name, sorted by name: its status and, if executed, its report."""
     protocols = {
         name: {"protocol": name, **status}
-        for name, status in _protocol_statuses(l9_reports).items()
+        for name, status in _protocol_statuses(cognition_protocol_reports).items()
     }
     for item in execution_reports or []:
         report = item.get("report") if isinstance(item, dict) else None
@@ -195,7 +197,7 @@ def _build_protocols(
         ):
             continue
         name = _normalize_protocol(report.get("protocol") or report.get("name"))
-        # A protocol with an execution report ran, even if the L9Report is missing.
+        # A protocol with an execution report ran, even if the CognitionProtocolReport is missing.
         protocol = protocols.setdefault(
             name, {"protocol": name, "enabled": True, "activated": True}
         )
@@ -220,37 +222,41 @@ def _build_protocols(
     return [protocols[n] for n in sorted(protocols)]
 
 
-def _get_session_l9_protocols(
+def _get_session_cognition_protocols(
     db: Connector, dialect: Dialect, *, session_id: str
-) -> SessionL9ProtocolsResponse:
-    """Return the L9 protocols (with their metrics) of one session."""
+) -> SessionCognitionProtocolsResponse:
+    """Return the Cognition protocols (with their metrics) of one session."""
     del dialect  # Neo4j-only query.
-    query, params = ui_queries.neo4j_session_l9_reports_query(session_id=session_id)
+    query, params = ui_queries.neo4j_session_cognition_protocol_reports_query(
+        session_id=session_id
+    )
     try:
         rows = db.execute(query, params)
     except Exception as exc:
         raise DatabaseError(
-            f"Failed to get L9 protocols for session '{session_id}': {exc}"
+            f"Failed to get Cognition protocols for session '{session_id}': {exc}"
         ) from exc
 
     row = rows[0] if rows else {}
     if not row.get("found"):
         raise NotFoundError(f"Session '{session_id}' not found.")
-    return SessionL9ProtocolsResponse(
+    return SessionCognitionProtocolsResponse(
         sessionId=session_id,
-        protocols=_build_protocols(row.get("l9Reports"), row.get("executionReports")),
+        protocols=_build_protocols(
+            row.get("cognitionProtocolReports"), row.get("executionReports")
+        ),
     )
 
 
-def _get_application_sessions_with_l9_protocols(
+def _get_application_sessions_with_cognition_protocols(
     db: Connector,
     dialect: Dialect,
     *,
     application_id: str,
     start_time: str = "",
     end_time: str = "",
-) -> SessionsWithL9ProtocolsResponse:
-    """Return the sessions of an application with their L9 protocol status."""
+) -> SessionsWithCognitionProtocolsResponse:
+    """Return the sessions of an application with their Cognition protocol status."""
     del dialect  # Neo4j-only query.
     start_epoch, end_epoch = parse_epoch_range(start_time, end_time)
     if start_epoch > end_epoch:
@@ -263,14 +269,14 @@ def _get_application_sessions_with_l9_protocols(
         rows = db.execute(query, params)
     except Exception as exc:
         raise DatabaseError(
-            f"Failed to get L9 protocols for '{application_id}': {exc}"
+            f"Failed to get Cognition protocols for '{application_id}': {exc}"
         ) from exc
 
-    sessions: list[SessionWithL9ProtocolsItem] = []
+    sessions: list[SessionWithCognitionProtocolsItem] = []
     for row in rows or []:
-        statuses = _protocol_statuses(row.get("l9Reports"))
+        statuses = _protocol_statuses(row.get("cognitionProtocolReports"))
         sessions.append(
-            SessionWithL9ProtocolsItem(
+            SessionWithCognitionProtocolsItem(
                 sessionId=str(row["sessionId"]),
                 timestamp=str(row["startTime"]),
                 agents=row.get("agents") or [],
@@ -282,11 +288,13 @@ def _get_application_sessions_with_l9_protocols(
                 session_metrics=_build_session_metrics_single_query(
                     row.get("sessionMetrics")
                 ),
-                l9Protocols=[{"protocol": n, **st} for n, st in statuses.items()],
+                cognitionProtocols=[
+                    {"protocol": n, **st} for n, st in statuses.items()
+                ],
                 cognitiveObservabilityMetrics=_build_cognitive_metrics(
                     row.get("sessionMetrics")
                 ),
                 cognitiveFailures=_build_cognitive_failures(row.get("failures")),
             )
         )
-    return SessionsWithL9ProtocolsResponse(sessions=sessions)
+    return SessionsWithCognitionProtocolsResponse(sessions=sessions)

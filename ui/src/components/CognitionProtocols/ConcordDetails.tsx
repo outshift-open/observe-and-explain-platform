@@ -7,11 +7,11 @@ import { Stack, Typography } from '@mui/material';
 import { Banner } from '@open-ui-kit/core';
 import {
   CONCORD_PHASE_ORDER,
-  L9_CONCORD,
+  COGNITION_CONCORD,
   isBestEffortState,
   isCommitState
-} from '@/common/l9Protocols';
-import { L9ConcordProtocol } from '@/types/oxp.type';
+} from '@/common/cognitionProtocols';
+import { CognitionConcordProtocol } from '@/types/oxp.type';
 import { BoundsTable, PhaseUsageTable, UsageSummaryTable } from './UsageTables';
 import { SatisfactionTrajectoryChart } from './SatisfactionTrajectoryChart';
 import {
@@ -27,7 +27,7 @@ import {
   formatScore
 } from './primitives';
 
-const Compliance = ({ protocol }: { protocol: L9ConcordProtocol }) => {
+const Compliance = ({ protocol }: { protocol: CognitionConcordProtocol }) => {
   const compliance = protocol.compliance;
   const completion = compliance?.completion;
 
@@ -82,7 +82,7 @@ const Compliance = ({ protocol }: { protocol: L9ConcordProtocol }) => {
   );
 };
 
-const Correctness = ({ protocol }: { protocol: L9ConcordProtocol }) => (
+const Correctness = ({ protocol }: { protocol: CognitionConcordProtocol }) => (
   <SubSection title="Correctness">
     <Stack direction="column" gap="8px">
       <MetricRow
@@ -101,7 +101,7 @@ const Correctness = ({ protocol }: { protocol: L9ConcordProtocol }) => (
   </SubSection>
 );
 
-const Cost = ({ protocol }: { protocol: L9ConcordProtocol }) => (
+const Cost = ({ protocol }: { protocol: CognitionConcordProtocol }) => (
   <SubSection title="Cost">
     <Stack direction="column" gap="16px">
       <UsageSummaryTable usage={protocol.cost?.usage} />
@@ -123,7 +123,7 @@ const Cost = ({ protocol }: { protocol: L9ConcordProtocol }) => (
   </SubSection>
 );
 
-const Outcome = ({ protocol }: { protocol: L9ConcordProtocol }) => {
+const Outcome = ({ protocol }: { protocol: CognitionConcordProtocol }) => {
   const outcome = protocol.outcome;
   const tau = outcome?.tau;
   const terminalState = protocol.compliance?.completion?.terminalState;
@@ -213,7 +213,7 @@ const Outcome = ({ protocol }: { protocol: L9ConcordProtocol }) => {
 export const ConcordDetails = ({
   protocol
 }: {
-  protocol: L9ConcordProtocol;
+  protocol: CognitionConcordProtocol;
 }) => (
   <>
     <Compliance protocol={protocol} />

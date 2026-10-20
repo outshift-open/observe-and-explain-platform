@@ -27,7 +27,7 @@ export const FEATURE_FLAG_KEYS = [
   'waste_estimation',
   'neurosymbolic_eval',
   'cognitive_observability',
-  'l9_protocols'
+  'cognition_protocols'
 ] as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAG_KEYS)[number];
@@ -43,7 +43,7 @@ export const DEFAULT_FLAGS: FeatureFlags = {
   waste_estimation: false,
   neurosymbolic_eval: false,
   cognitive_observability: false,
-  l9_protocols: false
+  cognition_protocols: false
 };
 
 /**
@@ -118,9 +118,9 @@ const FLAG_SOURCES: Record<
     env: import.meta.env.VITE_FF_COGNITIVE_OBSERVABILITY,
     windowProp: 'ffCognitiveObservability'
   },
-  l9_protocols: {
-    env: import.meta.env.VITE_FF_L9_PROTOCOLS,
-    windowProp: 'ffL9Protocols'
+  cognition_protocols: {
+    env: import.meta.env.VITE_FF_COGNITION_PROTOCOLS,
+    windowProp: 'ffCognitionProtocols'
   }
 };
 

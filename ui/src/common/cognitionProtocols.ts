@@ -4,21 +4,21 @@
  */
 
 import {
-  L9AccordProtocol,
-  L9ConcordProtocol,
-  L9Protocol
+  CognitionAccordProtocol,
+  CognitionConcordProtocol,
+  CognitionProtocol
 } from '@/types/oxp.type';
 
-export const L9_CONCORD = 'L9-CONCORD';
-export const L9_ACCORD = 'L9-ACCORD';
+export const COGNITION_CONCORD = 'L9-CONCORD';
+export const COGNITION_ACCORD = 'L9-ACCORD';
 
 export const isConcordProtocol = (
-  protocol: L9Protocol
-): protocol is L9ConcordProtocol => protocol.protocol === L9_CONCORD;
+  protocol: CognitionProtocol
+): protocol is CognitionConcordProtocol => protocol.protocol === COGNITION_CONCORD;
 
 export const isAccordProtocol = (
-  protocol: L9Protocol
-): protocol is L9AccordProtocol => protocol.protocol === L9_ACCORD;
+  protocol: CognitionProtocol
+): protocol is CognitionAccordProtocol => protocol.protocol === COGNITION_ACCORD;
 
 // Display order of the CONCORD cost phases; unknown phases go last.
 export const CONCORD_PHASE_ORDER = [
@@ -49,11 +49,11 @@ export const isBestEffortState = (state?: string | null): boolean =>
 
 // `info` is for informational values that are neither good nor bad; `neutral`
 // (grey) is for absence of a signal.
-export type L9Tone = 'positive' | 'warning' | 'negative' | 'info' | 'neutral';
+export type CognitionTone = 'positive' | 'warning' | 'negative' | 'info' | 'neutral';
 
 // Verdict labels are not confirmed yet: this is an extensible mapping, and any
 // label that is not listed is displayed with a neutral tone.
-export const L9_VERDICT_TONES: Record<string, L9Tone> = {
+export const COGNITION_VERDICT_TONES: Record<string, CognitionTone> = {
   ACTIVATED: 'positive',
   INCORRECTLY_ACTIVATED: 'negative',
   SATISFACTORY: 'positive',
@@ -62,8 +62,8 @@ export const L9_VERDICT_TONES: Record<string, L9Tone> = {
   INSUFFICIENT_DATA: 'neutral'
 };
 
-export const getVerdictTone = (label: string): L9Tone =>
-  L9_VERDICT_TONES[label.toUpperCase()] ?? 'neutral';
+export const getVerdictTone = (label: string): CognitionTone =>
+  COGNITION_VERDICT_TONES[label.toUpperCase()] ?? 'neutral';
 
 // 'INCORRECTLY_ACTIVATED' -> 'Incorrectly activated'
 export const humanizeLabel = (label: string): string => {

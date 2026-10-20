@@ -946,9 +946,9 @@ export interface CognitiveFailure {
 }
 
 // ---------------------------------------------------------------------------
-// L9 protocols (per-session)
+// Cognition protocols (per-session)
 //
-// The API returns the list of L9 protocols that are relevant for a session.
+// The API returns the list of Cognition protocols that are relevant for a session.
 // Each protocol is `enabled` (applies to the session) and/or `activated`
 // (actually started). Every metric may be missing: `null` / absent always means
 // "no data" and must never be rendered as a zero.
@@ -956,25 +956,25 @@ export interface CognitiveFailure {
 
 // Verdict labels are an extensible enum (not confirmed yet), so they are plain
 // strings.
-export interface L9Verdict {
+export interface CognitionVerdict {
   label: string;
   reason?: string | null;
   // Optional list backing the verdict, e.g. issues missing a definition.
   items?: string[] | null;
 }
 
-export interface L9ExpectedActivation {
+export interface CognitionExpectedActivation {
   expected: boolean | null;
   reason?: string | null;
 }
 
 // Pass/fail check with the failed items (steps, fields...) when it failed.
-export interface L9Check {
+export interface CognitionCheck {
   passed: boolean | null;
   failures?: string[] | null;
 }
 
-export interface L9UsageSummary {
+export interface CognitionUsageSummary {
   inputTokens?: number | null;
   outputTokens?: number | null;
   cacheReadTokens?: number | null;
@@ -988,7 +988,7 @@ export interface L9UsageSummary {
   totalCost?: number | null;
 }
 
-export interface L9PhaseUsage {
+export interface CognitionPhaseUsage {
   phase: string;
   llmCalls?: number | null;
   inputTokens?: number | null;
@@ -999,15 +999,15 @@ export interface L9PhaseUsage {
 }
 
 // "achieved / bound": the protocol reports its bounds when the run opens.
-export interface L9Bound {
+export interface CognitionBound {
   name: string;
   achieved?: number | null;
   bound?: number | null;
 }
 
 // One evaluation metric of an activated protocol, as stored in the KG. The
-// protocol-specific meaning (label, format) lives in `common/l9Metrics.ts`.
-export interface L9Metric {
+// protocol-specific meaning (label, format) lives in `common/cognitionMetrics.ts`.
+export interface CognitionMetric {
   name: string;
   // Grouping chosen by the API: 'convergence', 'contract', 'cost', 'other'...
   section: string;
@@ -1022,7 +1022,7 @@ export interface L9Metric {
   timestamp?: string;
 }
 
-export interface L9ProtocolBase {
+export interface CognitionProtocolBase {
   // Protocol identifier, e.g. 'L9-CONCORD'.
   protocol: string;
   displayName?: string | null;
@@ -1034,7 +1034,7 @@ export interface L9ProtocolBase {
   // Round/step or timestamp, shown as is.
   activatedAt?: string | null;
   // Absent: not tracked for this protocol. null: tracked but no data.
-  expected?: L9ExpectedActivation | null;
+  expected?: CognitionExpectedActivation | null;
   // Execution report of an activated protocol: who had it, who used it.
   enabledEvidence?: string | null;
   agentsEnabled?: string[] | null;
@@ -1044,31 +1044,31 @@ export interface L9ProtocolBase {
   reportedAt?: string | null;
   // Generic metrics list. When present, it is rendered instead of the
   // protocol's dedicated sections.
-  metrics?: L9Metric[] | null;
+  metrics?: CognitionMetric[] | null;
 }
 
 // Extensible: the reference doc names the success state both `COMMIT` and
 // `SUCCESS`, next to `BEST_EFFORT`.
-export type L9ConcordTerminalState = string;
+export type CognitionConcordTerminalState = string;
 
-export interface L9ConcordProtocol extends L9ProtocolBase {
+export interface CognitionConcordProtocol extends CognitionProtocolBase {
   protocol: 'L9-CONCORD';
   compliance?: {
-    candidateCompleteness?: L9Check | null;
+    candidateCompleteness?: CognitionCheck | null;
     completion?: {
       passed: boolean | null;
-      terminalState: L9ConcordTerminalState | null;
+      terminalState: CognitionConcordTerminalState | null;
     } | null;
-    protocolCompliance?: L9Check | null;
+    protocolCompliance?: CognitionCheck | null;
   } | null;
   correctness?: {
-    outcomeSatisfaction?: L9Verdict | null;
-    scoreFairness?: L9Verdict | null;
+    outcomeSatisfaction?: CognitionVerdict | null;
+    scoreFairness?: CognitionVerdict | null;
   } | null;
   cost?: {
-    usage?: L9UsageSummary | null;
-    phases?: L9PhaseUsage[] | null;
-    bounds?: L9Bound[] | null;
+    usage?: CognitionUsageSummary | null;
+    phases?: CognitionPhaseUsage[] | null;
+    bounds?: CognitionBound[] | null;
   } | null;
   outcome?: {
     // Satisfaction floor threshold.
@@ -1081,7 +1081,7 @@ export interface L9ConcordProtocol extends L9ProtocolBase {
   } | null;
 }
 
-export interface L9AccordProtocol extends L9ProtocolBase {
+export interface CognitionAccordProtocol extends CognitionProtocolBase {
   protocol: 'L9-ACCORD';
   convergence?: {
     lockedFrame?: {
@@ -1106,58 +1106,58 @@ export interface L9AccordProtocol extends L9ProtocolBase {
     } | null;
   } | null;
   cost?: {
-    usage?: L9UsageSummary | null;
+    usage?: CognitionUsageSummary | null;
   } | null;
   benefits?: {
     goalSuccess?: { achieved: boolean | null; reason?: string | null } | null;
-    mutualUnderstanding?: L9Verdict | null;
+    mutualUnderstanding?: CognitionVerdict | null;
     intentContractConsumedByConcord?: boolean | null;
   } | null;
 }
 
 // Protocol without a dedicated renderer: only its activation is shown.
-export interface L9GenericProtocol extends L9ProtocolBase {
+export interface CognitionGenericProtocol extends CognitionProtocolBase {
   protocol: string;
 }
 
-export type L9Protocol =
-  | L9ConcordProtocol
-  | L9AccordProtocol
-  | L9GenericProtocol;
+export type CognitionProtocol =
+  | CognitionConcordProtocol
+  | CognitionAccordProtocol
+  | CognitionGenericProtocol;
 
-export interface SessionL9Protocols {
+export interface SessionCognitionProtocols {
   sessionId: string;
-  protocols: L9Protocol[];
+  protocols: CognitionProtocol[];
 }
 
 // ---------------------------------------------------------------------------
-// L9 protocols comparison (sessions of a time interval)
+// Cognition protocols comparison (sessions of a time interval)
 //
-// Each session carries its L9 protocol status, so that sessions can be grouped
+// Each session carries its Cognition protocol status, so that sessions can be grouped
 // by which protocols were activated and compared with each other. Every field
 // besides the session itself may be missing, and a missing value is never
 // counted as a zero.
 // ---------------------------------------------------------------------------
 
-export interface SessionL9ProtocolStatus {
+export interface SessionCognitionProtocolStatus {
   protocol: string;
   enabled: boolean;
   activated: boolean;
 }
 
-export interface SessionWithL9Protocols extends Session {
-  // Absent or empty: no L9 protocol was enabled in the session.
-  l9Protocols?: SessionL9ProtocolStatus[] | null;
+export interface SessionWithCognitionProtocols extends Session {
+  // Absent or empty: no Cognition protocol was enabled in the session.
+  cognitionProtocols?: SessionCognitionProtocolStatus[] | null;
   cognitiveObservabilityMetrics?: CognitiveObservabilityMetric[] | null;
   cognitiveFailures?: CognitiveFailure[] | null;
   // Only for sessions where CONCORD was activated.
   concord?: {
-    terminalState?: L9ConcordTerminalState | null;
+    terminalState?: CognitionConcordTerminalState | null;
     // Final satisfaction of the worst-off agent.
     worstOffSatisfaction?: number | null;
   } | null;
 }
 
-export interface SessionsWithL9Protocols {
-  sessions: SessionWithL9Protocols[];
+export interface SessionsWithCognitionProtocols {
+  sessions: SessionWithCognitionProtocols[];
 }

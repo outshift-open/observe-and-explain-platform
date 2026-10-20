@@ -1,10 +1,10 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-"""L9Report / L9ProtocolExecutionReport persistence, against a fake connector."""
+"""CognitionProtocolReport / CognitionProtocolExecutionReport persistence, against a fake connector."""
 
 from oxp.interfaces.models import MetricResult
-from oxp.providers import OXPL9ReportProvider
-from oxp.query_builders import l9_graph, metric_graph
+from oxp.providers import OXPCognitionProtocolReportProvider
+from oxp.query_builders import cognition_protocol_graph, metric_graph
 
 
 class _FakeConnector:
@@ -35,19 +35,22 @@ def _metric(name: str, value, **extra) -> MetricResult:
     )
 
 
-def test_l9_report_lists_the_protocols_enabled_and_activated():
+def test_cognition_protocol_report_lists_the_protocols_enabled_and_activated():
     db = _FakeConnector()
     assert (
-        OXPL9ReportProvider(db=db).save_l9_report(
+        OXPCognitionProtocolReportProvider(db=db).save_cognition_protocol_report(
             "s1", ["concord", "accord"], ["accord"]
         )
         is True
     )
 
     ((query, params),) = db.commands
-    assert "MERGE (r:L9Report" in query and "-[:reportsOn]->(s)" in query
+    assert "MERGE (r:CognitionProtocolReport" in query and "-[:reportsOn]->(s)" in query
     props = params["props"]
-    assert props["id"] == l9_graph.l9_report_id("s1") and props["sessionId"] == "s1"
+    assert (
+        props["id"] == cognition_protocol_graph.cognition_protocol_report_id("s1")
+        and props["sessionId"] == "s1"
+    )
     assert props["protocolsEnabled"] == ["accord", "concord"] and props[
         "protocolsActivated"
     ] == ["accord"]
@@ -58,8 +61,8 @@ def test_l9_report_lists_the_protocols_enabled_and_activated():
 
 def test_nothing_is_written_for_a_session_that_is_not_in_the_graph():
     db = _FakeConnector(session_exists=False)
-    provider = OXPL9ReportProvider(db=db)
-    assert provider.save_l9_report("ghost", ["accord"], []) is False
+    provider = OXPCognitionProtocolReportProvider(db=db)
+    assert provider.save_cognition_protocol_report("ghost", ["accord"], []) is False
     assert (
         provider.save_protocol_execution_report(
             "ghost", "accord", agents_activated=["sre"]
@@ -77,7 +80,7 @@ def test_nothing_is_written_for_a_session_that_is_not_in_the_graph():
 
 def test_participation_is_recorded_on_the_protocol_execution_report():
     db = _FakeConnector()
-    provider = OXPL9ReportProvider(db=db)
+    provider = OXPCognitionProtocolReportProvider(db=db)
     assert provider.save_protocol_execution_report(
         "s1",
         "accord",
@@ -89,10 +92,13 @@ def test_participation_is_recorded_on_the_protocol_execution_report():
     )
     ((query, params),) = db.commands
     assert (
-        "MERGE (p:L9ProtocolExecutionReport" in query and "-[:reportsOn]->(s)" in query
+        "MERGE (p:CognitionProtocolExecutionReport" in query
+        and "-[:reportsOn]->(s)" in query
     )
     props = params["props"]
-    assert props["id"] == l9_graph.protocol_execution_report_id("s1", "accord")
+    assert props["id"] == cognition_protocol_graph.protocol_execution_report_id(
+        "s1", "accord"
+    )
     assert props["protocol"] == "accord" and props["agentsActivated"] == ["sre"]
     assert props["agentsEnabled"] == ["db", "sre"]
     assert "metricCount" not in props  # the metrics side is not touched
@@ -100,13 +106,13 @@ def test_participation_is_recorded_on_the_protocol_execution_report():
 
 def test_metrics_become_nodes_that_measure_the_report_not_the_session():
     db = _FakeConnector()
-    ok = OXPL9ReportProvider(db=db).save_protocol_execution_metrics(
+    ok = OXPCognitionProtocolReportProvider(db=db).save_protocol_execution_metrics(
         "s1",
         "accord",
         [_metric("AccordConverged", 1.0), _metric("AccordCacheRate", 0.25)],
     )
     assert ok is True
-    report_id = l9_graph.protocol_execution_report_id("s1", "accord")
+    report_id = cognition_protocol_graph.protocol_execution_report_id("s1", "accord")
 
     upsert, clear, *writes = db.commands
     assert (
@@ -118,7 +124,7 @@ def test_metrics_become_nodes_that_measure_the_report_not_the_session():
     }  # a re-run replaces the results
     assert len(writes) == 2
     for query, params in writes:
-        assert "(t:L9ProtocolExecutionReport {id: $resource_id})" in query
+        assert "(t:CognitionProtocolExecutionReport {id: $resource_id})" in query
         assert ":measures" in query and ":ofMetricType" in query
         assert params["resource_id"] == report_id
         assert params["definition"]["metricProvider"] == "Accord"
@@ -134,7 +140,7 @@ def test_metrics_that_errored_or_have_no_value_are_not_stored():
         _metric("AccordConverged", 1.0),
         _metric("AccordSkipped", 0.0, error="not applicable"),
     ]
-    assert OXPL9ReportProvider(db=db).save_protocol_execution_metrics(
+    assert OXPCognitionProtocolReportProvider(db=db).save_protocol_execution_metrics(
         "s1", "accord", metrics
     )
     upsert, _clear, *writes = db.commands
@@ -145,7 +151,7 @@ def test_the_metric_write_targets_a_report_by_id():
     query, _ = metric_graph.write_metric_result_query(
         "protocol_execution_report", "rid", {"id": "d"}, {"id": "r"}
     )
-    assert "MATCH (t:L9ProtocolExecutionReport {id: $resource_id})" in query
+    assert "MATCH (t:CognitionProtocolExecutionReport {id: $resource_id})" in query
 
 
 def test_a_failing_write_is_reported_not_raised():
@@ -154,5 +160,8 @@ def test_a_failing_write_is_reported_not_raised():
             raise RuntimeError("neo4j down")
 
     assert (
-        OXPL9ReportProvider(db=_Broken()).save_l9_report("s1", ["accord"], []) is False
+        OXPCognitionProtocolReportProvider(db=_Broken()).save_cognition_protocol_report(
+            "s1", ["accord"], []
+        )
+        is False
     )

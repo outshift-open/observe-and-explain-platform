@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { L9Metric } from '@/types/oxp.type';
+import { CognitionMetric } from '@/types/oxp.type';
 
 // How the numeric result of a metric is displayed.
 // - boolean: 1 / 0 as Yes / No
@@ -11,16 +11,16 @@ import { L9Metric } from '@/types/oxp.type';
 // - percent: a 0..1 ratio
 // - count: an integer
 // - score: a normalized score, with two decimals
-export type L9MetricKind = 'boolean' | 'pass' | 'percent' | 'count' | 'score';
+export type CognitionMetricKind = 'boolean' | 'pass' | 'percent' | 'count' | 'score';
 
-export interface L9MetricDefinition {
+export interface CognitionMetricDefinition {
   label: string;
   description?: string;
-  kind: L9MetricKind;
+  kind: CognitionMetricKind;
   // Rows for the table shown under the value, from the parsed `details`.
   detailsRows?: (details: unknown) => Record<string, unknown>[] | null;
   // The reasoning is dropped when it says nothing beyond the value.
-  isReasoningRedundant?: (metric: L9Metric) => boolean;
+  isReasoningRedundant?: (metric: CognitionMetric) => boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -109,7 +109,7 @@ const rowsPerPhase = (details: unknown): Record<string, unknown>[] | null => {
 };
 
 // Display order of the sections; unknown sections go last.
-export const L9_METRIC_SECTIONS: { key: string; title: string }[] = [
+export const COGNITION_METRIC_SECTIONS: { key: string; title: string }[] = [
   { key: 'convergence', title: 'Convergence' },
   { key: 'contract', title: 'Intent contract' },
   { key: 'cost', title: 'Cost' },
@@ -119,7 +119,7 @@ export const OTHER_SECTION_TITLE = 'Other metrics';
 
 // Known metrics, by name. Extensible: a metric that is not listed is displayed
 // with a label derived from its name, and its value as a plain number.
-export const L9_METRIC_DEFINITIONS: Record<string, L9MetricDefinition> = {
+export const COGNITION_METRIC_DEFINITIONS: Record<string, CognitionMetricDefinition> = {
   AccordConverged: {
     label: 'Converged',
     description: 'Did the agents reach a locked frame?',
@@ -375,8 +375,8 @@ export const L9_METRIC_DEFINITIONS: Record<string, L9MetricDefinition> = {
 };
 
 // 'AccordSomeMetric' -> 'Accord some metric'
-export const getMetricLabel = (metric: L9Metric): string => {
-  const known = L9_METRIC_DEFINITIONS[metric.name]?.label;
+export const getMetricLabel = (metric: CognitionMetric): string => {
+  const known = COGNITION_METRIC_DEFINITIONS[metric.name]?.label;
   if (known) return known;
   const text = metric.name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')

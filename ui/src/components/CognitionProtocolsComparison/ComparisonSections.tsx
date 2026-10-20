@@ -6,8 +6,8 @@
 import { useMemo } from 'react';
 import { Stack } from '@mui/material';
 import { COGNITIVE_FAILURE_DESCRIPTIONS } from '@/common/cognitiveFailures';
-import { SessionWithL9Protocols } from '@/types/oxp.type';
-import { SimpleTable, SubSection } from '../L9Protocols/primitives';
+import { SessionWithCognitionProtocols } from '@/types/oxp.type';
+import { SimpleTable, SubSection } from '../CognitionProtocols/primitives';
 import { ComparisonRow, ComparisonTable } from './ComparisonTable';
 import {
   Cohort,
@@ -22,7 +22,7 @@ import {
 } from './utils';
 
 interface ComparisonSectionsProps {
-  sessions: SessionWithL9Protocols[];
+  sessions: SessionWithCognitionProtocols[];
   cohorts: Cohort[];
   referenceLabel: string | null;
   // Failures count only when their confidence is above this fraction (0-1).

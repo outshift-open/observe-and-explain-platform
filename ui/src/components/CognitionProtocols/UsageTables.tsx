@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { L9Bound, L9PhaseUsage, L9UsageSummary } from '@/types/oxp.type';
+import { CognitionBound, CognitionPhaseUsage, CognitionUsageSummary } from '@/types/oxp.type';
 import {
   NotAvailable,
   SimpleTable,
@@ -16,7 +16,7 @@ import {
 export const UsageSummaryTable = ({
   usage
 }: {
-  usage?: L9UsageSummary | null;
+  usage?: CognitionUsageSummary | null;
 }) => {
   if (!usage) return <NotAvailable text="No usage data" />;
 
@@ -58,8 +58,8 @@ export const UsageSummaryTable = ({
 // Sum of a column; N/A as soon as one row has no value, so that a partial sum
 // is never presented as the total.
 const sumColumn = (
-  rows: L9PhaseUsage[],
-  pick: (row: L9PhaseUsage) => number | null | undefined
+  rows: CognitionPhaseUsage[],
+  pick: (row: CognitionPhaseUsage) => number | null | undefined
 ): number | null => {
   let total = 0;
   for (const row of rows) {
@@ -76,7 +76,7 @@ export const PhaseUsageTable = ({
   phases,
   phaseOrder
 }: {
-  phases?: L9PhaseUsage[] | null;
+  phases?: CognitionPhaseUsage[] | null;
   phaseOrder: string[];
 }) => {
   if (!phases?.length) return <NotAvailable text="No per-phase usage data" />;
@@ -120,7 +120,7 @@ export const PhaseUsageTable = ({
   );
 };
 
-export const BoundsTable = ({ bounds }: { bounds?: L9Bound[] | null }) => {
+export const BoundsTable = ({ bounds }: { bounds?: CognitionBound[] | null }) => {
   if (!bounds?.length) return <NotAvailable text="No bounds reported" />;
 
   return (

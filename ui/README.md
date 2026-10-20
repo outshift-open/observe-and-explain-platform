@@ -60,7 +60,7 @@ Resolution precedence (lowest to highest): built-in default → `VITE_FF_*` env 
 | `waste_estimation`        | `VITE_FF_WASTE_ESTIMATION`        | `ffWasteEstimation`        | `false` |
 | `neurosymbolic_eval`      | `VITE_FF_NEUROSYMBOLIC_EVAL`      | `ffNeurosymbolicEval`      | `false` |
 | `cognitive_observability` | `VITE_FF_COGNITIVE_OBSERVABILITY` | `ffCognitiveObservability` | `false` |
-| `l9_protocols`            | `VITE_FF_L9_PROTOCOLS`            | `ffL9Protocols`            | `false` |
+| `cognition_protocols`            | `VITE_FF_COGNITION_PROTOCOLS`            | `ffCognitionProtocols`            | `false` |
 
 `.env.sample` ships with explicit `true`/`false` values for every flag as a starting point — edit it to match what your local API instance actually supports.
 

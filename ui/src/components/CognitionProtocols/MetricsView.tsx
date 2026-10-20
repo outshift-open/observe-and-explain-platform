@@ -5,14 +5,14 @@
 
 import { Stack, Typography } from '@mui/material';
 import {
-  L9_METRIC_DEFINITIONS,
-  L9_METRIC_SECTIONS,
-  L9MetricKind,
+  COGNITION_METRIC_DEFINITIONS,
+  COGNITION_METRIC_SECTIONS,
+  CognitionMetricKind,
   OTHER_SECTION_TITLE,
   getMetricLabel
-} from '@/common/l9Metrics';
-import { humanizeLabel } from '@/common/l9Protocols';
-import { L9Metric, L9Protocol } from '@/types/oxp.type';
+} from '@/common/cognitionMetrics';
+import { humanizeLabel } from '@/common/cognitionProtocols';
+import { CognitionMetric, CognitionProtocol } from '@/types/oxp.type';
 import {
   BulletList,
   MetricRow,
@@ -41,7 +41,7 @@ const MetricValue = ({
   kind
 }: {
   value?: number | null;
-  kind?: L9MetricKind;
+  kind?: CognitionMetricKind;
 }) => {
   if (isMissing(value)) return <NotAvailable />;
   switch (kind) {
@@ -83,8 +83,8 @@ const DetailsTable = ({ rows }: { rows: Record<string, unknown>[] }) => {
   );
 };
 
-const MetricItem = ({ metric }: { metric: L9Metric }) => {
-  const definition = L9_METRIC_DEFINITIONS[metric.name];
+const MetricItem = ({ metric }: { metric: CognitionMetric }) => {
+  const definition = COGNITION_METRIC_DEFINITIONS[metric.name];
   const rows = definition?.detailsRows?.(metric.details) ?? null;
 
   return (
@@ -105,18 +105,18 @@ const MetricItem = ({ metric }: { metric: L9Metric }) => {
 
 // Metrics grouped by section: known sections first, in a fixed order, then the
 // others in the order they come.
-const groupBySection = (metrics: L9Metric[]) => {
-  const bySection = new Map<string, L9Metric[]>();
+const groupBySection = (metrics: CognitionMetric[]) => {
+  const bySection = new Map<string, CognitionMetric[]>();
   metrics.forEach((metric) =>
     bySection.set(metric.section, [
       ...(bySection.get(metric.section) ?? []),
       metric
     ])
   );
-  const known = L9_METRIC_SECTIONS.filter(({ key }) => bySection.has(key)).map(
+  const known = COGNITION_METRIC_SECTIONS.filter(({ key }) => bySection.has(key)).map(
     ({ key, title }) => ({ title, metrics: bySection.get(key) ?? [] })
   );
-  const knownKeys = new Set(L9_METRIC_SECTIONS.map(({ key }) => key));
+  const knownKeys = new Set(COGNITION_METRIC_SECTIONS.map(({ key }) => key));
   const others = [...bySection.entries()]
     .filter(([key]) => !knownKeys.has(key))
     .flatMap(([, items]) => items);
@@ -133,7 +133,7 @@ const labeled = (label: string, items?: string[] | null) =>
   ) : null;
 
 // Who had the protocol and who used it, from the protocol execution report.
-const Participation = ({ protocol }: { protocol: L9Protocol }) => {
+const Participation = ({ protocol }: { protocol: CognitionProtocol }) => {
   const rows = [
     protocol.enabledEvidence ? (
       <MetricRow
@@ -162,7 +162,7 @@ const Participation = ({ protocol }: { protocol: L9Protocol }) => {
 };
 
 // Generic view of a protocol: its participation and its metrics, as stored.
-export const MetricsView = ({ protocol }: { protocol: L9Protocol }) => (
+export const MetricsView = ({ protocol }: { protocol: CognitionProtocol }) => (
   <>
     <Participation protocol={protocol} />
     {groupBySection(protocol.metrics ?? []).map(({ title, metrics }) => (
@@ -177,5 +177,5 @@ export const MetricsView = ({ protocol }: { protocol: L9Protocol }) => (
   </>
 );
 
-export const hasMetrics = (protocol: L9Protocol): boolean =>
+export const hasMetrics = (protocol: CognitionProtocol): boolean =>
   (protocol.metrics?.length ?? 0) > 0;

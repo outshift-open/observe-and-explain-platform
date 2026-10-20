@@ -34,8 +34,8 @@ import {
   AgenticProtocolsMetrics,
   SpanDetails,
   SessionsWithCognitiveObservability,
-  SessionL9Protocols,
-  SessionsWithL9Protocols
+  SessionCognitionProtocols,
+  SessionsWithCognitionProtocols
 } from '@/types/oxp.type';
 import {
   ApplicationsResponse,
@@ -1401,11 +1401,11 @@ export const useSessionsWithCognitiveObservability = (
   });
 };
 
-const fetchSessionL9Protocols = async (
+const fetchSessionCognitionProtocols = async (
   sessionId: string
-): Promise<SessionL9Protocols> => {
+): Promise<SessionCognitionProtocols> => {
   const response = await fetch(
-    `${OCE_API_BASE_URL}/sessions/${sessionId}/l9-protocols`,
+    `${OCE_API_BASE_URL}/sessions/${sessionId}/cognition-protocols`,
     {
       method: 'GET',
       headers: {
@@ -1416,32 +1416,32 @@ const fetchSessionL9Protocols = async (
 
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch session L9 protocols: ${response.statusText}`
+      `Failed to fetch session Cognition protocols: ${response.statusText}`
     );
   }
 
   return response.json();
 };
 
-export const useSessionL9Protocols = (sessionId?: string) => {
-  return useQuery<SessionL9Protocols>({
-    queryKey: ['sessionL9Protocols', sessionId],
-    queryFn: () => fetchSessionL9Protocols(sessionId ?? ''),
+export const useSessionCognitionProtocols = (sessionId?: string) => {
+  return useQuery<SessionCognitionProtocols>({
+    queryKey: ['sessionCognitionProtocols', sessionId],
+    queryFn: () => fetchSessionCognitionProtocols(sessionId ?? ''),
     enabled: !!sessionId
   });
 };
 
-const fetchSessionsWithL9Protocols = async (
+const fetchSessionsWithCognitionProtocols = async (
   applicationId: string,
   startTime?: number,
   endTime?: number
-): Promise<SessionsWithL9Protocols> => {
+): Promise<SessionsWithCognitionProtocols> => {
   const params = new URLSearchParams();
   if (startTime != null) params.set('start_time', String(startTime));
   if (endTime != null) params.set('end_time', String(endTime));
 
   const response = await fetch(
-    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-l9-protocols?${params.toString()}`,
+    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-cognition-protocols?${params.toString()}`,
     {
       method: 'GET',
       headers: {
@@ -1452,22 +1452,22 @@ const fetchSessionsWithL9Protocols = async (
 
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch sessions with L9 protocols: ${response.statusText}`
+      `Failed to fetch sessions with Cognition protocols: ${response.statusText}`
     );
   }
 
   return response.json();
 };
 
-export const useSessionsWithL9Protocols = (
+export const useSessionsWithCognitionProtocols = (
   applicationId: string,
   startTime?: number,
   endTime?: number
 ) => {
-  return useQuery<SessionsWithL9Protocols>({
-    queryKey: ['sessionsWithL9Protocols', applicationId, startTime, endTime],
+  return useQuery<SessionsWithCognitionProtocols>({
+    queryKey: ['sessionsWithCognitionProtocols', applicationId, startTime, endTime],
     queryFn: () =>
-      fetchSessionsWithL9Protocols(applicationId, startTime, endTime),
+      fetchSessionsWithCognitionProtocols(applicationId, startTime, endTime),
     enabled: !!applicationId
   });
 };

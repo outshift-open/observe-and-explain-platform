@@ -31,7 +31,7 @@ from oxp.interfaces import MetricsProvider
 from oxp.interfaces.models import MetricResult
 from oxp.providers._graph import _graph_properties, _metric_property_value  # noqa: F401
 from oxp.providers.kg import OXPKGProvider, _resolve_connector
-from oxp.providers.l9 import OXPL9ReportProvider
+from oxp.providers.cognition_protocols import OXPCognitionProtocolReportProvider
 from oxp.query_builders import metric_graph
 from oxp.query_builders import metrics as metrics_qb
 
@@ -269,7 +269,7 @@ OXPGraphProvider = Neo4jGraphProvider
 
 
 __all__ = [
-    "OXPL9ReportProvider",
+    "OXPCognitionProtocolReportProvider",
     "OXPMetricsProvider",
     "OXPKGProvider",
     "OXPGraphProvider",

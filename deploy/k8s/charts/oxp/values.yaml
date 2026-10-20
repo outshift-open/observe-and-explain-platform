@@ -411,7 +411,7 @@ ui:
     wasteEstimation: "false"
     neurosymbolicEval: "false"
     cognitiveObservability: "false"
-    l9Protocols: "false"
+    cognitionProtocols: "false"
   livenessProbe:
     httpGet:
       path: /

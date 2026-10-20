@@ -10,23 +10,23 @@ import { Banner, EmptyState, Skeleton } from '@open-ui-kit/core';
 import { format } from 'date-fns';
 import dayjs from 'dayjs';
 import { IntervalPicker } from '@/components';
-import { useSessionsWithL9Protocols } from '@/api/oxpApi';
+import { useSessionsWithCognitionProtocols } from '@/api/oxpApi';
 import { FAILURE_CONFIDENCE_THRESHOLD } from '@/common/cognitiveFailures';
 import { useTimeRangeStore } from '@/store';
 import { useDebouncedValue } from '@/utils';
-import { InfoTooltip, SubSection } from '../L9Protocols/primitives';
+import { InfoTooltip, SubSection } from '../CognitionProtocols/primitives';
 import { CohortSummary } from './CohortSummary';
 import { ComparisonSections } from './ComparisonSections';
 import { SessionsTable } from './SessionsTable';
-import { NO_PROTOCOL_COHORT, groupIntoCohorts, hasL9Protocol } from './utils';
+import { NO_PROTOCOL_COHORT, groupIntoCohorts, hasCognitionProtocol } from './utils';
 
-const L9ProtocolsComparison = () => {
+const CognitionProtocolsComparison = () => {
   const { applicationId } = useParams();
   const { startDate, endDate, setStartDate, setEndDate } = useTimeRangeStore();
   const debouncedStartDate = useDebouncedValue(startDate, 500);
   const debouncedEndDate = useDebouncedValue(endDate, 500);
 
-  const { data, isLoading, isError } = useSessionsWithL9Protocols(
+  const { data, isLoading, isError } = useSessionsWithCognitionProtocols(
     applicationId ?? '',
     debouncedStartDate,
     debouncedEndDate
@@ -42,12 +42,12 @@ const L9ProtocolsComparison = () => {
   const sessions = useMemo(() => data?.sessions ?? [], [data?.sessions]);
   const cohorts = useMemo(() => groupIntoCohorts(sessions), [sessions]);
   const protocolSessions = useMemo(
-    () => sessions.filter(hasL9Protocol),
+    () => sessions.filter(hasCognitionProtocol),
     [sessions]
   );
 
   // The differences are shown against the selected group, by default the
-  // sessions without any L9 protocol.
+  // sessions without any Cognition protocol.
   const referenceLabel =
     cohorts.find((cohort) => cohort.label === selectedReference)?.label ??
     cohorts.find((cohort) => cohort.label === NO_PROTOCOL_COHORT)?.label ??
@@ -69,7 +69,7 @@ const L9ProtocolsComparison = () => {
       return (
         <Banner
           status="negative"
-          text="Failed to load the L9 protocols comparison."
+          text="Failed to load the Cognition protocols comparison."
         />
       );
     }
@@ -98,8 +98,8 @@ const L9ProtocolsComparison = () => {
         />
 
         <SubSection
-          title="Sessions with L9 protocols"
-          description="The sessions where at least one L9 protocol was enabled. Select one to open its L9 Protocols tab."
+          title="Sessions with Cognition protocols"
+          description="The sessions where at least one Cognition protocol was enabled. Select one to open its Cognition Protocols tab."
         >
           <SessionsTable sessions={protocolSessions} />
         </SubSection>
@@ -134,7 +134,7 @@ const L9ProtocolsComparison = () => {
           <Typography variant={'body2'} sx={{ whiteSpace: 'nowrap' }}>
             Compare against
           </Typography>
-          <InfoTooltip description="The group the differences are shown against, for example the sessions without an L9 protocol, or the sessions with CONCORD alone to see what ACCORD adds." />
+          <InfoTooltip description="The group the differences are shown against, for example the sessions without a Cognition protocol, or the sessions with CONCORD alone to see what ACCORD adds." />
           <Select
             size="small"
             value={referenceLabel ?? ''}
@@ -185,4 +185,4 @@ const L9ProtocolsComparison = () => {
   );
 };
 
-export default L9ProtocolsComparison;
+export default CognitionProtocolsComparison;

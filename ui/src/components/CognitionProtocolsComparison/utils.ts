@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { isBestEffortState, isCommitState } from '@/common/l9Protocols';
-import { SessionWithL9Protocols, Unit } from '@/types/oxp.type';
+import { isBestEffortState, isCommitState } from '@/common/cognitionProtocols';
+import { SessionWithCognitionProtocols, Unit } from '@/types/oxp.type';
 import { formatDurationMs } from '@/utils';
-import { NO_DATA } from '../L9Protocols/primitives';
+import { NO_DATA } from '../CognitionProtocols/primitives';
 
-export const NO_PROTOCOL_COHORT = 'No L9 protocol';
+export const NO_PROTOCOL_COHORT = 'No Cognition protocol';
 export const ENABLED_NOT_ACTIVATED_COHORT = 'Enabled, not activated';
 
 // ---------------------------------------------------------------------------
@@ -20,30 +20,30 @@ export interface Cohort {
   label: string;
   // Number of activated protocols, used to order the groups.
   activatedCount: number;
-  sessions: SessionWithL9Protocols[];
+  sessions: SessionWithCognitionProtocols[];
 }
 
 export const shortProtocolName = (protocol: string): string =>
   protocol.replace(/^L9-/, '');
 
-const getActivatedProtocols = (session: SessionWithL9Protocols): string[] =>
-  (session.l9Protocols ?? [])
+const getActivatedProtocols = (session: SessionWithCognitionProtocols): string[] =>
+  (session.cognitionProtocols ?? [])
     .filter((protocol) => protocol.activated)
     .map((protocol) => shortProtocolName(protocol.protocol))
     .sort();
 
-export const getCohortLabel = (session: SessionWithL9Protocols): string => {
+export const getCohortLabel = (session: SessionWithCognitionProtocols): string => {
   const activated = getActivatedProtocols(session);
   if (activated.length > 0) return activated.join(' + ');
-  if ((session.l9Protocols ?? []).some((protocol) => protocol.enabled)) {
+  if ((session.cognitionProtocols ?? []).some((protocol) => protocol.enabled)) {
     return ENABLED_NOT_ACTIVATED_COHORT;
   }
   return NO_PROTOCOL_COHORT;
 };
 
-// Whether any L9 protocol was enabled or activated in the session.
-export const hasL9Protocol = (session: SessionWithL9Protocols): boolean =>
-  (session.l9Protocols ?? []).some(
+// Whether any Cognition protocol was enabled or activated in the session.
+export const hasCognitionProtocol = (session: SessionWithCognitionProtocols): boolean =>
+  (session.cognitionProtocols ?? []).some(
     (protocol) => protocol.enabled || protocol.activated
   );
 
@@ -54,7 +54,7 @@ const cohortRank = (cohort: Cohort): number => {
 };
 
 export const groupIntoCohorts = (
-  sessions: SessionWithL9Protocols[]
+  sessions: SessionWithCognitionProtocols[]
 ): Cohort[] => {
   const cohorts = new Map<string, Cohort>();
 
@@ -93,7 +93,7 @@ const isNumber = (value: unknown): value is number =>
 // Share of the sessions (with cognitive observability data) that have a
 // failure above the threshold. Restricted to one failure when a name is given.
 export const getFailureRate = (
-  sessions: SessionWithL9Protocols[],
+  sessions: SessionWithCognitionProtocols[],
   threshold: number,
   failureName?: string
 ): number | null => {
@@ -112,7 +112,7 @@ export const getFailureRate = (
 
 // Names of the failures above the threshold in at least one session.
 export const getFailureNames = (
-  sessions: SessionWithL9Protocols[],
+  sessions: SessionWithCognitionProtocols[],
   threshold: number
 ): string[] =>
   Array.from(
@@ -131,7 +131,7 @@ export interface CognitiveMetricInfo {
 }
 
 export const getCognitiveMetrics = (
-  sessions: SessionWithL9Protocols[]
+  sessions: SessionWithCognitionProtocols[]
 ): CognitiveMetricInfo[] => {
   const metrics = new Map<string, CognitiveMetricInfo>();
   sessions.forEach((session) =>
@@ -150,7 +150,7 @@ export const getCognitiveMetrics = (
 };
 
 export const getMetricAverage = (
-  sessions: SessionWithL9Protocols[],
+  sessions: SessionWithCognitionProtocols[],
   metricName: string
 ): number | null =>
   mean(
@@ -163,13 +163,13 @@ export const getMetricAverage = (
   );
 
 export const getUsageAverage = (
-  sessions: SessionWithL9Protocols[],
+  sessions: SessionWithCognitionProtocols[],
   field: 'tokens' | 'cost' | 'duration'
 ): number | null =>
   mean(sessions.map((session) => session[field]).filter(isNumber));
 
 // CONCORD figures, over the sessions where CONCORD was activated.
-export const getConcordStats = (sessions: SessionWithL9Protocols[]) => {
+export const getConcordStats = (sessions: SessionWithCognitionProtocols[]) => {
   const concordSessions = sessions.filter((session) => session.concord);
   const states = concordSessions
     .map((session) => session.concord?.terminalState)
