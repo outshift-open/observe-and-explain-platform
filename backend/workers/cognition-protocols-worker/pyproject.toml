@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cognition-protocols-worker"
+version = "0.1.0"
+description = "OXP ingestion worker that detects which Cognition protocols (ACCORD, CONCORD, and any plugged in) a session used and evaluates the ones it did."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "ioc-accord-mce-metrics",
+    "ioc-concord-mce-metrics",
+    "oxp-mce",
+    "oxp-mce-client",
+    "oxp-api",
+    "worker-base",
+    "click>=8.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
+
+[project.scripts]
+cognition-protocols-worker-cli = "cognition_protocols_worker.cli:main"
+
+# Graph access goes through the platform's API package (OXPKGProvider to read a session,
+# OXPCognitionProtocolReportProvider to write the Cognition protocol reports) and metrics run on the
+# platform's MCE: both are workspace members. The protocol MCE metrics live with their protocols.
+[tool.uv.sources]
+ioc-accord-mce-metrics = { git = "ssh://git@github.com/cisco-eti/ioc-core-l9-extensions.git", subdirectory = "evals/accord_custom_evals/accord-mce-metrics", branch = "feat/adding-mce-metrics-plugin" }
+ioc-concord-mce-metrics = { git = "ssh://git@github.com/ioc-project/cognition-protocols.git", subdirectory = "protocols/concord/mce-metrics", branch = "feat/add-eval" }
+oxp-mce = { workspace = true }
+oxp-mce-client = { workspace = true }
+oxp-api = { workspace = true }
+worker-base = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cognition_protocols_worker"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

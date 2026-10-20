@@ -23,6 +23,7 @@ group "backend" {
     "normal-behaviour-worker",
     "intelligence-worker",
     "stateful-eval-worker",
+    "cognition-protocols-worker",
   ]
 }
 
@@ -126,4 +127,12 @@ target "stateful-eval-worker" {
   args = {
     MODEL_PRICES_REFRESHED_AT = timestamp()
   }
+}
+
+target "cognition-protocols-worker" {
+  inherits   = ["docker-metadata-action"]
+  context    = "backend"
+  dockerfile = "workers/cognition-protocols-worker/deploy/docker/Dockerfile"
+  platforms  = ["linux/amd64"]
+  ssh        = ["default"]
 }

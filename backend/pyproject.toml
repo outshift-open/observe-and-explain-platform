@@ -39,10 +39,15 @@ members = [
     "workers/anomaly-detection-worker",
     "workers/analysis-worker",
     "workers/stateful-eval-worker",
+    "workers/cognition-protocols-worker",
     "workers/intelligence-worker",
     "worker-base",
     "stateful-evals",
 ]
+
+[tool.uv]
+# The protocol MCE plugins pin oxp-mce-core to a git ref for standalone use; here it is the workspace member.
+override-dependencies = ["oxp-mce-core"]
 
 [tool.uv.sources]
 dem = { workspace = true }
@@ -67,6 +72,7 @@ consistency-worker = { workspace = true }
 anomaly-detection-worker = { workspace = true }
 analysis-worker = { workspace = true }
 stateful-eval-worker = { workspace = true }
+cognition-protocols-worker = { workspace = true }
 stateful-evals = { workspace = true }
 intelligence-worker = { workspace = true }
 worker-base = { workspace = true }

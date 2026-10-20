@@ -1,0 +1,41 @@
+# MCE configuration for the ACCORD worker: which plugin metrics run, per scope.
+# Convergence, correctness and benefit metrics skip sessions with no evidence of ACCORD activation;
+# a skipped metric is an error result and is never stored. Token-cost metrics apply to any session.
+# The MCE's own cache would store each result on the Session. The worker writes them
+# into the session's CognitionProtocolExecutionReport instead, so the cache is off in both directions
+# (reading it would also serve stale results from before a rerun).
+cache:
+  read: false
+  write: false
+
+engine:
+  max_workers: 4
+  execution_strategy: thread
+
+metrics:
+  Session:
+    - AccordConverged
+    - AccordPhaseCoverage
+    - AccordCanonicalValid
+    - AccordRelayedValid
+    - AccordFabricatedLock
+    - AccordContractWarnings
+    - AccordLockPrecision
+    - AccordLockRecall
+    - AccordTermUtilization
+    - AccordLockedTerms
+    - AccordOverSelected
+    - AccordUnderSelected
+    # Token cost of ACCORD itself: the calls made while the protocol ran, and what the locked contract adds to
+    # later ones.
+    - AccordProtocolPromptTokens
+    - AccordProtocolCachedTokens
+    - AccordProtocolFreshTokens
+    - AccordProtocolCompletionTokens
+    - AccordContractOverheadTokens
+    - AccordContractOverheadPerCall
+    - AccordContractOverheadShare
+    # LLM-judged, so each session costs judge tokens (MCE records them on the result).
+    # Needs the MCE LLM settings (LLM_BASE_MODEL_URL, LLM_API_KEY, LLM_MODEL_NAME). Comment out to disable.
+    - AccordGlossaryUptake
+    - AccordGlossaryInfluence
