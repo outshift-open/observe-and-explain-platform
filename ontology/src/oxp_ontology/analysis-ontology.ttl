@@ -45,7 +45,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/analysis/1.0.0-rc0> ;
-    owl:versionInfo "1.0.7" ;
+    owl:versionInfo "1.0.6" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> ;
     rdfs:comment "Analysis ontology — group-scoped consistency/anomaly/normal-behaviour reports. All classes are computed post-hoc artefacts attached to execution KG nodes. v1.0.0: initial draft."@en .
 
@@ -242,16 +242,16 @@ mas:representativeProcessedSample rdf:type owl:DatatypeProperty, sh:PropertyShap
 
 
 #################################################################
-#    L9 PROTOCOL REPORTS
+#    COGNITION PROTOCOL REPORTS
 #
-#    L9 protocols (ACCORD, CONCORD, ...) are coordination protocols
+#    Cognition protocols (ACCORD, CONCORD, ...) are coordination protocols
 #    an agent system can follow. Two computed artefacts describe
 #    them for one Session:
 #
-#      L9Report                    which protocols were available to
+#      CognitionProtocolReport                    which protocols were available to
 #                                  the session's agents and which were
 #                                  actually used. One per Session.
-#      L9ProtocolExecutionReport   how one protocol went in that
+#      CognitionProtocolExecutionReport   how one protocol went in that
 #                                  Session: who took part, and the
 #                                  protocol's evaluation metrics (the
 #                                  MetricResults that measure it).
@@ -266,171 +266,171 @@ mas:multiValued rdf:type owl:AnnotationProperty ;
     rdfs:range xsd:boolean ;
     rdfs:comment "Set to true on a datatype property that holds a list of values (a Neo4j list property) instead of one. Generated models type such a property as a list of its range." .
 
-mas:L9Report rdf:type owl:Class ;
+mas:CognitionProtocolReport rdf:type owl:Class ;
     rdfs:subClassOf mas:Element ;
     mas:layer "analysis" ;
-    rdfs:comment "Session-level summary of the L9 protocols: which were enabled (available to the session's agents) and which were activated (actually used). Lists protocol names, so a new protocol adds an entry rather than new properties. One per Session." ;
+    rdfs:comment "Session-level summary of the Cognition protocols: which were enabled (available to the session's agents) and which were activated (actually used). Lists protocol names, so a new protocol adds an entry rather than new properties. One per Session." ;
     skos:example "protocolsEnabled ['accord', 'concord'], protocolsActivated ['accord']." .
 
 mas:protocolsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:protocolsEnabled ;
-    sh:targetClass mas:L9Report ;
+    sh:targetClass mas:CognitionProtocolReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9Report ;
+    rdfs:domain mas:CognitionProtocolReport ;
     rdfs:range xsd:string ;
-    rdfs:comment "Names of the L9 protocols that were enabled: available to at least one agent of the session (for example, listed among its skills)." .
+    rdfs:comment "Names of the Cognition protocols that were enabled: available to at least one agent of the session (for example, listed among its skills)." .
 
 mas:protocolsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:protocolsActivated ;
-    sh:targetClass mas:L9Report ;
+    sh:targetClass mas:CognitionProtocolReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9Report ;
+    rdfs:domain mas:CognitionProtocolReport ;
     rdfs:range xsd:string ;
-    rdfs:comment "Names of the L9 protocols that were activated: an agent actually used them (for example, called one of their skills)." .
+    rdfs:comment "Names of the Cognition protocols that were activated: an agent actually used them (for example, called one of their skills)." .
 
-mas:L9ProtocolExecutionReport rdf:type owl:Class ;
+mas:CognitionProtocolExecutionReport rdf:type owl:Class ;
     rdfs:subClassOf mas:Element ;
     mas:layer "analysis" ;
-    rdfs:comment "How one L9 protocol went in one Session: which agents had it and which used it, and the protocol's evaluation metrics, as MetricResults that measure this report. One per Session and protocol." ;
+    rdfs:comment "How one Cognition protocol went in one Session: which agents had it and which used it, and the protocol's evaluation metrics, as MetricResults that measure this report. One per Session and protocol." ;
     skos:example "The ACCORD execution of session s1: agents sre and db activated it; AccordConverged = 1." .
 
 mas:reportsOn rdf:type owl:ObjectProperty, sh:PropertyShape ;
     sh:path mas:reportsOn ;
-    sh:targetClass mas:L9Report, mas:L9ProtocolExecutionReport, mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitionProtocolReport, mas:CognitionProtocolExecutionReport, mas:CognitiveFailureReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain [ owl:unionOf ( mas:L9Report mas:L9ProtocolExecutionReport mas:CognitiveChallengeReport ) ] ;
+    rdfs:domain [ owl:unionOf ( mas:CognitionProtocolReport mas:CognitionProtocolExecutionReport mas:CognitiveFailureReport ) ] ;
     rdfs:range mas:Session ;
-    rdfs:comment "The Session this session-level report (L9 or cognitive challenge) describes. A report cannot exist without one." .
+    rdfs:comment "The Session this session-level report (Cognition protocol or cognitive failure) describes. A report cannot exist without one." .
 
 mas:protocol rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:protocol ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
-    rdfs:comment "Name of the L9 protocol this report is about, for example 'accord'." .
+    rdfs:comment "Name of the Cognition protocol this report is about, for example 'accord'." .
 
 mas:enabledEvidence rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:enabledEvidence ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
     rdfs:comment "How we know the protocol was enabled: 'system_prompt' when an agent's prompt lists one of its skills, 'activation' when only a call to it shows it was there." .
 
 mas:skillsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:skillsEnabled ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Names of the protocol's skills that were available to the session's agents." .
 
 mas:skillsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:skillsActivated ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Names of the protocol's skills that agents actually called." .
 
 mas:agentsEnabled rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:agentsEnabled ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Names of the agents that had the protocol available." .
 
 mas:agentsActivated rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:agentsActivated ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
     mas:multiValued true ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Names of the agents that took part in the protocol: they actually used it." .
 
 mas:metricCount rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:metricCount ;
-    sh:targetClass mas:L9ProtocolExecutionReport ;
+    sh:targetClass mas:CognitionProtocolExecutionReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
-    rdfs:domain mas:L9ProtocolExecutionReport ;
+    rdfs:domain mas:CognitionProtocolExecutionReport ;
     rdfs:range xsd:integer ;
     rdfs:comment "Number of MetricResults currently measuring this report, from the protocol's latest evaluation." .
 
 mas:reportedAt rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:reportedAt ;
-    sh:targetClass mas:L9Report, mas:L9ProtocolExecutionReport, mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitionProtocolReport, mas:CognitionProtocolExecutionReport, mas:CognitiveFailureReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain [ owl:unionOf ( mas:L9Report mas:L9ProtocolExecutionReport mas:CognitiveChallengeReport ) ] ;
+    rdfs:domain [ owl:unionOf ( mas:CognitionProtocolReport mas:CognitionProtocolExecutionReport mas:CognitiveFailureReport ) ] ;
     rdfs:range xsd:dateTime ;
     rdfs:comment "When this report was last written." .
 
 #################################################################
-#    COGNITIVE CHALLENGE REPORT
+#    COGNITIVE FAILURE REPORT
 #
-#    One detection of a cognitive challenge (see the challenges
+#    One detection of a cognitive failure (see the challenges
 #    taxonomy) in a session: which challenge, how sure the
 #    detector is, why, and the call where it happened, if it
-#    applies to one. Like the L9 reports it describes a session,
+#    applies to one. Like the Cognition protocol reports it describes a session,
 #    so it is linked to it by mas:reportsOn.
 #################################################################
 
-mas:CognitiveChallengeReport rdf:type owl:Class ;
+mas:CognitiveFailureReport rdf:type owl:Class ;
     rdfs:subClassOf mas:Element ;
     mas:layer "analysis" ;
-    rdfs:comment "A cognitive challenge (from the challenges taxonomy, e.g. IR-1 or CC-3) detected in a session: the challenge code, the detector's confidence, and a brief reasoning. Attached to the Session, and to the call where the challenge happened when it applies to one." ;
+    rdfs:comment "A cognitive failure (from the challenges taxonomy, e.g. IR-1 or CC-3) detected in a session: the challenge code, the detector's confidence, and a brief reasoning. Attached to the Session, and to the call where the challenge happened when it applies to one." ;
     skos:example "code 'IC-2', confidence 'medium', reasoning 'The plan kept booking the train after the user cancelled the trip.'" .
 
 mas:code rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:code ;
-    sh:targetClass mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitiveFailureReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain mas:CognitiveChallengeReport ;
+    rdfs:domain mas:CognitiveFailureReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Code of the detected challenge in the challenges taxonomy, e.g. 'IR-1', 'DC-4', 'CC-3'." .
 
 mas:confidence rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:confidence ;
-    sh:targetClass mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitiveFailureReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain mas:CognitiveChallengeReport ;
+    rdfs:domain mas:CognitiveFailureReport ;
     rdfs:range xsd:string ;
     rdfs:comment "How sure the detector is that the challenge happened: 'low' | 'medium' | 'high'." .
 
 mas:reasoning rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path mas:reasoning ;
-    sh:targetClass mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitiveFailureReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain mas:CognitiveChallengeReport ;
+    rdfs:domain mas:CognitiveFailureReport ;
     rdfs:range xsd:string ;
     rdfs:comment "Brief explanation of why this is a detection: what in the trace matches the challenge." .
 
 mas:atCall rdf:type owl:ObjectProperty, sh:PropertyShape ;
     sh:path mas:atCall ;
-    sh:targetClass mas:CognitiveChallengeReport ;
+    sh:targetClass mas:CognitiveFailureReport ;
     sh:minCount 0 ;
     sh:severity sh:Info ;
-    rdfs:domain mas:CognitiveChallengeReport ;
+    rdfs:domain mas:CognitiveFailureReport ;
     rdfs:range mas:ExecutionElement ;
     rdfs:comment "The call (LLM, tool or agent call) where the challenge happened. Absent for challenges that only show at the level of the whole session." .

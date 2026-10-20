@@ -127,36 +127,38 @@ def test_expected_core_node_classes_exist(module, cls_name):
     assert hasattr(imported, cls_name)
 
 
-def test_l9_report_lists_protocols_as_list_fields():
+def test_cognition_protocol_report_lists_protocols_as_list_fields():
     """mas:multiValued types a property as a list of its range."""
     from datetime import datetime, timezone
 
-    from oxp_ontology.models.nodes.l9_report import L9Report
+    from oxp_ontology.models.nodes.cognition_protocol_report import (
+        CognitionProtocolReport,
+    )
 
     now = datetime.now(timezone.utc)
-    report = L9Report(
+    report = CognitionProtocolReport(
         id="r", sessionId="s", reportedAt=now, protocolsEnabled=["accord"]
     )
     assert report.protocolsEnabled == ["accord"] and report.protocolsActivated == []
     assert (
-        L9Report(id="r2", sessionId="s", reportedAt=now).protocolsEnabled
+        CognitionProtocolReport(id="r2", sessionId="s", reportedAt=now).protocolsEnabled
         is not report.protocolsActivated
     )
 
 
-def test_l9_protocol_execution_report_requires_its_protocol():
+def test_cognition_protocol_execution_report_requires_its_protocol():
     from datetime import datetime, timezone
 
     from pydantic import ValidationError
 
-    from oxp_ontology.models.nodes.l9_protocol_execution_report import (
-        L9ProtocolExecutionReport,
+    from oxp_ontology.models.nodes.cognition_protocol_execution_report import (
+        CognitionProtocolExecutionReport,
     )
 
     now = datetime.now(timezone.utc)
     with pytest.raises(ValidationError):
-        L9ProtocolExecutionReport(id="p", sessionId="s", reportedAt=now)
-    report = L9ProtocolExecutionReport(
+        CognitionProtocolExecutionReport(id="p", sessionId="s", reportedAt=now)
+    report = CognitionProtocolExecutionReport(
         id="p",
         sessionId="s",
         reportedAt=now,

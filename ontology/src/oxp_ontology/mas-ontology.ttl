@@ -26,7 +26,7 @@
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/mas/1.0.0-rc0> ;
-    owl:versionInfo "1.0.7" ;
+    owl:versionInfo "1.0.6" ;
     rdfs:comment "Multi-Agent System telemetry ontology for observability and governance, independent of any specific telemetry source format. v1.0.0: initial proposal."@en .
 
 #################################################################
@@ -212,10 +212,10 @@
 
 :sessionId rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     sh:path :sessionId ;
-    sh:targetClass :ExecutionElement, mas:L9Report, mas:L9ProtocolExecutionReport ;
+    sh:targetClass :ExecutionElement, mas:CognitionProtocolReport, mas:CognitionProtocolExecutionReport ;
     sh:minCount 1 ;
     sh:severity sh:Violation ;
-    rdfs:domain [ owl:unionOf ( :ExecutionElement mas:L9Report mas:L9ProtocolExecutionReport ) ] ;
+    rdfs:domain [ owl:unionOf ( :ExecutionElement mas:CognitionProtocolReport mas:CognitionProtocolExecutionReport ) ] ;
     rdfs:range xsd:string ;
     rdfs:comment "Unique session identifier. Primary key for Session nodes (MERGE key). Carried as a provenance attribute on State and Transition nodes to make their scope explicit without a join." .
 

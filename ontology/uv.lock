@@ -240,7 +240,7 @@ wheels = [
 
 [[package]]
 name = "oxp-ontology"
-version = "1.0.7"
+version = "1.0.6"
 source = { editable = "." }
 dependencies = [
     { name = "rdflib" },

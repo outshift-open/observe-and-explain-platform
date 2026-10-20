@@ -222,8 +222,8 @@ class TestOntologyValidity:
         assert "agent_spans[0] has mismatched sessionId" in report.issues
 
 
-class TestL9ReportsOntology:
-    """The L9 protocol reports and how metrics attach to them."""
+class TestCognitionProtocolReportsOntology:
+    """The Cognition protocol reports and how metrics attach to them."""
 
     @staticmethod
     def _graph():
@@ -241,7 +241,7 @@ class TestL9ReportsOntology:
             self._graph(),
             Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
         )
-        for cls in (mas.L9Report, mas.L9ProtocolExecutionReport):
+        for cls in (mas.CognitionProtocolReport, mas.CognitionProtocolExecutionReport):
             assert (cls, RDF.type, OWL.Class) in g
             assert (cls, RDFS.subClassOf, mas.Element) in g
 
@@ -266,7 +266,7 @@ class TestL9ReportsOntology:
         )
         union = next(g.objects(mas.measures, RDFS.range))
         members = set(Collection(g, next(g.objects(union, OWL.unionOf))))
-        assert members == {mas.ExecutionElement, mas.L9ProtocolExecutionReport}
+        assert members == {mas.ExecutionElement, mas.CognitionProtocolExecutionReport}
 
     def test_protocol_lists_are_marked_multi_valued(self):
         from rdflib import Namespace
