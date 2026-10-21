@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.cognition_protocol_graph`.
   Requires `oxp-ontology>=1.0.6`.
 - **Cognition protocols read API.** `GET /sessions/{id}/cognition-protocols` reads the session's `CognitionProtocolReport` and
-  `CognitionProtocolExecutionReport` nodes and returns, per protocol (`L9-ACCORD`...), `enabled` / `activated`, the
+  `CognitionProtocolExecutionReport` nodes and returns, per protocol (`ACCORD`...), `enabled` / `activated`, the
   agents and skills that had / used it, and a generic `metrics` list (`name`, `section`, `value`, `reasoning`
   or parsed `details`, `provider`, `unit`, `timestamp`). `sessions-with-cognition-protocols` returns each session's
   enabled / activated protocols from its `CognitionProtocolReport`; its `concord` summary is no longer filled.

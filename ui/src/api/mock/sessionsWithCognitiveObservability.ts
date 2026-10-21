@@ -182,22 +182,22 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Incomplete Synthesis',
             confidence: 0.93,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           },
           {
             name: 'Shared Task Model Failure',
             confidence: 0.88,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Collective Goal Coordination Failure',
             confidence: 0.74,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           },
           {
             name: 'Representational Fidelity Loss at Interface',
             confidence: 0.45,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           }
         ]
       },
@@ -380,17 +380,17 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Transactive Memory Failure',
             confidence: 0.72,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Collective Goal Coordination Failure',
             confidence: 0.64,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Incomplete Synthesis',
             confidence: 0.54,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           }
         ]
       },
@@ -573,12 +573,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.95,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           },
           {
             name: 'Situational State Synchronisation Failure',
             confidence: 0.77,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           }
         ]
       },
@@ -761,12 +761,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Representational Failure',
             confidence: 0.97,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           },
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.63,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           }
         ]
       },
@@ -949,12 +949,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Plan Revision Failure',
             confidence: 0.57,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Shared Task Model Failure',
             confidence: 0.48,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           }
         ]
       },
@@ -1137,12 +1137,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Negotiation and Consensus Failure',
             confidence: 0.8,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           },
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.72,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           }
         ]
       },
@@ -1325,12 +1325,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.77,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           },
           {
             name: 'Individual Representational Failure',
             confidence: 0.62,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           }
         ]
       },
@@ -1513,12 +1513,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.76,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           },
           {
             name: 'Collective Goal Coordination Failure',
             confidence: 0.69,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           }
         ]
       },
@@ -1701,27 +1701,27 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.85,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Negotiation and Consensus Failure',
             confidence: 0.57,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Task Delegation Failure',
             confidence: 0.54,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           },
           {
             name: 'Collective Reasoning Degradation',
             confidence: 0.5,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Semantic and Ontological Misalignment',
             confidence: 0.45,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           }
         ]
       },
@@ -1904,27 +1904,27 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Incomplete Synthesis',
             confidence: 0.94,
-            remediations: ['L9-Concord']
+            remediations: ['Concord']
           },
           {
             name: 'Task Delegation Failure',
             confidence: 0.7,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Situational State Synchronisation Failure',
             confidence: 0.64,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Negotiation and Consensus Failure',
             confidence: 0.6,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           },
           {
             name: 'Collective Reasoning Degradation',
             confidence: 0.5,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           }
         ]
       },
@@ -2107,12 +2107,12 @@ export const mockSessionsWithCognitiveObservability: SessionsWithCognitiveObserv
           {
             name: 'Individual Metacognitive Blindness',
             confidence: 0.87,
-            remediations: ['L9-Accord']
+            remediations: ['Accord']
           },
           {
             name: 'Plan Revision Failure',
             confidence: 0.86,
-            remediations: ['L9-Accord', 'L9-Concord']
+            remediations: ['Accord', 'Concord']
           }
         ]
       }

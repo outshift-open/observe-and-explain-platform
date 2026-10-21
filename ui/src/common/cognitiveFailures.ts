@@ -44,14 +44,14 @@ export const COGNITIVE_METRIC_GROUPS: {
 
 // Explanations of the remediation protocols, keyed by lowercase protocol name.
 const COGNITIVE_REMEDIATION_DESCRIPTIONS: Record<string, string> = {
-  'l9-accord':
+  accord:
     "A pre-execution, four-phase protocol (CONVENE → FRAME → GROUND → VERIFY) that gets agents to establish shared intent before any work begins: who they are, what problem they're solving, what terms mean, and how correctness will be checked. It produces a locked Intent Contract and is explicitly not negotiation — just identity/capability/semantic reconciliation.",
-  'l9-concord':
+  concord:
     'An execution-phase protocol that aggregates agent preferences over a shared model via multi-round leximin negotiation (ANCHOR → PROPOSE_SEED → SCORE → REPAIR → COMMIT), converging on a consensus with a formal CONCORD certificate.'
 };
 
 export const getRemediationDescription = (name: string): string | undefined =>
-  COGNITIVE_REMEDIATION_DESCRIPTIONS[name.toLowerCase()];
+  COGNITIVE_REMEDIATION_DESCRIPTIONS[name.toLowerCase().replace(/^l9-/, '')];
 
 // Explanations of the cognitive failures, keyed by failure name.
 export const COGNITIVE_FAILURE_DESCRIPTIONS: Record<string, string> = {

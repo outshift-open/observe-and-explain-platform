@@ -68,8 +68,8 @@ def test_session_cognition_protocols_mapping():
 
     assert resp.sessionId == "s1"
     assert [(p["protocol"], p["enabled"], p["activated"]) for p in resp.protocols] == [
-        ("L9-ACCORD", True, True),
-        ("L9-CONCORD", True, False),
+        ("ACCORD", True, True),
+        ("CONCORD", True, False),
     ]
     accord, concord = resp.protocols
     assert accord["agentsActivated"] == ["a"]
@@ -109,7 +109,7 @@ def test_session_cognition_protocols_execution_report_without_cognition_protocol
     resp = _get_session_cognition_protocols(db, Dialect.NEO4J, session_id="s1")
 
     assert [(p["protocol"], p["enabled"], p["activated"]) for p in resp.protocols] == [
-        ("L9-ACCORD", True, True)
+        ("ACCORD", True, True)
     ]
 
 
@@ -155,8 +155,8 @@ def test_sessions_with_cognition_protocols_status():
 
     s1, s2 = resp.sessions
     assert [(p.protocol, p.enabled, p.activated) for p in s1.cognitionProtocols] == [
-        ("L9-ACCORD", True, True),
-        ("L9-CONCORD", True, False),
+        ("ACCORD", True, True),
+        ("CONCORD", True, False),
     ]
     assert s2.cognitionProtocols == []
 

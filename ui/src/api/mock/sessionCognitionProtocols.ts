@@ -13,8 +13,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
     sessionId: '4493f565-d069-47ec-9a6c-5df6dc8f31b7',
     protocols: [
       {
-        protocol: 'L9-ACCORD',
-        displayName: 'L9-ACCORD',
+        protocol: 'ACCORD',
+        displayName: 'ACCORD',
         description:
           'Runs before the task: each agent states what it means by the terms in play, who it is, what it thinks the problem is and what it knows, and ACCORD assembles it all into one shared model. Locking it emits the Intent Contract (Roster, Frame, Glossary and Verifiable Objective). Conflicting definitions are recorded with the agent that holds each, not resolved. It is not one-shot: an agent can raise a scoped update later, for example before a delegation or before final synthesis.',
         enabled: true,
@@ -72,8 +72,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
         }
       },
       {
-        protocol: 'L9-CONCORD',
-        displayName: 'L9-CONCORD',
+        protocol: 'CONCORD',
+        displayName: 'CONCORD',
         description:
           'Runs during the task: reconciles divergent-but-correct preferences into one decision. It does not decide who is right, it looks for the outcome every agent can live with, within a round budget. It ends in COMMIT (every agent clears the satisfaction floor) or BEST_EFFORT (the budget ran out, and the shortfall is reported). It certifies agreement, not correctness.',
         enabled: true,
@@ -198,8 +198,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
     sessionId: '41114179-2600-4073-a51d-0150651f2ae8',
     protocols: [
       {
-        protocol: 'L9-CONCORD',
-        displayName: 'L9-CONCORD',
+        protocol: 'CONCORD',
+        displayName: 'CONCORD',
         enabled: true,
         activated: true,
         activatedAt: '2026-10-07T08:41:12Z',
@@ -301,8 +301,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
     sessionId: '0e78e3a6-9ec4-46af-8835-0a69360c6c9e',
     protocols: [
       {
-        protocol: 'L9-ACCORD',
-        displayName: 'L9-ACCORD',
+        protocol: 'ACCORD',
+        displayName: 'ACCORD',
         enabled: true,
         activated: true,
         activatedAt: 'Init, before first delegation',
@@ -346,8 +346,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
         }
       },
       {
-        protocol: 'L9-CONCORD',
-        displayName: 'L9-CONCORD',
+        protocol: 'CONCORD',
+        displayName: 'CONCORD',
         enabled: true,
         activated: false,
         activatedAt: null,
@@ -363,8 +363,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
     sessionId: '65d1c926-de00-451f-bdcc-eb38bbe39c3a',
     protocols: [
       {
-        protocol: 'L9-CONCORD',
-        displayName: 'L9-CONCORD',
+        protocol: 'CONCORD',
+        displayName: 'CONCORD',
         enabled: true,
         activated: true,
         activatedAt: null,
@@ -429,8 +429,8 @@ export const mockSessionCognitionProtocols: Record<string, SessionCognitionProto
     sessionId: '5980fc14-3a53-429a-bef7-6d7af89cae8c',
     protocols: [
       {
-        protocol: 'L9-ACCORD',
-        displayName: 'L9-ACCORD',
+        protocol: 'ACCORD',
+        displayName: 'ACCORD',
         enabled: true,
         activated: false,
         activatedAt: null

@@ -98,9 +98,11 @@ _METRIC_SECTIONS = {
 
 
 def _normalize_protocol(name: object) -> str:
-    """``accord`` / ``COGNITION_ACCORD`` / ``L9-ACCORD`` -> ``L9-ACCORD``."""
+    """``accord`` / ``COGNITION_ACCORD`` / ``L9-ACCORD`` -> ``ACCORD``."""
     text = str(name).strip().upper().replace("_", "-").replace(" ", "-")
-    return text if text.startswith("L9-") else f"L9-{text}"
+    for prefix in ("L9-", "COGNITION-"):
+        text = text.removeprefix(prefix)
+    return text
 
 
 def _names(raw: object) -> set[str]:

@@ -1023,7 +1023,7 @@ export interface CognitionMetric {
 }
 
 export interface CognitionProtocolBase {
-  // Protocol identifier, e.g. 'L9-CONCORD'.
+  // Protocol identifier, e.g. 'CONCORD'.
   protocol: string;
   displayName?: string | null;
   description?: string | null;
@@ -1052,7 +1052,7 @@ export interface CognitionProtocolBase {
 export type CognitionConcordTerminalState = string;
 
 export interface CognitionConcordProtocol extends CognitionProtocolBase {
-  protocol: 'L9-CONCORD';
+  protocol: 'CONCORD';
   compliance?: {
     candidateCompleteness?: CognitionCheck | null;
     completion?: {
@@ -1082,7 +1082,7 @@ export interface CognitionConcordProtocol extends CognitionProtocolBase {
 }
 
 export interface CognitionAccordProtocol extends CognitionProtocolBase {
-  protocol: 'L9-ACCORD';
+  protocol: 'ACCORD';
   convergence?: {
     lockedFrame?: {
       wellFormed: boolean | null;

@@ -9,8 +9,8 @@ import {
   CognitionProtocol
 } from '@/types/oxp.type';
 
-export const COGNITION_CONCORD = 'L9-CONCORD';
-export const COGNITION_ACCORD = 'L9-ACCORD';
+export const COGNITION_CONCORD = 'CONCORD';
+export const COGNITION_ACCORD = 'ACCORD';
 
 export const isConcordProtocol = (
   protocol: CognitionProtocol
