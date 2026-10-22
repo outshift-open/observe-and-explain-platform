@@ -80,6 +80,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-mce-config" (include "oxp.fullname" .) -}}
 {{- end }}
 
+{{- define "oxp.cognitiveChallengeConfigMapName" -}}
+{{- printf "%s-cognitive-challenge-config" (include "oxp.fullname" .) -}}
+{{- end }}
+
 {{- define "oxp.statefulEvalConfigMapName" -}}
 {{- printf "%s-stateful-eval-config" (include "oxp.fullname" .) -}}
 {{- end }}

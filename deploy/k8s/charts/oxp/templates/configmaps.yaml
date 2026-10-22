@@ -28,3 +28,13 @@ metadata:
 data:
   stateful_eval_config.yaml: |
 {{ toYaml (default dict (index .Values.workers "stateful-eval").config) | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxp.cognitiveChallengeConfigMapName" . }}
+  labels:
+    {{- include "oxp.labels" . | nindent 4 }}
+data:
+  cognitive_challenge_config.yaml: |
+{{ toYaml (default dict (index .Values.workers "cognitive-challenge").config) | indent 4 }}

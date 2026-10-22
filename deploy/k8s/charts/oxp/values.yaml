@@ -517,6 +517,7 @@ workers:
     outputQueue:
       - new_session_to_grouping
       - new_session_to_stateful_eval
+      - new_session_to_cognitive_challenge
     feedbackQueue: ""
     embedderType: OpenAIEmbedder
     maxInflightMessages: "32"
@@ -717,6 +718,36 @@ workers:
     # Trajectory metrics are opt-in: list the ones to run, or `all`. Each adds a judge call per session.
     config:
       trajectory_metrics: []
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 2Gi
+        cpu: "1"
+
+  cognitive-challenge:
+    enabled: true
+    replicaCount: 1
+    secretOverrides:
+      aiGatewayApiKey: ""
+      aiGatewayBaseUrl: ""
+      llmModelNameKey: ""
+    inputQueue: new_session_to_cognitive_challenge
+    outputQueue: []
+    feedbackQueue: ""
+    configPath: /oxp/cognitive_challenge_config.yaml
+    maxInflightMessages: "32"
+    extraEnv: {}
+    image:
+      repository: ghcr.io/outshift-open/oxp-cognitive-challenge-worker
+      # Overrides the image tag whose default is the chart appVersion.
+      tag: ""
+      pullPolicy: IfNotPresent
+    # Contents of cognitive_challenge_config.yaml (see backend/cognitive_challenge_config.yaml).
+    # Opt-in: list the challenge codes to look for (e.g. IR-1, CC-3). With none, nothing is detected.
+    config:
+      challenges: []
     resources:
       requests:
         memory: 256Mi
