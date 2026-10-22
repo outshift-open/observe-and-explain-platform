@@ -1,4 +1,4 @@
-{{- $worker := index .Values.workers "cognitive-challenge" -}}
+{{- $worker := index .Values.workers "cognitive-failure" -}}
 {{- if and .Values.workers.enabled $worker.enabled }}
 {{- $workerOverrides := default dict $worker.secretOverrides }}
 {{- $llmSecretName := include "oxp.secretName" . }}
@@ -6,24 +6,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "oxp.workerDeploymentName" (dict "root" . "name" "cognitive-challenge") }}
+  name: {{ include "oxp.workerDeploymentName" (dict "root" . "name" "cognitive-failure") }}
   labels:
     {{- include "oxp.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
-    app.kubernetes.io/worker-name: cognitive-challenge
+    app.kubernetes.io/worker-name: cognitive-failure
 spec:
   replicas: {{ default 1 $worker.replicaCount }}
   selector:
     matchLabels:
       {{- include "oxp.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: worker
-      app.kubernetes.io/worker-name: cognitive-challenge
+      app.kubernetes.io/worker-name: cognitive-failure
   template:
     metadata:
       labels:
         {{- include "oxp.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker
-        app.kubernetes.io/worker-name: cognitive-challenge
+        app.kubernetes.io/worker-name: cognitive-failure
     spec:
       {{- $globalValues := get .Values "global" | default dict }}
       {{- $globalPullSecrets := get $globalValues "imagePullSecrets" | default (list) }}
@@ -38,7 +38,7 @@ spec:
         {{- $waitInitContainers | nindent 8 }}
       {{- end }}
       containers:
-        - name: cognitive-challenge
+        - name: cognitive-failure
           image: "{{ $worker.image.repository }}:{{ $worker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ $worker.image.pullPolicy }}
           envFrom:
@@ -52,21 +52,21 @@ spec:
             {{- include "oxp.rabbitmqWorkerEnv" . | nindent 12 }}
             {{- include "oxp.clickhouseWorkerEnv" . | nindent 12 }}
             {{- include "oxp.neo4jWorkerEnv" . | nindent 12 }}
-            - name: COGNITIVE_CHALLENGE_INPUT_QUEUE
+            - name: COGNITIVE_FAILURE_INPUT_QUEUE
               value: {{ $worker.inputQueue | quote }}
-            - name: COGNITIVE_CHALLENGE_OUTPUT_QUEUE
+            - name: COGNITIVE_FAILURE_OUTPUT_QUEUE
               value: {{ include "oxp.listOrStringEnvValue" $worker.outputQueue | quote }}
             {{ if $worker.feedbackQueue }}
-            - name: COGNITIVE_CHALLENGE_FEEDBACK_QUEUE
+            - name: COGNITIVE_FAILURE_FEEDBACK_QUEUE
               value: {{ $worker.feedbackQueue | quote }}
             {{ end }}
-            {{- $cognitiveChallengeLlmModelKey := default .Values.secrets.llm.llmModelNameKey (get $workerOverrides "llmModelNameKey") }}
+            {{- $cognitiveFailureLlmModelKey := default .Values.secrets.llm.llmModelNameKey (get $workerOverrides "llmModelNameKey") }}
             - name: LLM_MODEL_NAME
               valueFrom:
                 secretKeyRef:
                   name: {{ $llmSecretName }}
-                  key: {{ $cognitiveChallengeLlmModelKey }}
-            - name: COGNITIVE_CHALLENGE_CONFIG_PATH
+                  key: {{ $cognitiveFailureLlmModelKey }}
+            - name: COGNITIVE_FAILURE_CONFIG_PATH
               value: {{ $worker.configPath | quote }}
             - name: MAX_INFLIGHT_MESSAGES
               value: {{ $worker.maxInflightMessages | quote }}
@@ -99,16 +99,16 @@ spec:
           resources:
             {{- toYaml $worker.resources | nindent 12 }}
           volumeMounts:
-            - name: cognitive-challenge-config
+            - name: cognitive-failure-config
               mountPath: {{ $worker.configPath }}
-              subPath: cognitive_challenge_config.yaml
+              subPath: cognitive_failure_config.yaml
             {{- with $worker.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
-        - name: cognitive-challenge-config
+        - name: cognitive-failure-config
           configMap:
-            name: {{ include "oxp.cognitiveChallengeConfigMapName" . }}
+            name: {{ include "oxp.cognitiveFailureConfigMapName" . }}
         {{- with $worker.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
