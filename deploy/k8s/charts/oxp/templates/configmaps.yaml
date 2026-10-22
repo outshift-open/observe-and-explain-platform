@@ -32,9 +32,9 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "oxp.cognitiveChallengeConfigMapName" . }}
+  name: {{ include "oxp.cognitiveFailureConfigMapName" . }}
   labels:
     {{- include "oxp.labels" . | nindent 4 }}
 data:
-  cognitive_challenge_config.yaml: |
-{{ toYaml (default dict (index .Values.workers "cognitive-challenge").config) | indent 4 }}
+  cognitive_failure_config.yaml: |
+{{ toYaml (default dict (index .Values.workers "cognitive-failure").config) | indent 4 }}
