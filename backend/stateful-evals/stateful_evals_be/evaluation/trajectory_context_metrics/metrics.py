@@ -230,8 +230,10 @@ class LLMRubricMetric:
             }
         requested_score = raw.get("score")
         evaluation_invalid = (
-            not raw or bool(raw_metadata.get("evaluation_invalid"))
-            or type(requested_score) not in (int, float) or requested_score not in (0, 1)
+            not raw
+            or bool(raw_metadata.get("evaluation_invalid"))
+            or type(requested_score) not in (int, float)
+            or requested_score not in (0, 1)
             or (requested_score == 0 and not fatal_failures and not minor_failures)
         )
         # A binary failure must be backed by a fatal finding. This prevents an
@@ -1254,7 +1256,11 @@ async def aevaluate_high_level_metrics_batched(
     async def evaluate(metric: LLMRubricMetric) -> HighLevelMetricResult:
         metric = copy(metric)
         source_judge = metric.judge or judge or LLMMetricJudge()
-        metric.judge = source_judge.fork() if type(source_judge) is LLMMetricJudge else source_judge
+        metric.judge = (
+            source_judge.fork()
+            if type(source_judge) is LLMMetricJudge
+            else source_judge
+        )
         return await metric.aevaluate(context, stateful_result=stateful_result)
 
     results = await asyncio.gather(*(evaluate(metric) for metric in llm_metrics))
@@ -1263,15 +1269,26 @@ async def aevaluate_high_level_metrics_batched(
         if isinstance(metric, LLMRubricMetric):
             continue
         effective_result = stateful_result
-        if isinstance(metric, CorrectnessMetric) and isinstance(stateful_result, Mapping):
+        if isinstance(metric, CorrectnessMetric) and isinstance(
+            stateful_result, Mapping
+        ):
             # Replace stale embedded findings for metrics just recomputed.
             effective_result = dict(stateful_result)
             for key in ("fatal_failures", "minor_failures"):
                 effective_result[key] = [
-                    item for item in normalize_failures(stateful_result.get(key, []))
-                    if str(item.get("metric") or item.get("metric_name") or item.get("high_level_metric") or "") not in by_name
+                    item
+                    for item in normalize_failures(stateful_result.get(key, []))
+                    if str(
+                        item.get("metric")
+                        or item.get("metric_name")
+                        or item.get("high_level_metric")
+                        or ""
+                    )
+                    not in by_name
                 ]
-        by_name[metric.name] = metric.evaluate(context, stateful_result=effective_result)
+        by_name[metric.name] = metric.evaluate(
+            context, stateful_result=effective_result
+        )
     return [by_name[metric.name] for metric in metrics]
 
 

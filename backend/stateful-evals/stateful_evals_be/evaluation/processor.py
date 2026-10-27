@@ -398,12 +398,19 @@ class TemporalMetricsProcessor:
     async def _aquery_with_budget(
         self, messages, *, max_tokens, span_processing=False, response_format=None
     ):
-        kwargs = {"temperature": 1.0 if "claude-sonnet" in self.llm_config.LLM_MODEL_NAME.casefold() else 0.0,
-                  "max_tokens": max_tokens}
+        kwargs = {
+            "temperature": 1.0
+            if "claude-sonnet" in self.llm_config.LLM_MODEL_NAME.casefold()
+            else 0.0,
+            "max_tokens": max_tokens,
+        }
         if response_format is not None:
             kwargs["response_format"] = response_format
-        effort = (self.options.span_reasoning_effort if span_processing
-                  else self.options.reasoning_effort)
+        effort = (
+            self.options.span_reasoning_effort
+            if span_processing
+            else self.options.reasoning_effort
+        )
         if effort is not None:
             kwargs["reasoning_effort"] = effort
             kwargs["allowed_openai_params"] = ["reasoning_effort"]
@@ -415,8 +422,10 @@ class TemporalMetricsProcessor:
             # Legacy custom/MCE clients are synchronous. The model-owned path
             # below uses native async I/O for all model calls.
             return await asyncio.to_thread(
-                self.evaluate_spans, spans,
-                session_id=session_id, policy_override=policy_override,
+                self.evaluate_spans,
+                spans,
+                session_id=session_id,
+                policy_override=policy_override,
             )
         from stateful_evals_be.evaluation.llm_pipeline import evaluate_llm_spans
 
@@ -424,7 +433,6 @@ class TemporalMetricsProcessor:
             return await evaluate_llm_spans(
                 self, spans, session_id=session_id, policy_override=policy_override
             )
-
 
     @staticmethod
     def _sort_spans_chronologically(
@@ -1601,9 +1609,11 @@ class TemporalMetricsProcessor:
         processor executes one trajectory at a time.
         """
         if self.options.artifact_organization == "llm":
-            return run_sync(self.aevaluate_spans(
-                spans, session_id=session_id, policy_override=policy_override
-            ))
+            return run_sync(
+                self.aevaluate_spans(
+                    spans, session_id=session_id, policy_override=policy_override
+                )
+            )
         self._last_cross_span_usage = None
         self._last_final_outcome_usage = None
         try:

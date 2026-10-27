@@ -189,7 +189,8 @@ def _packaged_lookup(*, proxy_only: bool = False) -> Dict[str, ModelPrice]:
         return {}
     if proxy_only:
         raw = {
-            name: metadata for name, metadata in raw.items()
+            name: metadata
+            for name, metadata in raw.items()
             if isinstance(metadata, dict)
             and metadata.get("stateful_evals_source") == "proxy_model_info_snapshot"
         }

@@ -24,15 +24,22 @@ from .helpers import compact, final_answer_text, selected_claims, selected_evide
 
 _CAUSAL_METRICS = frozenset({"Handoff Quality", "Context Preservation"})
 _CAUSAL_ROLES = (
-    "requirement", "sender_output", "receiver_context", "downstream_action",
-    "downstream_effect", "recovery",
+    "requirement",
+    "sender_output",
+    "receiver_context",
+    "downstream_action",
+    "downstream_effect",
+    "recovery",
 )
 _CAUSAL_SCHEMA = {
-    **{role: {
-        "status": "observed | unknown | not_applicable",
-        "evidence_refs": "array of 0-2 exact provided artifact IDs; observed requires a reference; use [] when unknown/not_applicable has no references",
-        "observation": "one factual observation, at most about 25 words; explain unknown/not_applicable",
-    } for role in _CAUSAL_ROLES},
+    **{
+        role: {
+            "status": "observed | unknown | not_applicable",
+            "evidence_refs": "array of 0-2 exact provided artifact IDs; observed requires a reference; use [] when unknown/not_applicable has no references",
+            "observation": "one factual observation, at most about 25 words; explain unknown/not_applicable",
+        }
+        for role in _CAUSAL_ROLES
+    },
     "conclusion": "one concise sentence linking the evidence to this metric's verdict; state causal uncertainty",
 }
 _CAUSAL_INSTRUCTIONS = """\
@@ -114,17 +121,29 @@ def compact_prompt_context(context: Mapping[str, Any]) -> dict[str, Any]:
             if len(value) >= 256:
                 source_id = text_ids.setdefault(value, f"prompt_text:{len(text_ids)}")
                 texts[source_id] = value
-                provenance.setdefault(source_id, []).append({"artifact_id": artifact_id, "path": list(path)})
+                provenance.setdefault(source_id, []).append(
+                    {"artifact_id": artifact_id, "path": list(path)}
+                )
                 return {"source_text_ref": source_id}
         if isinstance(value, dict):
             artifact_id = value.get("artifact_id", artifact_id)
-            return {key: project(item, (*path, key), artifact_id) for key, item in value.items()}
+            return {
+                key: project(item, (*path, key), artifact_id)
+                for key, item in value.items()
+            }
         if isinstance(value, list):
-            return [project(item, (*path, index), artifact_id) for index, item in enumerate(value)]
+            return [
+                project(item, (*path, index), artifact_id)
+                for index, item in enumerate(value)
+            ]
         return value
 
     projected = project(context)
-    return {"trajectory_context": projected, "source_texts": texts, "source_text_provenance": provenance}
+    return {
+        "trajectory_context": projected,
+        "source_texts": texts,
+        "source_text_provenance": provenance,
+    }
 
 
 class LLMMetricJudge:
@@ -314,7 +333,10 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         messages: Sequence[Mapping[str, str]],
         *,
         initial_max_tokens: int,
-        validate_response: Callable[[Mapping[str, Any]], tuple[Mapping[str, Any], list[str]]] | None = None,
+        validate_response: Callable[
+            [Mapping[str, Any]], tuple[Mapping[str, Any], list[str]]
+        ]
+        | None = None,
     ) -> Mapping[str, Any]:
         usage_totals = {
             "prompt_tokens": 0,
@@ -331,7 +353,9 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
             attempt_messages = [dict(message) for message in messages]
             if attempt:
                 if rejected_response:
-                    attempt_messages.append({"role": "assistant", "content": rejected_response})
+                    attempt_messages.append(
+                        {"role": "assistant", "content": rejected_response}
+                    )
                 attempt_messages.append(
                     {
                         "role": "user",
@@ -342,7 +366,9 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
                             "Do not echo the input wrapper or schema. Preserve supported findings and use exact "
                             "provided artifact IDs. Use unknown/not_applicable for unsupported causal roles. "
                             "Do not invent evidence or change a verdict merely to satisfy the schema."
-                        ) if validation_errors else (
+                        )
+                        if validation_errors
+                        else (
                             "The previous response was empty, truncated, or invalid "
                             "JSON. Retry with strict compact JSON only. Keep overall "
                             "reasoning under 60 words, return at most one fatal and "
@@ -437,9 +463,14 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         allow_not_applicable: bool | None = None,
     ) -> Mapping[str, Any]:
         causal = metric_name in _CAUSAL_METRICS
-        output_schema = {**self._OUTPUT_SCHEMA, **({"causal_evidence": _CAUSAL_SCHEMA} if causal else {})}
+        output_schema = {
+            **self._OUTPUT_SCHEMA,
+            **({"causal_evidence": _CAUSAL_SCHEMA} if causal else {}),
+        }
         if allow_not_applicable is False:
-            output_schema["applicable"] = "true; this metric does not permit a not-applicable verdict"
+            output_schema["applicable"] = (
+                "true; this metric does not permit a not-applicable verdict"
+            )
         user_prompt = json.dumps(
             {
                 "metric_name": metric_name,
@@ -452,7 +483,11 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         )
         return await self._query_json(
             (
-                {"role": "system", "content": self._SYSTEM_PROMPT + (_CAUSAL_INSTRUCTIONS if causal else "")},
+                {
+                    "role": "system",
+                    "content": self._SYSTEM_PROMPT
+                    + (_CAUSAL_INSTRUCTIONS if causal else ""),
+                },
                 {"role": "user", "content": user_prompt},
             ),
             initial_max_tokens=self.max_tokens,
@@ -470,7 +505,10 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         shared_context: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         """Judge several rubrics once against a deduplicated artifact store."""
-        causal = any(metric.get("high_level_metric") in _CAUSAL_METRICS for metric in metrics_payload)
+        causal = any(
+            metric.get("high_level_metric") in _CAUSAL_METRICS
+            for metric in metrics_payload
+        )
         output_schema = deepcopy(self._BATCH_OUTPUT_SCHEMA)
         if causal:
             output_schema["metrics"][0]["causal_evidence"] = _CAUSAL_SCHEMA
@@ -501,7 +539,11 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
         )
         return await self._query_json(
             (
-                {"role": "system", "content": self._SYSTEM_PROMPT + (_CAUSAL_INSTRUCTIONS if causal else "")},
+                {
+                    "role": "system",
+                    "content": self._SYSTEM_PROMPT
+                    + (_CAUSAL_INSTRUCTIONS if causal else ""),
+                },
                 {"role": "user", "content": user_prompt},
             ),
             initial_max_tokens=max(self.max_tokens, 16384),
@@ -516,17 +558,40 @@ trajectory_context, or output_schema itself. Return strict JSON. No markdown.
 
 
 async def call_judge(
-    judge: MetricJudge, method: str, *,
-    allow_not_applicable: bool | None = None, **kwargs: Any,
+    judge: MetricJudge,
+    method: str,
+    *,
+    allow_not_applicable: bool | None = None,
+    **kwargs: Any,
 ) -> Mapping[str, Any]:
     """Await native async judges, preserving custom synchronous judge support."""
-    if method == "judge" and not isinstance(judge, LLMMetricJudge) and callable(getattr(judge, "judge_batch", None)):
+    if (
+        method == "judge"
+        and not isinstance(judge, LLMMetricJudge)
+        and callable(getattr(judge, "judge_batch", None))
+    ):
         context = kwargs["context_payload"]
-        raw = await call_judge(judge, "judge_batch", metrics_payload=[{
-            "high_level_metric": kwargs["metric_name"], "rubric": kwargs["rubric"],
-            "allow_not_applicable": allow_not_applicable,
-        }], shared_context=context)
-        row = next((row for row in raw.get("metrics", []) if isinstance(row, Mapping) and row.get("high_level_metric") == kwargs["metric_name"]), None)
+        raw = await call_judge(
+            judge,
+            "judge_batch",
+            metrics_payload=[
+                {
+                    "high_level_metric": kwargs["metric_name"],
+                    "rubric": kwargs["rubric"],
+                    "allow_not_applicable": allow_not_applicable,
+                }
+            ],
+            shared_context=context,
+        )
+        row = next(
+            (
+                row
+                for row in raw.get("metrics", [])
+                if isinstance(row, Mapping)
+                and row.get("high_level_metric") == kwargs["metric_name"]
+            ),
+            None,
+        )
         if row is None:
             raise ValueError("Judge omitted the requested metric")
         return resolve_batch_evidence_refs(row, context)
@@ -564,11 +629,16 @@ def recorded_source_context(context: TrajectoryContext) -> dict[str, Any]:
     """Expose accepted source records without inferring or filtering their meaning."""
     if getattr(context, "artifact_organization", "python") != "llm":
         return {}
-    return {"recorded_source_spans": [
-        {"artifact_id": f"source:{index}:0", "span_index": index,
-         "content": deepcopy(source)}
-        for index, source in enumerate(context.source_spans)
-    ]}
+    return {
+        "recorded_source_spans": [
+            {
+                "artifact_id": f"source:{index}:0",
+                "span_index": index,
+                "content": deepcopy(source),
+            }
+            for index, source in enumerate(context.source_spans)
+        ]
+    }
 
 
 def build_context_payload(
@@ -599,7 +669,8 @@ def build_context_payload(
                 "content": _content(fact.content, max_item_chars),
                 "artifact_id": (
                     context._evidence_artifact_id(evidence_indexes[id(fact)], fact)
-                    if model_organized else fact.source_name
+                    if model_organized
+                    else fact.source_name
                 ),
             }
             for fact in context.evidence
@@ -1151,7 +1222,8 @@ def _model_operation_context(
     operations = [
         {
             **{
-                key: value for key, value in operation.items()
+                key: value
+                for key, value in operation.items()
                 if key != "input_payload" or operation.get("operation_type") == "tool"
             },
             "content": _content(operation.get("content", ""), max_item_chars),
@@ -1197,9 +1269,9 @@ def _work_response_content(context: TrajectoryContext, work_unit: Any) -> str:
         context._evidence_artifact_id(index, fact): fact.content
         for index, fact in enumerate(context.evidence)
     }
-    artifacts.update({
-        f"claim:{index}": claim.content for index, claim in enumerate(context.claims)
-    })
+    artifacts.update(
+        {f"claim:{index}": claim.content for index, claim in enumerate(context.claims)}
+    )
     return "\n".join(
         artifacts[ref] for ref in work_unit.response_artifact_ids if ref in artifacts
     )
@@ -1298,13 +1370,17 @@ def build_instruction_execution_context(
 
     model_organized = getattr(context, "artifact_organization", "python") == "llm"
     identity = str if model_organized else _normalise_agent_id
-    root_agent_id = context.root_agent_id if model_organized else next(
-        (
-            str(operation.get("agent_id") or "")
-            for operation in operations
-            if operation.get("actor_scope") == "root" and operation.get("agent_id")
-        ),
-        "root",
+    root_agent_id = (
+        context.root_agent_id
+        if model_organized
+        else next(
+            (
+                str(operation.get("agent_id") or "")
+                for operation in operations
+                if operation.get("actor_scope") == "root" and operation.get("agent_id")
+            ),
+            "root",
+        )
     )
     available_peer_agents = sorted(
         {
@@ -1312,8 +1388,7 @@ def build_instruction_execution_context(
             for fact in context.evidence
             if fact.fact_type == "policy_rule"
             and fact.source_name.startswith("semantic_contract:")
-            and identity(fact.source_name.split(":", 1)[1])
-            != identity(root_agent_id)
+            and identity(fact.source_name.split(":", 1)[1]) != identity(root_agent_id)
         }
     )
     work_by_request_span = {
@@ -1329,7 +1404,8 @@ def build_instruction_execution_context(
         span_index = _safe_int(operation.get("span_index"), -1)
         work_unit = (
             work_by_id.get(str(operation.get("work_id") or ""))
-            if model_organized else None
+            if model_organized
+            else None
         ) or work_by_request_span.get(span_index)
         tool_fact = _operation_tool_fact(context, operation)
         recipient = str(operation.get("recipient_agent_id") or "")
@@ -1359,7 +1435,8 @@ def build_instruction_execution_context(
                 "tool_outcome": tool_fact.outcome if tool_fact is not None else "",
                 "result": (
                     _work_response_content(context, work_unit)
-                    if model_organized else compact(
+                    if model_organized
+                    else compact(
                         _delegation_result(str(operation.get("content") or "")), 360
                     )
                 ),
@@ -1434,7 +1511,8 @@ def build_instruction_following_context(
             "content": _content(fact.content, max_item_chars),
             "artifact_id": (
                 context._evidence_artifact_id(evidence_indexes[id(fact)], fact)
-                if model_organized else fact.source_name
+                if model_organized
+                else fact.source_name
             ),
         }
         for fact in context.evidence
@@ -1546,7 +1624,8 @@ def build_delegation_context(
         start_span = _safe_int(operation.get("span_index"), -1)
         work_unit = (
             work_by_id.get(str(operation.get("work_id") or ""))
-            if model_organized else None
+            if model_organized
+            else None
         ) or work_by_request_span.get(start_span)
         recipient = str(operation.get("recipient_agent_id") or "")
         if not recipient and model_organized and work_unit is not None:
@@ -1565,7 +1644,8 @@ def build_delegation_context(
                 or (
                     candidate.get("parent_delegation_id") != delegation_id
                     and not (
-                        model_organized and work_unit is not None
+                        model_organized
+                        and work_unit is not None
                         and candidate.get("work_id") == work_unit.work_id
                     )
                 )
@@ -1606,8 +1686,7 @@ def build_delegation_context(
                 fact
                 for fact in tool_facts
                 if fact.span_index == start_span
-                and identity(fact.source_name)
-                == identity(entity_name)
+                and identity(fact.source_name) == identity(entity_name)
             ),
             None,
         )
@@ -1625,13 +1704,13 @@ def build_delegation_context(
                 "recipient_agent": recipient,
                 "delegated_task": (
                     (work_unit.request if work_unit is not None else "")
-                    if model_organized else _delegated_task(
-                        str(operation.get("input_signature") or "")
-                    )
+                    if model_organized
+                    else _delegated_task(str(operation.get("input_signature") or ""))
                 ),
                 "delegation_result": (
                     _work_response_content(context, work_unit)
-                    if model_organized else _delegation_result(
+                    if model_organized
+                    else _delegation_result(
                         delegation_fact.content if delegation_fact is not None else ""
                     )
                 ),
@@ -1644,9 +1723,13 @@ def build_delegation_context(
                 ),
                 "work_id": work_unit.work_id if work_unit is not None else "",
                 "recipient_contract_artifact_id": (
-                    context._evidence_artifact_id(evidence_indexes[id(contract)], contract)
+                    context._evidence_artifact_id(
+                        evidence_indexes[id(contract)], contract
+                    )
                     if model_organized and contract is not None
-                    else contract.source_name if contract is not None else ""
+                    else contract.source_name
+                    if contract is not None
+                    else ""
                 ),
                 "observed_tools_before_next_delegation": observed_tools,
             }
@@ -1711,7 +1794,9 @@ def _agent_capability_profiles(
     specific_text = (
         {agent_id: fact.content for agent_id, fact in contracts.items()}
         if model_organized
-        else _agent_specific_contract_text(contracts) if include_contract_text else {}
+        else _agent_specific_contract_text(contracts)
+        if include_contract_text
+        else {}
     )
     evidence_indexes = {id(fact): index for index, fact in enumerate(context.evidence)}
     rows = []
@@ -1725,7 +1810,9 @@ def _agent_capability_profiles(
             "contract_artifact_id": (
                 context._evidence_artifact_id(evidence_indexes[id(contract)], contract)
                 if model_organized and contract is not None
-                else contract.source_name if contract is not None else ""
+                else contract.source_name
+                if contract is not None
+                else ""
             ),
             "declared_tools": list(getattr(profile, "declared_tools", []) or []),
             "observed_tools": list(getattr(profile, "observed_tools", []) or []),
@@ -1870,7 +1957,9 @@ def build_shared_context_payload(
     return payload
 
 
-def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+def _context_artifact_lookup(
+    shared_context: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
     """Index the exact artifact IDs supplied to the final judge."""
     artifact_lookup: dict[str, dict[str, Any]] = {}
     component_kinds = {
@@ -1929,15 +2018,21 @@ def _context_artifact_lookup(shared_context: Mapping[str, Any]) -> dict[str, dic
     for text_id, text in projected["source_texts"].items():
         sources = projected["source_text_provenance"][text_id]
         artifact_lookup[text_id] = {
-            "artifact_id": text_id, "span_index": -1, "kind": "source_text",
-            "source_name": "source_texts", "content": text,
+            "artifact_id": text_id,
+            "span_index": -1,
+            "kind": "source_text",
+            "source_name": "source_texts",
+            "content": text,
             "metadata": {"sources": sources},
         }
     return artifact_lookup
 
 
 def _retain_causal_evidence(
-    raw: Mapping[str, Any], artifact_lookup: Mapping[str, Any], *, required: bool = False,
+    raw: Mapping[str, Any],
+    artifact_lookup: Mapping[str, Any],
+    *,
+    required: bool = False,
 ) -> tuple[dict[str, Any], list[str]]:
     """Validate pointers and shape only; preserve the judge's causal assessment."""
     result = dict(raw)
@@ -1961,38 +2056,86 @@ def _retain_causal_evidence(
                 item = {**item, "evidence_refs": []}
                 audit[role] = item
             refs = item.get("evidence_refs")
-            if not isinstance(status, str) or status not in {"observed", "unknown", "not_applicable"}:
-                errors.append(f"causal_evidence.{role}.status must be observed, unknown, or not_applicable")
-            if not isinstance(item.get("observation"), str) or not item["observation"].strip():
-                errors.append(f"causal_evidence.{role}.observation must explain the evidence or its absence")
+            if not isinstance(status, str) or status not in {
+                "observed",
+                "unknown",
+                "not_applicable",
+            }:
+                errors.append(
+                    f"causal_evidence.{role}.status must be observed, unknown, or not_applicable"
+                )
+            if (
+                not isinstance(item.get("observation"), str)
+                or not item["observation"].strip()
+            ):
+                errors.append(
+                    f"causal_evidence.{role}.observation must explain the evidence or its absence"
+                )
             if not isinstance(refs, list):
                 errors.append(f"causal_evidence.{role}.evidence_refs must be an array")
             else:
                 if status == "observed" and not refs:
-                    errors.append(f"causal_evidence.{role}: observed evidence requires an artifact reference")
+                    errors.append(
+                        f"causal_evidence.{role}: observed evidence requires an artifact reference"
+                    )
                 for ref in refs:
                     if not isinstance(ref, str) or ref not in artifact_lookup:
-                        errors.append(f"causal_evidence.{role}: unknown artifact ID {ref!r}")
-        if not isinstance(audit.get("conclusion"), str) or not audit["conclusion"].strip():
-            errors.append("causal_evidence.conclusion must explain the verdict and any causal uncertainty")
+                        errors.append(
+                            f"causal_evidence.{role}: unknown artifact ID {ref!r}"
+                        )
+        if (
+            not isinstance(audit.get("conclusion"), str)
+            or not audit["conclusion"].strip()
+        ):
+            errors.append(
+                "causal_evidence.conclusion must explain the verdict and any causal uncertainty"
+            )
     scopes = [("verdict", raw)]
     for key in ("fatal_failures", "minor_failures"):
         if isinstance(raw.get(key), list):
-            scopes.extend((f"{key}[{index}]", row) for index, row in enumerate(raw[key]) if isinstance(row, Mapping))
+            scopes.extend(
+                (f"{key}[{index}]", row)
+                for index, row in enumerate(raw[key])
+                if isinstance(row, Mapping)
+            )
     for location, row in scopes:
         refs = row.get("evidence_refs", [])
         if not isinstance(refs, list):
             errors.append(f"{location}.evidence_refs must be an array")
             continue
         if isinstance(row.get("evidence"), list):
-            refs = [*refs, *(item["artifact_id"] for item in row["evidence"] if isinstance(item, Mapping) and item.get("artifact_id"))]
+            refs = [
+                *refs,
+                *(
+                    item["artifact_id"]
+                    for item in row["evidence"]
+                    if isinstance(item, Mapping) and item.get("artifact_id")
+                ),
+            ]
         for ref in refs:
             if not isinstance(ref, str) or ref not in artifact_lookup:
                 errors.append(f"{location}: unknown artifact ID {ref!r}")
-    metadata = dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), Mapping) else {}
+    metadata = (
+        dict(raw.get("metadata") or {})
+        if isinstance(raw.get("metadata"), Mapping)
+        else {}
+    )
     previous_validation = metadata.get("causal_evidence_validation")
-    if isinstance(previous_validation, Mapping) and isinstance(previous_validation.get("errors"), list):
-        errors = list(dict.fromkeys([*errors, *(error for error in previous_validation["errors"] if isinstance(error, str))]))
+    if isinstance(previous_validation, Mapping) and isinstance(
+        previous_validation.get("errors"), list
+    ):
+        errors = list(
+            dict.fromkeys(
+                [
+                    *errors,
+                    *(
+                        error
+                        for error in previous_validation["errors"]
+                        if isinstance(error, str)
+                    ),
+                ]
+            )
+        )
     metadata["causal_evidence"] = deepcopy(audit)
     metadata["causal_evidence_validation"] = {"valid": not errors, "errors": errors}
     if errors:
@@ -2002,7 +2145,9 @@ def _retain_causal_evidence(
 
 
 def _final_response_validator(
-    context_payload: Mapping[str, Any], *, metric_name: str | None = None,
+    context_payload: Mapping[str, Any],
+    *,
+    metric_name: str | None = None,
     allow_not_applicable: bool | None = None,
     requested_metrics: Mapping[str, bool | None] | None = None,
 ) -> Callable[[Mapping[str, Any]], tuple[Mapping[str, Any], list[str]]]:
@@ -2013,15 +2158,25 @@ def _final_response_validator(
         if metric_name is None:
             rows = raw.get("metrics")
             requested = requested_metrics or {}
-            if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+            if not isinstance(rows, list) or any(
+                not isinstance(row, Mapping) for row in rows
+            ):
                 return raw, ["metrics must be an array of verdict objects"]
-            if sorted(row.get("high_level_metric", "") for row in rows) != sorted(requested):
+            if sorted(row.get("high_level_metric", "") for row in rows) != sorted(
+                requested
+            ):
                 return raw, ["return each requested metric exactly once"]
             validated = [
-                _final_response_validator(context_payload, metric_name=row["high_level_metric"], allow_not_applicable=requested[row["high_level_metric"]])(row)
+                _final_response_validator(
+                    context_payload,
+                    metric_name=row["high_level_metric"],
+                    allow_not_applicable=requested[row["high_level_metric"]],
+                )(row)
                 for row in rows
             ]
-            return {**raw, "metrics": [row for row, _ in validated]}, [error for _, errors in validated for error in errors]
+            return {**raw, "metrics": [row for row, _ in validated]}, [
+                error for _, errors in validated for error in errors
+            ]
         errors = []
         score = raw.get("score")
         if type(score) not in (int, float) or score not in (0, 1):
@@ -2034,7 +2189,11 @@ def _final_response_validator(
             errors.append("this metric does not permit a not-applicable verdict")
         for key in ("fatal_failures", "minor_failures"):
             rows = raw.get(key, [])
-            if not isinstance(rows, list) or any(not isinstance(row, Mapping) or not str(row.get("reasoning") or "").strip() for row in rows):
+            if not isinstance(rows, list) or any(
+                not isinstance(row, Mapping)
+                or not str(row.get("reasoning") or "").strip()
+                for row in rows
+            ):
                 errors.append(f"{key} must contain failure objects with reasoning")
         if bool(raw.get("fatal_failures")) != (score == 0):
             errors.append("score 0 requires fatal failures; score 1 requires none")
@@ -2045,8 +2204,16 @@ def _final_response_validator(
             errors.extend(causal_errors)
         result = dict(raw)
         if errors:
-            metadata = dict(raw.get("metadata")) if isinstance(raw.get("metadata"), Mapping) else {}
-            result["metadata"] = {**metadata, "evaluation_invalid": True, "evaluation_error": "; ".join(errors)}
+            metadata = (
+                dict(raw.get("metadata"))
+                if isinstance(raw.get("metadata"), Mapping)
+                else {}
+            )
+            result["metadata"] = {
+                **metadata,
+                "evaluation_invalid": True,
+                "evaluation_error": "; ".join(errors),
+            }
         return result, errors
 
     return validate

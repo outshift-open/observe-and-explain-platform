@@ -40,9 +40,13 @@ async def query(client, messages, **kwargs):
         return client.query(messages, **kwargs)
     if client.custom_llm_provider != "openai":
         return await litellm.acompletion(
-            model=client.model, api_base=client.api_base, api_version=client.api_version,
-            api_key=client.api_key, messages=list(messages),
-            custom_llm_provider=client.custom_llm_provider, num_retries=client.num_retries,
+            model=client.model,
+            api_base=client.api_base,
+            api_version=client.api_version,
+            api_key=client.api_key,
+            messages=list(messages),
+            custom_llm_provider=client.custom_llm_provider,
+            num_retries=client.num_retries,
             **kwargs,
         )
     if _transports.get() is None:
@@ -51,12 +55,16 @@ async def query(client, messages, **kwargs):
     transports = _transports.get()
     if id(client) not in transports:
         # Construction has no await, so concurrent calls share this client.
-        transports[id(client)] = AsyncOpenAI(api_key=client.api_key,
-                                            base_url=client.api_base or None,
-                                            max_retries=client.num_retries)
+        transports[id(client)] = AsyncOpenAI(
+            api_key=client.api_key,
+            base_url=client.api_base or None,
+            max_retries=client.num_retries,
+        )
     kwargs.pop("allowed_openai_params", None)
     return await transports[id(client)].chat.completions.create(
-        model=client.model, messages=list(messages), **kwargs,
+        model=client.model,
+        messages=list(messages),
+        **kwargs,
     )
 
 

@@ -255,10 +255,14 @@ def _load_llm_context(payload: Mapping[str, Any]) -> TrajectoryContext:
     """Restore model-owned state exactly, without adapter or status inference."""
     context = TrajectoryContext(policy_text="", artifact_organization="llm")
     record_types = {
-        "evidence": EvidenceFact, "intents": IntentEntry, "claims": ClaimEntry,
+        "evidence": EvidenceFact,
+        "intents": IntentEntry,
+        "claims": ClaimEntry,
         "coordination_events": CoordinationEvent,
-        "provenance_links": ArtifactProvenanceLink, "agents": AgentProfile,
-        "work_units": WorkUnit, "flags": FlagEntry,
+        "provenance_links": ArtifactProvenanceLink,
+        "agents": AgentProfile,
+        "work_units": WorkUnit,
+        "flags": FlagEntry,
     }
     for name, record_type in record_types.items():
         rows = payload.get(name, [])
@@ -268,12 +272,25 @@ def _load_llm_context(payload: Mapping[str, Any]) -> TrajectoryContext:
             records = [record_type(**row) for row in rows]
         except TypeError as exc:
             raise ValueError(f"Invalid saved {name}: {exc}") from exc
-        setattr(context, name, {row.agent_id: row for row in records} if name == "agents" else records)
+        setattr(
+            context,
+            name,
+            {row.agent_id: row for row in records} if name == "agents" else records,
+        )
     for name in (
-        "policy_text", "root_request", "root_agent_id", "tool_definitions",
-        "latest_root_answer", "latest_root_answer_span_index",
-        "delivery_span_index", "termination_span_index", "raw_spans",
-        "source_spans", "artifact_sources", "coordination_metadata", "artifact_relationship_decisions",
+        "policy_text",
+        "root_request",
+        "root_agent_id",
+        "tool_definitions",
+        "latest_root_answer",
+        "latest_root_answer_span_index",
+        "delivery_span_index",
+        "termination_span_index",
+        "raw_spans",
+        "source_spans",
+        "artifact_sources",
+        "coordination_metadata",
+        "artifact_relationship_decisions",
     ):
         if name in payload:
             setattr(context, name, payload[name])
@@ -323,19 +340,23 @@ def trajectory_context_to_payload(
         "delivery_span_index": context.delivery_span_index,
     }
     if context.artifact_organization == "llm":
-        payload.update({
-            "artifact_organization": "llm",
-            "root_agent_id": context.root_agent_id,
-            "root_request": context.root_request,
-            "tool_definitions": _jsonable(context.tool_definitions),
-            "latest_root_answer": context.latest_root_answer,
-            "latest_root_answer_span_index": context.latest_root_answer_span_index,
-            "termination_span_index": context.termination_span_index,
-            "raw_spans": _jsonable(context.raw_spans),
-            "source_spans": _jsonable(context.source_spans),
-            "artifact_sources": _jsonable(context.artifact_sources),
-            "artifact_relationship_decisions": _jsonable(context.artifact_relationship_decisions),
-        })
+        payload.update(
+            {
+                "artifact_organization": "llm",
+                "root_agent_id": context.root_agent_id,
+                "root_request": context.root_request,
+                "tool_definitions": _jsonable(context.tool_definitions),
+                "latest_root_answer": context.latest_root_answer,
+                "latest_root_answer_span_index": context.latest_root_answer_span_index,
+                "termination_span_index": context.termination_span_index,
+                "raw_spans": _jsonable(context.raw_spans),
+                "source_spans": _jsonable(context.source_spans),
+                "artifact_sources": _jsonable(context.artifact_sources),
+                "artifact_relationship_decisions": _jsonable(
+                    context.artifact_relationship_decisions
+                ),
+            }
+        )
     if metadata:
         payload.update(_jsonable(dict(metadata)))
     return payload

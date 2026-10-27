@@ -2040,7 +2040,9 @@ class TrajectoryContext:
             # but must never alias a different recorded invocation.
             if call_id and fact.tool_call_id:
                 continue
-            if not result or _exact_text_key(result) not in self._tool_result_keys(fact):
+            if not result or _exact_text_key(result) not in self._tool_result_keys(
+                fact
+            ):
                 continue
             matches.append((index, fact))
         if call_id and len(matches) == 1:
@@ -2586,9 +2588,11 @@ class TrajectoryContext:
                     for index, claim in enumerate(self.claims)
                 ]
             elif role in {"tool", "function"}:
-                artifact_ids.extend(self._tool_input_artifact_ids(
-                    message.get("tool_call_id", ""), message["content"]
-                ))
+                artifact_ids.extend(
+                    self._tool_input_artifact_ids(
+                        message.get("tool_call_id", ""), message["content"]
+                    )
+                )
                 continue
             else:
                 candidates = [
@@ -3028,7 +3032,9 @@ class TrajectoryContext:
                     description_override=(
                         event_unit.request
                         if event_unit is not None
-                        else request_text if actor_override else ""
+                        else request_text
+                        if actor_override
+                        else ""
                     ),
                     actor_override=(
                         sidecar_event.actor_agent_id
@@ -3049,8 +3055,10 @@ class TrajectoryContext:
                         for parent_id in intent.parent_intent_ids
                     ],
                 )
-                if sidecar_event is None and span_unit is None and (
-                    event_type == "assignment" or "assignment" not in event_types
+                if (
+                    sidecar_event is None
+                    and span_unit is None
+                    and (event_type == "assignment" or "assignment" not in event_types)
                 ):
                     span_unit = self._open_work_unit(
                         allocator_agent_id=actor_agent_id,
@@ -4308,10 +4316,10 @@ class TrajectoryContext:
         user_facing: list[ClaimEntry] = []
         unattributed: list[ClaimEntry] = []
         for claim in self.claims:
-            if (
-                claim.claim_type not in ("assertion", "completion_claim")
-                or claim.actor_scope not in ("", "root")
-            ):
+            if claim.claim_type not in (
+                "assertion",
+                "completion_claim",
+            ) or claim.actor_scope not in ("", "root"):
                 continue
             text = claim.content.strip()
             if not text:
@@ -4517,8 +4525,10 @@ def _normalise_message(message: Any) -> Optional[Dict[str, str]]:
         or attributes.get("tool_call_id")
         or ""
     ).strip()
-    if not content and not has_tool_calls and not (
-        role in {"tool", "function"} and tool_call_id
+    if (
+        not content
+        and not has_tool_calls
+        and not (role in {"tool", "function"} and tool_call_id)
     ):
         return None
     normalized = {"role": role, "content": content}
@@ -4602,9 +4612,8 @@ def _extract_flattened_messages(
             ),
         }
         for _, entry in sorted(indexed.items())
-        if entry.get("content") or (
-            entry.get("role") in {"tool", "function"} and entry.get("tool_call_id")
-        )
+        if entry.get("content")
+        or (entry.get("role") in {"tool", "function"} and entry.get("tool_call_id"))
     ]
 
 
@@ -4752,11 +4761,15 @@ def _span_phase(span_dict: Dict[str, Any]) -> str:
 def _span_actor_scope(span_dict: Dict[str, Any]) -> str:
     """Read native topology scope; a role label does not establish topology."""
     attrs = _span_attributes(span_dict)
-    value = str(
-        span_dict.get("actor_scope")
-        or _first_populated(attrs, "mas.actor.scope", "actor.scope", "actor_scope")
-        or ""
-    ).strip().lower()
+    value = (
+        str(
+            span_dict.get("actor_scope")
+            or _first_populated(attrs, "mas.actor.scope", "actor.scope", "actor_scope")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     return value if value in {"root", "peer"} else ""
 
 
@@ -5029,7 +5042,9 @@ def _is_sidecar_verification_event(event: CoordinationEvent) -> bool:
     except (TypeError, json.JSONDecodeError):
         return False
     return isinstance(payload, dict) and {
-        "verdict", "action_after_verification", "verification_gate_observed"
+        "verdict",
+        "action_after_verification",
+        "verification_gate_observed",
     }.issubset(payload)
 
 
@@ -5231,6 +5246,7 @@ _AGENT_OUTPUT_MAP_KEYS = {
     "peer_messages",
     "prior_agent_outputs",
 }
+
 
 def _payload_contains_coordination_context(payload: Any) -> bool:
     stack: List[Any] = [payload]

@@ -290,7 +290,6 @@ not evidence that required reasoning was skipped.
         }
 
 
-
 class HandoffQualityMetric(TrajectoryMetric):
     """Checks whether delegation requests and responses form usable interfaces."""
 

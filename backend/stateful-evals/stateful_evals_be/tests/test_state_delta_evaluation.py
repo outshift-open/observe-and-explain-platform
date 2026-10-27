@@ -225,7 +225,9 @@ def test_combined_span_judge_falls_back_to_one_call_per_missing_metric() -> None
 
 def test_evaluate_session_uses_one_unified_final_audit_and_accounts_for_it() -> None:
     processor = _processor()
-    processor.options = TemporalMetricOptions(artifact_organization="legacy", use_fatal_mode=True)
+    processor.options = TemporalMetricOptions(
+        artifact_organization="legacy", use_fatal_mode=True
+    )
     processor.llm_config = SimpleNamespace(LLM_MODEL_NAME="gpt-4o")
     raw_span = {
         "SpanId": "1",

@@ -216,9 +216,13 @@ class DelegationAccuracyMetric(TrajectoryMetric):
         super().__init__(input_config=input_config, judge=judge)
 
     def to_judge_payload(self, context: TrajectoryContext) -> dict[str, Any]:
-        payload = DelegationOwnershipMetric(input_config=self.input_config).to_judge_payload(context)
+        payload = DelegationOwnershipMetric(
+            input_config=self.input_config
+        ).to_judge_payload(context)
         payload["rubric"] = self.rubric
-        payload["context"].update(DelegationAccuracyMetricV1().to_judge_payload(context)["context"])
+        payload["context"].update(
+            DelegationAccuracyMetricV1().to_judge_payload(context)["context"]
+        )
         return payload
 
 
