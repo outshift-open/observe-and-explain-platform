@@ -10,8 +10,8 @@ Orchestrates temporal evaluation of agent sessions using three core primitives:
 Flow:
   1. Accept spans (or a normalized trajectory) supplied by the caller
   2. Iterate spans sequentially, accumulating trajectory context
-  3. For each span, compute all applicable primitives in one state-delta call
-  4. Post-processing: one shared high-level trajectory audit
+  3. For each span, run primitive judges concurrently and apply extracted state
+  4. Post-processing: run independent final metric audits concurrently
   5. Return scored result
 """
 
@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from metrics_computation_engine.llm_judge.llm import LLMClient
 from metrics_computation_engine.models.requests import LLMJudgeConfig
+
+from stateful_evals_be.evaluation.async_utils import model_query_scope, query, run_sync
 from stateful_evals_be.evaluation.cost_estimator import (
     estimate_token_cost,
     estimate_usage_cost_usd,
@@ -53,6 +55,7 @@ from stateful_evals_be.models.trajectory import Trajectory
 
 if TYPE_CHECKING:
     from metrics_computation_engine.llm_judge.jury import Jury
+
     from stateful_evals_be.models.requests import IntentState
 
 
@@ -112,10 +115,13 @@ class TemporalMetricsProcessor:
         options: Optional[TemporalMetricOptions] = None,
     ):
         self.llm_config = deepcopy(llm_config)
-        self.metric_names = list(CORE_METRICS)
         self.options = (
             deepcopy(options) if options is not None else TemporalMetricOptions()
         )
+        self.metric_names = [
+            f"mdt.{name}" if self.options.artifact_organization == "llm" else name
+            for name in CORE_METRICS
+        ]
 
         import threading
 
@@ -389,9 +395,44 @@ class TemporalMetricsProcessor:
                 raise
             return self.llm_client.query(messages, temperature=temperature)
 
-    # ================================================================
-    # Context synchronization
-    # ================================================================
+    async def _aquery_with_budget(
+        self, messages, *, max_tokens, span_processing=False, response_format=None
+    ):
+        kwargs = {
+            "temperature": 1.0
+            if "claude-sonnet" in self.llm_config.LLM_MODEL_NAME.casefold()
+            else 0.0,
+            "max_tokens": max_tokens,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        effort = (
+            self.options.span_reasoning_effort
+            if span_processing
+            else self.options.reasoning_effort
+        )
+        if effort is not None:
+            kwargs["reasoning_effort"] = effort
+            kwargs["allowed_openai_params"] = ["reasoning_effort"]
+        return await query(self.llm_client, messages, **kwargs)
+
+    async def aevaluate_spans(self, spans, *, session_id, policy_override=None):
+        """Sequential model-owned state, followed by native async final audits."""
+        if self.options.artifact_organization == "legacy":
+            # Legacy custom/MCE clients are synchronous. The model-owned path
+            # below uses native async I/O for all model calls.
+            return await asyncio.to_thread(
+                self.evaluate_spans,
+                spans,
+                session_id=session_id,
+                policy_override=policy_override,
+            )
+        from stateful_evals_be.evaluation.llm_pipeline import evaluate_llm_spans
+
+        async with model_query_scope(self.llm_client):
+            return await evaluate_llm_spans(
+                self, spans, session_id=session_id, policy_override=policy_override
+            )
 
     @staticmethod
     def _sort_spans_chronologically(
@@ -713,6 +754,20 @@ class TemporalMetricsProcessor:
 
     _MIN_FINAL_ANSWER_LEN = 40
 
+    @staticmethod
+    def _final_answer_review_text(
+        final_answer: str, origin: str, max_chars: int
+    ) -> str:
+        answer = final_answer[:max_chars]
+        if origin == "unattributed_candidate":
+            return (
+                "Origin: unattributed reply candidate. The trace does not establish "
+                "whether this reply was delivered to the user. Assess its role from "
+                "the available evidence; uncertain origin alone is not a failure.\n\n"
+                f"Candidate reply:\n{answer}"
+            )
+        return answer
+
     def _cross_validate_final_answer(
         self,
         traj_ctx: TrajectoryContext,
@@ -728,6 +783,7 @@ class TemporalMetricsProcessor:
         ctx = traj_ctx.get_final_answer_context()
         final_answer = ctx["final_answer"]
         span_index = ctx["final_answer_span_index"]
+        final_answer_origin = ctx.get("final_answer_origin", "")
 
         if (
             not final_answer or len(final_answer.strip()) < self._MIN_FINAL_ANSWER_LEN
@@ -735,6 +791,7 @@ class TemporalMetricsProcessor:
             final_answer, span_index = self._extract_final_answer_from_raw_spans(
                 raw_spans
             )
+            final_answer_origin = ""
 
         if not final_answer or len(final_answer.strip()) < self._MIN_FINAL_ANSWER_LEN:
             logger.info(
@@ -768,7 +825,9 @@ class TemporalMetricsProcessor:
 
         user_prompt = CROSS_SPAN_VALIDATION_USER_PROMPT.format(
             user_question=user_question,
-            final_answer=final_answer[:4000],
+            final_answer=self._final_answer_review_text(
+                final_answer, final_answer_origin, 4000
+            ),
             # The extractor bounds each record. A combined prefix would hide
             # later verification results and actions from the final review.
             tool_outputs=tool_output_text,
@@ -937,7 +996,9 @@ class TemporalMetricsProcessor:
 
         user_prompt = FINAL_OUTCOME_REVIEW_USER_PROMPT.format(
             user_question=user_question[:2000],
-            final_answer=final_answer[:5000],
+            final_answer=self._final_answer_review_text(
+                final_answer, ctx.get("final_answer_origin", ""), 5000
+            ),
             policy=(system_message or "No policy provided.")[:5000],
             aftermath=aftermath[:3000],
             trajectory_summary=trajectory_summary[:5000],
@@ -1131,7 +1192,10 @@ class TemporalMetricsProcessor:
             "unsatisfied_intents": unsatisfied_intents,
         }
 
-    def _run_unified_final_audit(
+    def _run_unified_final_audit(self, **kwargs):
+        return run_sync(self._arun_unified_final_audit(**kwargs))
+
+    async def _arun_unified_final_audit(
         self,
         *,
         traj_ctx: TrajectoryContext,
@@ -1149,16 +1213,17 @@ class TemporalMetricsProcessor:
     ]:
         """Replace three overlapping final reviews with one shared metric audit."""
         from stateful_evals_be.evaluation.trajectory_context_metrics import (
-            CorrectnessMetric,
             PAPER_METRIC_SUITE,
+            CorrectnessMetric,
+            aevaluate_metric_suite_batched,
             build_metric_suite,
-            evaluate_metric_suite_batched,
         )
         from stateful_evals_be.evaluation.trajectory_context_metrics.judge import (
             LLMMetricJudge,
         )
 
-        self._synchronize_final_answer(traj_ctx, raw_spans)
+        if getattr(traj_ctx, "artifact_organization", "legacy") != "llm":
+            self._synchronize_final_answer(traj_ctx, raw_spans)
 
         supplemental = self._build_trajectory_metric_supplemental(
             failures=failures,
@@ -1179,7 +1244,7 @@ class TemporalMetricsProcessor:
             for metric in all_metrics
             if not isinstance(metric, CorrectnessMetric)
         )
-        audit_results = evaluate_metric_suite_batched(
+        audit_results = await aevaluate_metric_suite_batched(
             traj_ctx,
             metric_suite=metric_suite,
             stateful_result={
@@ -1349,7 +1414,10 @@ class TemporalMetricsProcessor:
         )
         return fatal_details, minor_details, patterns, payloads, usage
 
-    def _run_configured_trajectory_metrics(
+    def _run_configured_trajectory_metrics(self, **kwargs):
+        return run_sync(self._arun_configured_trajectory_metrics(**kwargs))
+
+    async def _arun_configured_trajectory_metrics(
         self,
         *,
         traj_ctx: TrajectoryContext,
@@ -1365,7 +1433,7 @@ class TemporalMetricsProcessor:
     ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
         """Evaluate opt-in metrics without mutating correctness state."""
         from stateful_evals_be.evaluation.trajectory_context_metrics import (
-            evaluate_trajectory_metrics_batched,
+            aevaluate_trajectory_metrics_batched,
         )
         from stateful_evals_be.evaluation.trajectory_context_metrics.judge import (
             LLMMetricJudge,
@@ -1375,7 +1443,8 @@ class TemporalMetricsProcessor:
         if not selectors:
             return [], _empty_usage()
 
-        self._synchronize_final_answer(traj_ctx, raw_spans)
+        if getattr(traj_ctx, "artifact_organization", "legacy") != "llm":
+            self._synchronize_final_answer(traj_ctx, raw_spans)
 
         supplemental = self._build_trajectory_metric_supplemental(
             failures=failures,
@@ -1388,7 +1457,7 @@ class TemporalMetricsProcessor:
             max_tokens=self.options.final_judge_max_tokens,
             reasoning_effort=self.options.reasoning_effort,
         )
-        results = evaluate_trajectory_metrics_batched(
+        results = await aevaluate_trajectory_metrics_batched(
             traj_ctx,
             selectors,
             stateful_result={
@@ -1539,6 +1608,12 @@ class TemporalMetricsProcessor:
         Use EvaluationEngine for concurrent evaluations. This compatibility
         processor executes one trajectory at a time.
         """
+        if self.options.artifact_organization == "llm":
+            return run_sync(
+                self.aevaluate_spans(
+                    spans, session_id=session_id, policy_override=policy_override
+                )
+            )
         self._last_cross_span_usage = None
         self._last_final_outcome_usage = None
         try:

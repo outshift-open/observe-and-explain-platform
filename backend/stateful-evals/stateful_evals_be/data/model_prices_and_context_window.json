@@ -16154,6 +16154,62 @@
     "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-mixtral-8x7b-instruct.md",
     "supports_tool_choice": true
   },
+  "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+    "input_cost_per_token": 1e-06,
+    "litellm_provider": "bedrock",
+    "max_input_tokens": 200000,
+    "max_output_tokens": 64000,
+    "max_tokens": 64000,
+    "mode": "chat",
+    "output_cost_per_token": 5e-06,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "bedrock/global.anthropic.claude-opus-4-6-1": {
+    "aliases": [
+      "bedrock/global.anthropic.claude-opus-4-6-v1"
+    ],
+    "input_cost_per_token": 5e-06,
+    "litellm_provider": "bedrock",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "output_cost_per_token": 2.5e-05,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "bedrock/global.anthropic.claude-opus-4-6-v1": {
+    "aliases": [
+      "bedrock/global.anthropic.claude-opus-4-6-1"
+    ],
+    "input_cost_per_token": 5e-06,
+    "litellm_provider": "bedrock",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "output_cost_per_token": 2.5e-05,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "bedrock/global.anthropic.claude-opus-4-7": {
+    "input_cost_per_token": 5e-06,
+    "litellm_provider": "bedrock",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "max_tokens": 128000,
+    "mode": "chat",
+    "output_cost_per_token": 2.5e-05,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "bedrock/global.anthropic.claude-sonnet-4-6": {
+    "input_cost_per_token": 3e-06,
+    "litellm_provider": "bedrock",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 64000,
+    "max_tokens": 64000,
+    "mode": "chat",
+    "output_cost_per_token": 1.5e-05,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
   "bedrock/guardrails": {
     "guardrail_cost_per_unit": {
       "automatedReasoningPolicyUnits": 0.00017,
@@ -48156,6 +48212,27 @@
     "supports_tool_choice": true,
     "supports_vision": true
   },
+  "lightning-ai/deepseek-v4-pro": {
+    "input_cost_per_token": 8.900000000000001e-07,
+    "litellm_provider": "openai_compatible",
+    "mode": "chat",
+    "output_cost_per_token": 3e-06,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "lightning-ai/glm-5": {
+    "input_cost_per_token": 9.000000000000001e-07,
+    "litellm_provider": "openai_compatible",
+    "mode": "chat",
+    "output_cost_per_token": 3.2000000000000003e-06,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
+  "lightning-ai/kimi-k2.5": {
+    "input_cost_per_token": 1.1e-06,
+    "litellm_provider": "openai_compatible",
+    "mode": "chat",
+    "output_cost_per_token": 2.5e-06,
+    "stateful_evals_source": "proxy_model_info_snapshot"
+  },
   "linkup/search": {
     "input_cost_per_query": 0.00587,
     "litellm_provider": "linkup",
@@ -67408,6 +67485,16 @@
     "output_cost_per_token": 3e-07,
     "output_cost_per_token_batches": 1.5e-07,
     "source": "https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing"
+  },
+  "vertex_ai/gemini-2.5-flash": {
+    "input_cost_per_token": 3e-07,
+    "litellm_provider": "vertex_ai",
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 65535,
+    "max_tokens": 65535,
+    "mode": "chat",
+    "output_cost_per_token": 2.5e-06,
+    "stateful_evals_source": "proxy_model_info_snapshot"
   },
   "vertex_ai/gemini-2.5-flash-image": {
     "deprecation_date": "2027-03-15",

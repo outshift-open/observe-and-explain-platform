@@ -74,9 +74,16 @@ class SamplingConfig(BaseModel):
 class TemporalMetricOptions(BaseModel):
     """Configuration options for temporal metric computation."""
 
+    artifact_organization: Literal["llm", "legacy"] = Field(
+        default="llm",
+        description=(
+            "'llm' extracts trajectory artifacts and runs span judges in "
+            "parallel. 'legacy' retains Python artifact ingestion."
+        ),
+    )
     span_context_mode: Literal["focused", "legacy"] = Field(
         default="focused",
-        description="Select task-linked span context, or the previous recency-based view.",
+        description="Legacy organization only: task-linked or recency-based span context.",
     )
     span_context_max_chars: int = Field(
         default=14000,
@@ -112,9 +119,9 @@ class TemporalMetricOptions(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Span-level metrics (Groundedness, IntentRecognition, Relevancy) are scored on a 1-5 rubric normalized to "
-            "0.0-1.0 ((score-1)/4). A span metric passes when its normalized "
-            "value is >= this threshold and fails when it is below it."
+            "Legacy span metrics (Groundedness, IntentRecognition, Relevancy) use a 1-5 rubric normalized to "
+            "0.0-1.0 ((score-1)/4). A legacy span metric passes when its normalized "
+            "value is >= this threshold. LLM artifact organization uses binary span scores."
         ),
     )
     use_fatal_mode: bool = Field(
@@ -140,10 +147,10 @@ class TemporalMetricOptions(BaseModel):
         ),
     )
     span_judge_max_tokens: int = Field(
-        default=1200,
+        default=4096,
         ge=256,
-        le=8192,
-        description="Maximum output tokens for the combined three-primitive span judge.",
+        le=16384,
+        description="Maximum output tokens for intent recognition and artifact extraction.",
     )
     span_judge_max_attempts: int = Field(
         default=3,
@@ -151,7 +158,7 @@ class TemporalMetricOptions(BaseModel):
         le=5,
         description=(
             "Maximum attempts when a combined span judge returns invalid JSON "
-            "or omits requested primitive metrics."
+            "or omits requested primitive metrics or required artifact updates."
         ),
     )
     final_judge_max_tokens: int = Field(
@@ -167,7 +174,7 @@ class TemporalMetricOptions(BaseModel):
     span_reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = Field(
         default="none",
         description=(
-            "Reasoning effort for span judgments only. 'none' requests disabled "
+            "Reasoning effort for span organization and judgments. 'none' requests disabled "
             "thinking where supported; null omits the setting and uses the provider "
             "default. Does not change final-audit or trajectory-metric reasoning."
         ),
@@ -186,8 +193,9 @@ class TemporalMetricOptions(BaseModel):
     sampling: Optional[SamplingConfig] = Field(
         default=None,
         description=(
-            "Adaptive span sampling configuration. "
-            "None or strategy='none' disables sampling (default behaviour)."
+            "Adaptive span sampling for legacy organization only. LLM organization "
+            "requires every span and rejects non-none sampling. "
+            "None or strategy='none' scores every span."
         ),
     )
 

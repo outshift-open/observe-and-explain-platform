@@ -46,7 +46,9 @@ def offline_engine(monkeypatch):
         LLM_BASE_MODEL_URL="https://example.invalid/v1",
         LLM_API_KEY="test-only",
     )
-    options = TemporalMetricOptions(use_fatal_mode=False, batch_size=2)
+    options = TemporalMetricOptions(
+        artifact_organization="legacy", use_fatal_mode=False, batch_size=2
+    )
     return (
         EvaluationEngine(llm_config=config, options=options),
         config,

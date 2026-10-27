@@ -93,6 +93,29 @@ The library does no database access. Database sessions are read by the
 Stateful Eval worker through the OXP API (`get_session_trajectory`) and evaluated
 with `TemporalMetricsProcessor.evaluate_trajectory`.
 
+### Async evaluation and artifact extraction
+
+`artifact_organization="llm"` is the default. For each span, three model calls
+run concurrently: IntentRecognition extracts coarse artifacts and scores the
+intent; Groundedness and Relevancy score the same prior-state snapshot. The loop
+awaits all three, validates and applies the state update, then advances. Independent
+final metrics all run concurrently, including all13metrics in `paper_v2`.
+
+Python stores the model's selected exact source values and checks their references;
+the model decides roles, intent links, evidence, claims, and ownership. Responses
+remain whole records. Exact source spans are archived for final audits. Prompts
+reference repeated source text once to avoid replaying duplicated histories.
+Span reasoning defaults to `none`; final reasoning defaults to `low`.
+
+Async callers use `await engine.aevaluate_spans(spans, session_id=...)` on one
+event loop and one shared HTTP client. Synchronous entry points remain available.
+
+LLM artifact organization applies to OTel input through `evaluate_spans`,
+`aevaluate_spans`, and `evaluate_file`. Normalized input through
+`TemporalMetricsProcessor.evaluate_trajectory` retains the compatibility pipeline:
+Python organizes its artifacts and span judges use the normalized 1-5 rubric.
+`artifact_organization` does not select a different pipeline for normalized input.
+
 ## Options
 
 `TemporalMetricOptions` fields most callers set:

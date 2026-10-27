@@ -2,11 +2,13 @@
 #  SPDX-License-Identifier: Apache-2.0
 """Combined per-span judging, prompt preparation and response parsing."""
 
+import asyncio
 import json
 import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
+from stateful_evals_be.evaluation.span_context import current_agent_instruction_records
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.models.requests import TemporalMetricOptions
 
@@ -14,6 +16,34 @@ RUBRIC_MIN_SCORE = 1
 RUBRIC_MAX_SCORE = 5
 
 _SPAN_STATE_DELTA_SYSTEM_PROMPT = """\
+You evaluate one transition in an accumulated agent trajectory. Judge every
+requested primitive from the same compact current-span delta and prior state.
+
+Groundedness: pass when material output claims are supported by provided facts,
+policy, or clearly marked uncertainty; fail fabricated or contradicted claims.
+IntentRecognition: pass when the transition correctly recognizes and advances
+the active user/delegated intent; fail missed, distorted, or abandoned intent.
+Relevancy: pass when the transition is relevant and logically compatible with
+the active intent and prior claims; fail material contradiction or non-progress.
+
+Assess the current agent's responsibility from its attributed instructions and
+observed interactions. Instruction sources identify root policy, the current
+agent's instructions, or earlier recorded instructions. Identical text
+may have multiple sources. Do not apply another agent's instructions to the
+current agent merely because they appear in context. Responsibilities can
+include moderating, routing, reviewing, or synthesizing work; infer their meaning
+from the full instructions and recorded flow, not special names or phrases.
+Assigning or proposing work does not establish that it was executed. Quoted or
+relayed material is not automatically the current agent's own assertion.
+An unknown role or outcome alone is not a failure. When deciding a requested
+metric requires missing earlier evidence, set `needs_more_context` to true if
+that field is available in the output schema.
+
+Return strict JSON only with a `metrics` array. Each item must contain the exact
+requested `metric_name`, binary numeric `score`, and one concise `reasoning`.
+"""
+
+_CONTINUOUS_SPAN_STATE_DELTA_SYSTEM_PROMPT = """\
 You evaluate one transition in an accumulated agent trajectory. Judge every
 requested primitive from the same compact current-span delta and prior state.
 
@@ -36,6 +66,19 @@ intent and prior claims?):
 tension with prior claims; 3 = partly relevant, some inconsistency or
 non-progress; 4 = relevant with minor inconsistency; 5 = fully relevant and
 consistent.
+
+Assess the current agent's responsibility from its attributed instructions and
+observed interactions. Instruction sources identify root policy, the current
+agent's instructions, or earlier recorded instructions. Identical text
+may have multiple sources. Do not apply another agent's instructions to the
+current agent merely because they appear in context. Responsibilities can
+include moderating, routing, reviewing, or synthesizing work; infer their meaning
+from the full instructions and recorded flow, not special names or phrases.
+Assigning or proposing work does not establish that it was executed. Quoted or
+relayed material is not automatically the current agent's own assertion.
+An unknown role or outcome alone is not a failure. When deciding a requested
+metric requires missing earlier evidence, set `needs_more_context` to true if
+that field is available in the output schema.
 
 Return strict JSON only with a `metrics` array. Each item must contain the exact
 requested `metric_name`, integer `score` from 1 to 5, and one concise `reasoning`.
@@ -77,6 +120,31 @@ them. Use the full source record to distinguish returned data from error echoes.
 """
 
 
+class SpanJudgeError(RuntimeError):
+    def __init__(self, message, *, usage, calls):
+        super().__init__(message)
+        self.usage, self.calls = usage, calls
+
+
+_EXTRACTION_INSTRUCTIONS = """\
+Also organize this observed span into coarse trajectory artifacts and return
+state_delta according to state_update_guidance. Keep whole responses as claims,
+tool results as evidence, requests/requirements as intents, and observed work
+and transfers as work/coordination records. Tool-loaded instructions may add
+requirements during execution. Attribute policies and responses to their agents.
+Infer ownership and intent links from meaning, including moderation and synthesis.
+Separate proposed actions from executed work, peer assertions from direct evidence,
+and external requests from delegated tasks. Record uncertainty rather than inventing
+roles, evidence or relationships. Preserve canonical IDs, numbers, units, conditions,
+provenance, and uncertainty by selecting exact source nodes. All prior intents are
+available. Reuse existing records; append new records with consecutive IDs starting
+at new_record_ids. Record the actual root request/policy and final user-facing answer
+when available. Never turn every response into separate propositions.
+The output template describes fields, not records to invent. Use empty lists
+for absent updates, actual source IDs and supported values for real records.
+"""
+
+
 class SpanJudge:
     """Judge one transition using the caller-owned model query function."""
 
@@ -90,6 +158,203 @@ class SpanJudge:
         self._query = query
         self.options = options
         self.metric_names = list(metric_names)
+
+    async def aevaluate_and_update(self, state, *, span_index, raw_span):
+        """Run the three judges together, then apply one accepted state update."""
+        state.source_catalog(span_index)
+        prior = state.prompt_state()
+        extractor = next(
+            (
+                name
+                for name in self.metric_names
+                if name.split(".")[-1] == "IntentRecognition"
+            ),
+            self.metric_names[0],
+        )
+        payload = {
+            "current_span_index": span_index,
+            "current_raw_span": raw_span,
+            "available_current_sources": state.source_catalog(span_index),
+            "trajectory_state_before_span": prior,
+        }
+
+        async def judge_metric(name):
+            extracting = name == extractor
+            usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            request = {
+                **payload,
+                "requested_metrics": [name],
+                "output_schema": {
+                    "metric_name": name,
+                    "score": "numeric0or1",
+                    "reasoning": "one concise evidence-grounded sentence",
+                },
+            }
+            if extracting:
+                request["state_update_guidance"] = state.schema()
+                request["output_schema"]["state_delta"] = {
+                    "evidence": [
+                        {
+                            "id": "fact:N",
+                            "source_ref": "catalog source_id",
+                            "fact_type": "model-assigned type",
+                            "source_name": "source name",
+                        }
+                    ],
+                    "claims": [
+                        {
+                            "id": "claim:N",
+                            "source_ref": "catalog source_id",
+                            "claim_type": "model-assigned type",
+                            "entity_name": "author",
+                            "agent_id": "declared agent ID",
+                            "related_intent_ids": [],
+                        }
+                    ],
+                    "intents": [
+                        {
+                            "id": "intent:N",
+                            "source_ref": "catalog source_id",
+                            "name": "short task name",
+                            "source": "user or peer_agent",
+                            "status": "in_progress",
+                            "owner_agent_ids": [],
+                            "parent_intent_ids": [],
+                        }
+                    ],
+                    "agents": [
+                        {"id": "stable agent ID", "source_ref": "catalog source_id"}
+                    ],
+                    "work_units": [
+                        {
+                            "id": "work:N",
+                            "source_ref": "catalog source_id",
+                            "allocator_agent_id": "declared agent ID",
+                            "recipient_agent_ids": [],
+                            "intent_id": "existing or same-delta intent ID",
+                        }
+                    ],
+                    "coordination_events": [
+                        {
+                            "id": "coordination:N",
+                            "source_ref": "catalog source_id",
+                            "event_type": "observed event",
+                            "operation_name": "operation",
+                        }
+                    ],
+                    "operation": {
+                        "operation_type": "llm|tool|coordination",
+                        "entity_name": "operation name",
+                        "actor_scope": "root|peer|unknown",
+                        "is_delegation": False,
+                    },
+                    "metadata": {},
+                }
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        _SPAN_STATE_DELTA_SYSTEM_PROMPT.partition(
+                            "Return strict JSON only"
+                        )[0]
+                        + _FOCUSED_TRANSITION_INSTRUCTIONS
+                        + (_EXTRACTION_INSTRUCTIONS if extracting else "")
+                        + "Return one strict JSON object for only the requested metric using output_schema."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(request, ensure_ascii=False, default=str),
+                },
+            ]
+            error = None
+            for attempt in range(self.options.span_judge_max_attempts):
+                text = None
+                try:
+                    response = await self._query(
+                        messages,
+                        max_tokens=min(
+                            16384,
+                            (self.options.span_judge_max_tokens if extracting else 1024)
+                            * (2**attempt),
+                        ),
+                        response_format={"type": "json_object"},
+                    )
+                    for key in usage:
+                        usage[key] += int(
+                            getattr(getattr(response, "usage", None), key, 0) or 0
+                        )
+                    text = (response.choices[0].message.content or "").strip()
+                    if text.startswith("```"):
+                        text = text.split("\n", 1)[1].removesuffix("```").strip()
+                    result = json.loads(text)
+                    if (
+                        not isinstance(result, dict)
+                        or result.get("metric_name") != name
+                    ):
+                        raise ValueError(f"Return metric_name={name!r}")
+                    if type(result.get("score")) not in (int, float) or result[
+                        "score"
+                    ] not in (0, 1):
+                        raise ValueError("score must be numeric0or1")
+                    if (
+                        not isinstance(result.get("reasoning"), str)
+                        or not result["reasoning"].strip()
+                    ):
+                        raise ValueError("reasoning must be nonempty")
+                    if extracting:
+                        state.validate(result.get("state_delta"), span_index, raw_span)
+                    return {"result": result, "usage": usage, "calls": attempt + 1}
+                except (ValueError, TypeError, KeyError, IndexError) as exc:
+                    error = exc
+                    if text:
+                        messages.append({"role": "assistant", "content": text})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Previous response rejected: {exc}. State has not changed. "
+                                "Return the complete corrected JSON with exact catalog IDs. "
+                                "Preserve valid state_delta records and fields; declare any new "
+                                "referenced record in the same delta or reuse an available ID."
+                            ),
+                        }
+                    )
+                except Exception as exc:
+                    raise SpanJudgeError(
+                        str(exc), usage=usage, calls=attempt + 1
+                    ) from exc
+            raise SpanJudgeError(
+                f"Span{span_index} {name} failed: {error}",
+                usage=usage,
+                calls=self.options.span_judge_max_attempts,
+            )
+
+        verdicts = await asyncio.gather(
+            *(judge_metric(name) for name in self.metric_names), return_exceptions=True
+        )
+        usage = {
+            key: sum(
+                (v.usage if isinstance(v, SpanJudgeError) else v["usage"]).get(key, 0)
+                for v in verdicts
+            )
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+        }
+        calls = sum(
+            v.calls if isinstance(v, SpanJudgeError) else v["calls"] for v in verdicts
+        )
+        errors = [v for v in verdicts if isinstance(v, Exception)]
+        if errors:
+            raise SpanJudgeError(str(errors[0]), usage=usage, calls=calls)
+        results = [v["result"] for v in verdicts]
+        state.apply(
+            next(
+                row["state_delta"] for row in results if row["metric_name"] == extractor
+            ),
+            span_index,
+            raw_span,
+        )
+        return {"metrics": results, "usage": usage, "calls": calls}
 
     @staticmethod
     def compact_value(value: Any, max_chars: int | None) -> Any:
@@ -176,14 +441,18 @@ class SpanJudge:
                 output_payload, None if focused else 3000
             )
 
-        return {
+        prepared = {
             "span_id": span_dict.get("span_id", ""),
+            "agent_id": span_dict.get("agent_id") or None,
             "entity_type": span_dict.get("entity_type", ""),
             "entity_name": span_dict.get("entity_name", ""),
             "contains_error": bool(span_dict.get("contains_error")),
             "current_input": current_input,
             "current_output": current_output,
         }
+        if not focused:
+            prepared["instructions"] = current_agent_instruction_records(span_dict)
+        return prepared
 
     def evaluate(
         self,
@@ -307,7 +576,7 @@ class SpanJudge:
             messages = [
                 {
                     "role": "system",
-                    "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT
+                    "content": _CONTINUOUS_SPAN_STATE_DELTA_SYSTEM_PROMPT
                     + (
                         _FOCUSED_RESPONSE_INSTRUCTIONS
                         + _FOCUSED_TRANSITION_INSTRUCTIONS
@@ -332,7 +601,7 @@ class SpanJudge:
                             "The previous response omitted or invalidated the "
                             f"remaining requested metrics: {missing}. Return strict "
                             "compact JSON for only these metrics, with one score "
-                            "of 0 or 1 for each. Do not omit a metric."
+                            "from 1 to 5 for each. Do not omit a metric."
                         ),
                     }
                 )
@@ -383,7 +652,7 @@ class SpanJudge:
             messages = [
                 {
                     "role": "system",
-                    "content": _SPAN_STATE_DELTA_SYSTEM_PROMPT
+                    "content": _CONTINUOUS_SPAN_STATE_DELTA_SYSTEM_PROMPT
                     + (
                         ""
                         if self.options.span_context_mode == "focused"

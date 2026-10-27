@@ -30,6 +30,7 @@ from .metrics import (
     evaluate_high_level_metric_payloads,
     evaluate_high_level_metric_payloads_batched,
     evaluate_high_level_metrics,
+    aevaluate_high_level_metrics_batched,
     evaluate_high_level_metrics_batched,
 )
 from .trajectory_metrics import (
@@ -65,6 +66,7 @@ from .trajectory_metrics import (
     build_trajectory_metrics,
     build_updated_paper_metrics,
     build_updated_trajectory_metrics,
+    aevaluate_trajectory_metrics_batched,
     evaluate_trajectory_metrics_batched,
     resolve_trajectory_metric_codes,
 )
@@ -81,6 +83,7 @@ from .suites import (
     SUPPORTED_METRIC_SUITES,
     MetricSuiteName,
     build_metric_suite,
+    aevaluate_metric_suite_batched,
     evaluate_metric_suite_batched,
 )
 
@@ -150,8 +153,11 @@ __all__ = [
     "evaluate_high_level_metric_payloads",
     "evaluate_high_level_metric_payloads_batched",
     "evaluate_high_level_metrics",
+    "aevaluate_high_level_metrics_batched",
     "evaluate_high_level_metrics_batched",
+    "aevaluate_metric_suite_batched",
     "evaluate_metric_suite_batched",
+    "aevaluate_trajectory_metrics_batched",
     "evaluate_trajectory_metrics_batched",
     "metric_input_config",
     "resolve_trajectory_metric_codes",

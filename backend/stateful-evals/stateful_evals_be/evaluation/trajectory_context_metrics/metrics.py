@@ -4,9 +4,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
+from copy import copy
 from typing import Any
 
+from stateful_evals_be.evaluation.async_utils import run_sync
 from stateful_evals_be.evaluation.trajectory_context import TrajectoryContext
 
 from .base import (
@@ -20,12 +23,11 @@ from .helpers import fatal, get_field, minor, normalize_failures
 from .judge import (
     LLMMetricJudge,
     MetricJudge,
+    call_judge,
     build_context_payload,
-    build_shared_context_payload,
     judge_usage_payload,
     normalize_judge_failures,
     normalize_judge_evidence,
-    resolve_batch_evidence_refs,
 )
 
 
@@ -58,6 +60,14 @@ class LLMRubricMetric:
         *,
         stateful_result: Mapping[str, Any] | Any | None = None,
     ) -> HighLevelMetricResult:
+        return run_sync(self.aevaluate(context, stateful_result=stateful_result))
+
+    async def aevaluate(
+        self,
+        context: TrajectoryContext,
+        *,
+        stateful_result: Mapping[str, Any] | Any | None = None,
+    ) -> HighLevelMetricResult:
         applicability = self.applicability(context)
         if applicability["status"] == "not_applicable":
             return self.decorate_result(
@@ -78,10 +88,13 @@ class LLMRubricMetric:
             return self.decorate_result(prechecked, context)
         judge = self.judge or LLMMetricJudge()
         try:
-            raw = judge.judge(
+            raw = await call_judge(
+                judge,
+                "judge",
                 metric_name=self.name,
                 rubric=self.rubric,
                 context_payload=self.to_judge_payload(context)["context"],
+                allow_not_applicable=self.judge_decides_applicability,
             )
         except Exception as exc:
             return self.decorate_result(
@@ -133,7 +146,7 @@ class LLMRubricMetric:
             for event in intent.events
         )
         if self.metric_code == "handoff_quality" and not (
-            has_edges or has_delegated_work
+            has_edges or has_delegated_work or getattr(context, "source_spans", [])
         ):
             return {
                 "status": "not_applicable",
@@ -209,8 +222,20 @@ class LLMRubricMetric:
         )
         raw_metadata = raw.get("metadata")
         raw_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
-        evaluation_invalid = not raw or bool(raw_metadata.get("evaluation_invalid"))
-        requested_score = _score(raw.get("score"), default=0)
+        if raw.get("applicable") is False and not self.judge_decides_applicability:
+            raw_metadata = {
+                **raw_metadata,
+                "evaluation_invalid": True,
+                "evaluation_error": "The metric does not permit a not-applicable verdict.",
+            }
+        requested_score = raw.get("score")
+        evaluation_invalid = (
+            not raw
+            or bool(raw_metadata.get("evaluation_invalid"))
+            or type(requested_score) not in (int, float)
+            or requested_score not in (0, 1)
+            or (requested_score == 0 and not fatal_failures and not minor_failures)
+        )
         # A binary failure must be backed by a fatal finding. This prevents an
         # unsupported score=0 (or a recovered minor issue) from becoming a fatal
         # trajectory failure downstream.
@@ -1176,12 +1201,14 @@ def evaluate_high_level_metrics(
     *,
     stateful_result: Mapping[str, Any] | Any | None = None,
     metrics: tuple[TrajectoryContextMetric, ...] = DEFAULT_METRICS,
+    max_workers: int = 13,
 ) -> list[HighLevelMetricResult]:
-    """Evaluate the suite through the token-efficient shared batch path."""
+    """Evaluate independent metrics concurrently on one event loop."""
     return evaluate_high_level_metrics_batched(
         context,
         stateful_result=stateful_result,
         metrics=metrics,
+        max_workers=max_workers,
     )
 
 
@@ -1192,257 +1219,77 @@ def evaluate_high_level_metrics_batched(
     metrics: tuple[TrajectoryContextMetric, ...] = DEFAULT_METRICS,
     judge: MetricJudge | None = None,
     supplemental_context: Mapping[str, Any] | None = None,
+    max_workers: int = 13,
 ) -> list[HighLevelMetricResult]:
-    """Evaluate the high-level suite with one LLM call for rubric metrics.
-
-    Correctness remains a local adapter over the existing stateful eval result.
-    """
-    llm_metrics = [metric for metric in metrics if isinstance(metric, LLMRubricMetric)]
-    local_metrics = [
-        metric for metric in metrics if not isinstance(metric, LLMRubricMetric)
-    ]
-    results_by_name: dict[str, HighLevelMetricResult] = {}
-
-    pending_llm_metrics: list[LLMRubricMetric] = []
-    dedicated_llm_metrics: list[LLMRubricMetric] = []
-    for metric in llm_metrics:
-        applicability = metric.applicability(context)
-        if applicability["status"] == "not_applicable":
-            results_by_name[metric.name] = metric.decorate_result(
-                HighLevelMetricResult(
-                    high_level_metric=metric.name,
-                    score=None,
-                    status="not_applicable",
-                    reasoning=str(applicability["reason"]),
-                    metadata={"applicability": applicability},
-                ),
-                context,
-            )
-            continue
-        prechecked = metric.deterministic_precheck(
+    """Synchronous entry point; async callers should await the async variant."""
+    return run_sync(
+        aevaluate_high_level_metrics_batched(
             context,
             stateful_result=stateful_result,
-        )
-        if prechecked is None:
-            if metric.requires_dedicated_judge:
-                dedicated_llm_metrics.append(metric)
-            else:
-                pending_llm_metrics.append(metric)
-        else:
-            results_by_name[metric.name] = metric.decorate_result(prechecked, context)
-
-    for metric in dedicated_llm_metrics:
-        original_judge = metric.judge
-        if metric.judge is None and judge is not None:
-            metric.judge = judge
-        try:
-            result = metric.evaluate(
-                context,
-                stateful_result=stateful_result,
-            )
-        finally:
-            metric.judge = original_judge
-        result.metadata["usage_scope"] = "dedicated_compact_metric_call"
-        result.metadata["shared_artifact_payload"] = False
-        results_by_name[metric.name] = result
-
-    if pending_llm_metrics:
-        batch_judge = judge or pending_llm_metrics[0].judge or LLMMetricJudge()
-        shared_context = build_shared_context_payload(
-            context,
-            [metric.input_config for metric in pending_llm_metrics],
+            metrics=metrics,
+            judge=judge,
             supplemental_context=supplemental_context,
+            max_workers=max_workers,
         )
-        payloads = [
-            {
-                "high_level_metric": metric.name,
-                "metric_code": metric.metric_code,
-                "rubric": metric.rubric,
-                "input_components": sorted(metric.input_config.components),
-            }
-            for metric in pending_llm_metrics
-        ]
-        used_shared_batch = hasattr(batch_judge, "judge_batch")
-        individual_usages: list[dict[str, int]] = []
-        try:
-            if used_shared_batch:
-                raw_batch = batch_judge.judge_batch(  # type: ignore[attr-defined]
-                    metrics_payload=payloads,
-                    shared_context=shared_context,
-                )
-                raw_items = _batch_items(raw_batch)
-            else:
-                raw_items = []
-                for metric, payload in zip(pending_llm_metrics, payloads):
-                    raw_items.append(
-                        batch_judge.judge(
-                            metric_name=payload["high_level_metric"],
-                            rubric=payload["rubric"],
-                            context_payload=build_context_payload(
-                                context,
-                                metric.input_config,
-                                metric_name=metric.name,
-                            ),
-                        )
-                    )
-                    individual_usages.append(judge_usage_payload(batch_judge))
-        except Exception as exc:
-            raw_items = [
-                {
-                    "high_level_metric": metric.name,
-                    "score": 1,
-                    "reasoning": (
-                        "Metric evaluation was unavailable because the judge "
-                        "did not return valid JSON."
-                    ),
-                    "fatal_failures": [],
-                    "minor_failures": [],
-                    "metadata": {
-                        "evaluation_invalid": True,
-                        "evaluation_error": str(exc),
-                    },
-                }
-                for metric in pending_llm_metrics
-            ]
+    )
 
-        raw_items = [
-            resolve_batch_evidence_refs(item, shared_context)
-            if isinstance(item, Mapping)
-            else item
-            for item in raw_items
-        ]
 
-        shared_usage = judge_usage_payload(batch_judge)
-        by_name = {
-            str(item.get("high_level_metric") or item.get("metric_name") or ""): item
-            for item in raw_items
-            if isinstance(item, Mapping)
-        }
-        fallback_usage: dict[str, dict[str, int]] = {}
-        if used_shared_batch:
-            missing_metrics = [
-                metric for metric in pending_llm_metrics if metric.name not in by_name
-            ]
-            for metric in missing_metrics:
-                fallback_error: Exception | None = None
-                for _attempt in range(2):
-                    try:
-                        by_name[metric.name] = batch_judge.judge(
-                            metric_name=metric.name,
-                            rubric=metric.rubric,
-                            context_payload=build_context_payload(
-                                context,
-                                metric.input_config,
-                                metric_name=metric.name,
-                            ),
-                        )
-                        fallback_usage[metric.name] = judge_usage_payload(batch_judge)
-                        fallback_error = None
-                        break
-                    except Exception as exc:
-                        fallback_error = exc
-                if fallback_error is not None:
-                    by_name[metric.name] = {
-                        "high_level_metric": metric.name,
-                        "score": 1,
-                        "reasoning": (
-                            "Metric evaluation was unavailable because the judge "
-                            "did not return valid JSON."
-                        ),
-                        "fatal_failures": [],
-                        "minor_failures": [],
-                        "metadata": {
-                            "evaluation_invalid": True,
-                            "evaluation_error": str(fallback_error),
-                        },
-                    }
-                    fallback_usage[metric.name] = judge_usage_payload(batch_judge)
-        ordered_items = []
-        for idx, metric in enumerate(pending_llm_metrics):
-            raw = by_name.get(metric.name)
-            if (
-                raw is None
-                and idx < len(raw_items)
-                and isinstance(raw_items[idx], Mapping)
-            ):
-                raw = raw_items[idx]
-            ordered_items.append(raw or {})
-        for index, (metric, raw) in enumerate(zip(pending_llm_metrics, ordered_items)):
-            is_usage_owner = used_shared_batch and index == 0
-            result_usage = (
-                fallback_usage[metric.name]
-                if metric.name in fallback_usage
-                else shared_usage
-                if is_usage_owner
-                else _zero_usage()
-                if used_shared_batch
-                else individual_usages[index]
-                if index < len(individual_usages)
-                else _zero_usage()
-            )
-            normalized_result = metric.result_from_raw(
-                raw,
-                judge=batch_judge,
-                usage=result_usage,
-                batch_metadata={
-                    "usage_scope": (
-                        "individual_batch_fallback"
-                        if metric.name in fallback_usage
-                        else "shared_batch_total"
-                        if is_usage_owner
-                        else "shared_batch_member"
-                        if used_shared_batch
-                        else "individual_metric_call"
-                    ),
-                    "shared_artifact_payload": used_shared_batch,
-                },
-            )
-            results_by_name[metric.name] = metric.decorate_result(
-                normalized_result,
-                context,
-            )
+async def aevaluate_high_level_metrics_batched(
+    context: TrajectoryContext,
+    *,
+    stateful_result: Mapping[str, Any] | Any | None = None,
+    metrics: tuple[TrajectoryContextMetric, ...] = DEFAULT_METRICS,
+    judge: MetricJudge | None = None,
+    supplemental_context: Mapping[str, Any] | None = None,
+    max_workers: int = 13,
+) -> list[HighLevelMetricResult]:
+    """Await one independent request per metric on the current event loop.
 
-    for metric in local_metrics:
-        effective_stateful_result = stateful_result
+    The old batched name and max_workers argument remain for API compatibility;
+    all requested metrics start together. Each built-in judge has its own usage
+    counters while sharing the same asynchronous model client.
+    """
+    if max_workers < 1:
+        raise ValueError("max_workers must be at least 1")
+    llm_metrics = [metric for metric in metrics if isinstance(metric, LLMRubricMetric)]
+
+    async def evaluate(metric: LLMRubricMetric) -> HighLevelMetricResult:
+        metric = copy(metric)
+        source_judge = metric.judge or judge or LLMMetricJudge()
+        metric.judge = (
+            source_judge.fork()
+            if type(source_judge) is LLMMetricJudge
+            else source_judge
+        )
+        return await metric.aevaluate(context, stateful_result=stateful_result)
+
+    results = await asyncio.gather(*(evaluate(metric) for metric in llm_metrics))
+    by_name = {result.high_level_metric: result for result in results}
+    for metric in metrics:
+        if isinstance(metric, LLMRubricMetric):
+            continue
+        effective_result = stateful_result
         if isinstance(metric, CorrectnessMetric) and isinstance(
             stateful_result, Mapping
         ):
-            # A freshly recomputed high-level verdict supersedes an embedded
-            # failure for that same metric. This prevents Correctness from
-            # duplicating stale or subsequently corrected rubric findings.
-            recomputed_names = set(results_by_name)
-            effective_stateful_result = dict(stateful_result)
-            effective_stateful_result["fatal_failures"] = [
-                item
-                for item in normalize_failures(
-                    stateful_result.get("fatal_failures", [])
-                )
-                if str(
-                    item.get("metric")
-                    or item.get("metric_name")
-                    or item.get("high_level_metric")
-                    or ""
-                )
-                not in recomputed_names
-            ]
-            effective_stateful_result["minor_failures"] = [
-                item
-                for item in normalize_failures(
-                    stateful_result.get("minor_failures", [])
-                )
-                if str(
-                    item.get("metric")
-                    or item.get("metric_name")
-                    or item.get("high_level_metric")
-                    or ""
-                )
-                not in recomputed_names
-            ]
-        results_by_name[metric.name] = metric.evaluate(
-            context,
-            stateful_result=effective_stateful_result,
+            # Replace stale embedded findings for metrics just recomputed.
+            effective_result = dict(stateful_result)
+            for key in ("fatal_failures", "minor_failures"):
+                effective_result[key] = [
+                    item
+                    for item in normalize_failures(stateful_result.get(key, []))
+                    if str(
+                        item.get("metric")
+                        or item.get("metric_name")
+                        or item.get("high_level_metric")
+                        or ""
+                    )
+                    not in by_name
+                ]
+        by_name[metric.name] = metric.evaluate(
+            context, stateful_result=effective_result
         )
-    return [results_by_name[metric.name] for metric in metrics]
+    return [by_name[metric.name] for metric in metrics]
 
 
 def evaluate_high_level_metric_payloads(
@@ -1450,6 +1297,7 @@ def evaluate_high_level_metric_payloads(
     *,
     stateful_result: Mapping[str, Any] | Any | None = None,
     metrics: tuple[TrajectoryContextMetric, ...] = DEFAULT_METRICS,
+    max_workers: int = 13,
 ) -> list[dict[str, Any]]:
     """Return JSON-ready high-level metric payloads."""
     return [
@@ -1458,6 +1306,7 @@ def evaluate_high_level_metric_payloads(
             context,
             stateful_result=stateful_result,
             metrics=metrics,
+            max_workers=max_workers,
         )
     ]
 
@@ -1469,6 +1318,7 @@ def evaluate_high_level_metric_payloads_batched(
     metrics: tuple[TrajectoryContextMetric, ...] = DEFAULT_METRICS,
     judge: MetricJudge | None = None,
     supplemental_context: Mapping[str, Any] | None = None,
+    max_workers: int = 13,
 ) -> list[dict[str, Any]]:
     """Return JSON-ready payloads from the batched high-level metric evaluator."""
     return [
@@ -1477,31 +1327,17 @@ def evaluate_high_level_metric_payloads_batched(
             context,
             stateful_result=stateful_result,
             metrics=metrics,
+            max_workers=max_workers,
             judge=judge,
             supplemental_context=supplemental_context,
         )
     ]
 
 
-def _score(value: Any, *, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return 1 if parsed == 1 else 0
-
-
 def _as_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
-
-
-def _batch_items(raw_batch: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    raw_items = raw_batch.get("metrics")
-    if isinstance(raw_items, list):
-        return [item for item in raw_items if isinstance(item, Mapping)]
-    return []
 
 
 def _zero_usage() -> dict[str, int]:

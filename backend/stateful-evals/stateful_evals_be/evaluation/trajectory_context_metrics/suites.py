@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from typing import Literal
 
+from stateful_evals_be.evaluation.async_utils import run_sync
+
 from .base import TrajectoryContextMetric
 from .judge import MetricJudge
-from .metrics import build_default_metrics, evaluate_high_level_metrics_batched
+from .metrics import build_default_metrics, aevaluate_high_level_metrics_batched
 from .trajectory_metrics import (
     build_current_trajectory_metrics,
     build_legacy_trajectory_metrics,
@@ -60,15 +62,40 @@ def evaluate_metric_suite_batched(
     metrics: tuple[TrajectoryContextMetric, ...] | None = None,
     judge: MetricJudge | None = None,
     supplemental_context=None,
+    max_workers: int = 4,
+):
+    return run_sync(
+        aevaluate_metric_suite_batched(
+            context,
+            metric_suite=metric_suite,
+            stateful_result=stateful_result,
+            metrics=metrics,
+            judge=judge,
+            supplemental_context=supplemental_context,
+            max_workers=max_workers,
+        )
+    )
+
+
+async def aevaluate_metric_suite_batched(
+    context,
+    *,
+    metric_suite: MetricSuiteName | str = LEGACY_METRIC_SUITE,
+    stateful_result=None,
+    metrics: tuple[TrajectoryContextMetric, ...] | None = None,
+    judge: MetricJudge | None = None,
+    supplemental_context=None,
+    max_workers: int = 4,
 ):
     """Evaluate a named suite and tag every result with its suite identity."""
     selected_metrics = metrics or build_metric_suite(metric_suite, judge=judge)
-    results = evaluate_high_level_metrics_batched(
+    results = await aevaluate_high_level_metrics_batched(
         context,
         stateful_result=stateful_result,
         metrics=selected_metrics,
         judge=judge,
         supplemental_context=supplemental_context,
+        max_workers=max_workers,
     )
     for result in results:
         result.metadata["metric_suite"] = metric_suite

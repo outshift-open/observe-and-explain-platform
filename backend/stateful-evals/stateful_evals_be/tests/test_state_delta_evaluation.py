@@ -114,7 +114,9 @@ class PerMetricFallbackClient:
 
 def _processor() -> TemporalMetricsProcessor:
     processor = object.__new__(TemporalMetricsProcessor)
-    processor.options = TemporalMetricOptions(max_messages=2)
+    processor.options = TemporalMetricOptions(
+        artifact_organization="legacy", max_messages=2, span_judge_max_tokens=1200
+    )
     processor.metric_names = list(CORE_METRICS)
     processor.llm_client = FakeCombinedClient()
     return processor
@@ -223,7 +225,9 @@ def test_combined_span_judge_falls_back_to_one_call_per_missing_metric() -> None
 
 def test_evaluate_session_uses_one_unified_final_audit_and_accounts_for_it() -> None:
     processor = _processor()
-    processor.options = TemporalMetricOptions(use_fatal_mode=True)
+    processor.options = TemporalMetricOptions(
+        artifact_organization="legacy", use_fatal_mode=True
+    )
     processor.llm_config = SimpleNamespace(LLM_MODEL_NAME="gpt-4o")
     raw_span = {
         "SpanId": "1",
@@ -311,6 +315,7 @@ def test_evaluate_session_uses_one_unified_final_audit_and_accounts_for_it() -> 
 def test_paper_suite_keeps_diagnostic_failure_without_failing_outcome() -> None:
     processor = _processor()
     processor.options = TemporalMetricOptions(
+        artifact_organization="legacy",
         use_fatal_mode=True,
         high_level_metric_suite="paper_v1",
     )
@@ -391,6 +396,7 @@ def test_paper_suite_keeps_diagnostic_failure_without_failing_outcome() -> None:
 def test_configured_trajectory_metric_failure_is_additive_to_correctness() -> None:
     processor = _processor()
     processor.options = TemporalMetricOptions(
+        artifact_organization="legacy",
         use_fatal_mode=True,
         trajectory_metrics=["policy_safety"],
     )

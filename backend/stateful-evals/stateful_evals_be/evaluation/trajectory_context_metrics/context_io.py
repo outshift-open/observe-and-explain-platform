@@ -32,6 +32,8 @@ def load_trajectory_context_artifact(
     payload = json.loads(artifact_path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
         raise ValueError("Trajectory context artifact must contain a JSON object")
+    if payload.get("artifact_organization") == "llm":
+        return _load_llm_context(payload), dict(payload)
 
     evidence_payload = _items(payload.get("evidence"))
     policy_text = str(payload.get("policy_text") or "").strip()
@@ -249,6 +251,53 @@ def load_trajectory_context_artifact(
     return context, dict(payload)
 
 
+def _load_llm_context(payload: Mapping[str, Any]) -> TrajectoryContext:
+    """Restore model-owned state exactly, without adapter or status inference."""
+    context = TrajectoryContext(policy_text="", artifact_organization="llm")
+    record_types = {
+        "evidence": EvidenceFact,
+        "intents": IntentEntry,
+        "claims": ClaimEntry,
+        "coordination_events": CoordinationEvent,
+        "provenance_links": ArtifactProvenanceLink,
+        "agents": AgentProfile,
+        "work_units": WorkUnit,
+        "flags": FlagEntry,
+    }
+    for name, record_type in record_types.items():
+        rows = payload.get(name, [])
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError(f"Invalid saved {name}")
+        try:
+            records = [record_type(**row) for row in rows]
+        except TypeError as exc:
+            raise ValueError(f"Invalid saved {name}: {exc}") from exc
+        setattr(
+            context,
+            name,
+            {row.agent_id: row for row in records} if name == "agents" else records,
+        )
+    for name in (
+        "policy_text",
+        "root_request",
+        "root_agent_id",
+        "tool_definitions",
+        "latest_root_answer",
+        "latest_root_answer_span_index",
+        "delivery_span_index",
+        "termination_span_index",
+        "raw_spans",
+        "source_spans",
+        "artifact_sources",
+        "coordination_metadata",
+        "artifact_relationship_decisions",
+    ):
+        if name in payload:
+            setattr(context, name, payload[name])
+    context.rebuild_runtime_indexes()
+    return context
+
+
 def _load_records(value: Any, record_type: type) -> list[Any]:
     """Restore dataclass records, ignoring unknown keys and bad rows."""
     fields = getattr(record_type, "__dataclass_fields__", {})
@@ -290,6 +339,24 @@ def trajectory_context_to_payload(
         "flags": [_jsonable(flag) for flag in context.flags],
         "delivery_span_index": context.delivery_span_index,
     }
+    if context.artifact_organization == "llm":
+        payload.update(
+            {
+                "artifact_organization": "llm",
+                "root_agent_id": context.root_agent_id,
+                "root_request": context.root_request,
+                "tool_definitions": _jsonable(context.tool_definitions),
+                "latest_root_answer": context.latest_root_answer,
+                "latest_root_answer_span_index": context.latest_root_answer_span_index,
+                "termination_span_index": context.termination_span_index,
+                "raw_spans": _jsonable(context.raw_spans),
+                "source_spans": _jsonable(context.source_spans),
+                "artifact_sources": _jsonable(context.artifact_sources),
+                "artifact_relationship_decisions": _jsonable(
+                    context.artifact_relationship_decisions
+                ),
+            }
+        )
     if metadata:
         payload.update(_jsonable(dict(metadata)))
     return payload

@@ -192,7 +192,7 @@ _TRAJECTORY = {"session_id": "session-1", "steps": [_STEP]}
 
 def _session_processor(values: dict, usages: list, **options):
     processor = object.__new__(TemporalMetricsProcessor)
-    processor.options = TemporalMetricOptions(**options)
+    processor.options = TemporalMetricOptions(artifact_organization="legacy", **options)
     processor.metric_names = list(CORE_METRICS)
     processor.llm_config = SimpleNamespace(LLM_MODEL_NAME="gpt-4o")
     calls = []

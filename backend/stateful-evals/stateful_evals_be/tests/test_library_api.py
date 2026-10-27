@@ -35,7 +35,9 @@ def offline_processor(monkeypatch, config):
         TemporalMetricsProcessor, "_warm_inprocess_metric_catalog", lambda self: None
     )
     monkeypatch.setattr("stateful_evals_be.evaluation.processor.LLMClient", Mock())
-    processor = TemporalMetricsProcessor(llm_config=config)
+    processor = TemporalMetricsProcessor(
+        llm_config=config, options=TemporalMetricOptions(artifact_organization="legacy")
+    )
     processor.compute_span_state_delta = Mock(
         return_value={
             "results": [

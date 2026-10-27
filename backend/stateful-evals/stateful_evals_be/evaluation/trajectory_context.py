@@ -197,12 +197,15 @@ class WorkUnit:
 
     * ``pending`` - assigned, not yet resolved;
     * ``completed`` - the recipient returned a substantive reply;
+    * ``unknown`` - a reply was observed but its semantic outcome is unassessed;
     * ``failed`` - the delegation or the recipient errored;
     * ``needs_input`` - the recipient asked for missing information;
     * ``waiting`` - the recipient said it is waiting on another party;
     * ``declined`` - the recipient said it cannot or will not do the work;
     * ``unfinished`` - received but not resolved by the delivery boundary;
     * ``no_response`` - never received, or no reply by the boundary.
+
+    An ``unknown`` reply is recorded evidence, not unfinished or missing work.
     """
 
     work_id: str
@@ -287,9 +290,17 @@ class TrajectoryContext:
         max_context_chars: int = 6000,
         coordination_context: CoordinationContext | Dict[str, Any] | None = None,
         adapter_ingestion: str = "eager",
+        artifact_organization: str = "python",
     ):
         if adapter_ingestion not in {"eager", "incremental"}:
             raise ValueError("adapter_ingestion must be 'eager' or 'incremental'")
+        if artifact_organization not in {"python", "llm"}:
+            raise ValueError("artifact_organization must be 'python' or 'llm'")
+        self.artifact_organization = artifact_organization
+        # In LLM mode these are explicit model-organized operations, not raw
+        # telemetry interpreted again by the final metric payload builders.
+        self.raw_spans: List[Dict[str, Any]] = []
+        self.artifact_relationship_decisions: Dict[str, Dict[str, Any]] = {}
         self.evidence: List[EvidenceFact] = []
         self.intents: List[IntentEntry] = []
         self.claims: List[ClaimEntry] = []
@@ -356,6 +367,9 @@ class TrajectoryContext:
         self.tool_definitions = tool_definitions
         self.recency_window = recency_window
         self.max_context_chars = max_context_chars
+
+        if self.artifact_organization == "llm":
+            return
 
         if self.policy_text:
             self.add_policy_rule(self.policy_text, source_name="policy")
@@ -800,6 +814,18 @@ class TrajectoryContext:
     def declare_root_request(self, text: str) -> None:
         """Record the request the run was started with, read from its input."""
         self.root_request = str(text or "").strip()
+        if not self.root_request or any(
+            fact.fact_type == "user_statement"
+            and _exact_text_key(fact.content) == _exact_text_key(self.root_request)
+            for fact in self.evidence
+        ):
+            return
+        # The workflow input establishes an external request, not an agent's
+        # identity. Preserve it independently of user-role transport messages.
+        self._ingest_root_turn(
+            RootTurn("", "", "", self.root_request, -1),
+            -1,
+        )
 
     def declare_roster(self, agents: List[tuple[str, int]]) -> None:
         """Declare the complete roster seen in a trace before ingestion.
@@ -817,6 +843,8 @@ class TrajectoryContext:
         if self._finalized:
             return
         self._finalized = True
+        if self.artifact_organization == "llm":
+            return
         for edge in list(self._pending_adapter_edges):
             self._ingest_adapter_edge(edge, self._span_index_for_timestamp(edge))
         self._pending_adapter_edges = []
@@ -1367,6 +1395,7 @@ class TrajectoryContext:
         relay["response_ids"] = _ordered_union(
             relay["response_ids"], list(response_ids or [])
         )
+        relay["contains_error"] = relay["contains_error"] or contains_error
         relay["artifact_id"] = relay["artifact_id"] or artifact_id
 
     def _apply_relay(self, unit: WorkUnit, span_index: int) -> bool:
@@ -1384,13 +1413,6 @@ class TrajectoryContext:
         ):
             self._adapter_verification_ingested = True
             self._ingest_adapter_verification(span_index=span_index)
-        self._record_flags(
-            relay["text"],
-            span_index=relay["span_index"],
-            agent_id=relay["agent_id"],
-            artifact_id=relay["artifact_id"],
-            work_id=unit.work_id,
-        )
         self._resolve_work_response(
             unit,
             relay["text"],
@@ -1436,38 +1458,6 @@ class TrajectoryContext:
                     basis="control_returned_without_reply",
                     span_index=span_index,
                 )
-
-    def _record_flags(
-        self,
-        text: str,
-        *,
-        span_index: int,
-        agent_id: str,
-        artifact_id: str,
-        work_id: str,
-    ) -> None:
-        for kind, quote in _flag_matches(text):
-            if any(
-                flag.agent_id == agent_id
-                and flag.kind == kind
-                and flag.quote == quote
-                and flag.work_id == work_id
-                for flag in self.flags
-            ):
-                # The same statement seen again, e.g. relayed by the
-                # delegation tool after the recipient said it.
-                continue
-            self.flags.append(
-                FlagEntry(
-                    flag_id=f"flag:{len(self.flags)}",
-                    span_index=span_index,
-                    agent_id=agent_id,
-                    kind=kind,
-                    quote=quote,
-                    artifact_id=artifact_id,
-                    work_id=work_id,
-                )
-            )
 
     def _route_target(self, span_dict: Dict[str, Any]) -> tuple[str, bool, bool]:
         """Return ``(recipient, terminal, from_state)`` for a routing choice.
@@ -1677,6 +1667,8 @@ class TrajectoryContext:
     def ingest_span(self, span_dict: Dict[str, Any], span_index: int) -> None:
         """Extract and store information from a processed span."""
         attrs = _span_attributes(span_dict)
+        if not self.root_agent_id and _span_actor_scope(span_dict) == "root":
+            self.root_agent_id = self._explicit_agent_id(span_dict)
         for turn_call_id in (
             attrs.get("mas.parent.call.id"),
             attrs.get("mas.call.id"),
@@ -2129,54 +2121,29 @@ class TrajectoryContext:
         work_unit = self._work_unit_for_span(span_dict, span_index, explicit_agent)
         if work_unit is not None:
             self._record_receipt(work_unit, span_index)
-        delegated_task = (
-            _is_delegated_agent_input(
-                input_payload,
-                root_policy_text=self.policy_text,
-            )
-            or work_unit is not None
-        )
         agent_id = _span_agent_id(span_dict)
         provenance = self._operation_provenance(
             span_dict,
-            delegated_task=delegated_task,
+            delegated_task=True if work_unit is not None else None,
         )
-        peer_assertion = delegated_task or provenance["actor_scope"] == "peer"
-        if not peer_assertion and agent_id and not self.root_agent_id:
-            self.root_agent_id = agent_id
+        actor_scope = provenance["actor_scope"]
+        peer_assertion = actor_scope == "peer"
+        if actor_scope == "root" and explicit_agent and not self.root_agent_id:
+            self.root_agent_id = explicit_agent
         input_artifact_ids = self._input_artifact_ids(input_payload)
         related_intent_ids: List[str] = []
         user_messages = _extract_user_messages(input_payload)
-        embedded_user_requests = _ordered_union(
-            [],
-            [
-                request
-                for message in user_messages
-                if (request := _extract_embedded_user_request(message))
-            ],
-        )
-        if self.root_request and not embedded_user_requests:
-            root = " ".join(self.root_request.split()).casefold()
-            if any(
-                root in (normalized := " ".join(message.split()).casefold())
-                and len(normalized) > len(root) + 40
-                for message in user_messages
-            ):
-                # An orchestration prompt that wraps the user's request in
-                # instructions and replayed turns: only the request is theirs.
-                embedded_user_requests = [self.root_request]
-        message_records = [
-            (request, "user_statement") for request in embedded_user_requests
-        ]
+        message_records = []
         for message in user_messages:
-            if _is_runtime_feedback_message(message):
-                fact_type = "runtime_feedback"
-            elif delegated_task or _is_coordination_context_message(message):
+            if peer_assertion or _is_coordination_context_message(message):
                 fact_type = "agent_handoff"
-            elif embedded_user_requests:
-                fact_type = "environment_context"
-            else:
+            elif actor_scope == "root":
                 fact_type = "user_statement"
+            else:
+                # A user-role transport slot can carry a task, shared state,
+                # runtime feedback, or an external request. Without native
+                # origin evidence, retain it without inventing a user intent.
+                fact_type = "environment_context"
             message_records.append((message, fact_type))
 
         for msg, fact_type in message_records:
@@ -2222,6 +2189,8 @@ class TrajectoryContext:
                         source_name=(
                             "coordination_context"
                             if fact_type == "agent_handoff"
+                            else "prompt_user"
+                            if fact_type == "environment_context"
                             else fact_type.removesuffix("_statement")
                         ),
                         related_intent_ids=message_intent_ids,
@@ -2258,7 +2227,7 @@ class TrajectoryContext:
         )
         if agent_text:
             if (
-                not peer_assertion
+                actor_scope == "root"
                 and not routing_output
                 and _has_visible_content(agent_text)
             ):
@@ -2302,15 +2271,6 @@ class TrajectoryContext:
                 )
             )
             output_artifact_ids.append(claim_id)
-            own_words = _reply_without_tool_calls(agent_text)
-            if own_words and not message_targets:
-                self._record_flags(
-                    own_words,
-                    span_index=span_index,
-                    agent_id=provenance["agent_id"],
-                    artifact_id=claim_id,
-                    work_id=work_unit.work_id if work_unit is not None else "",
-                )
             if provenance["agent_id"]:
                 self._latest_claim_by_agent[
                     _normalise_actor_id(provenance["agent_id"])
@@ -2385,6 +2345,7 @@ class TrajectoryContext:
     ) -> Dict[str, str]:
         """Retain the actor and trace linkage needed by trajectory metrics."""
         agent_id = _span_agent_id(span_dict)
+        explicit_agent = self._explicit_agent_id(span_dict)
         explicit_scope = (
             str(span_dict.get("actor_scope") or _span_actor_scope(span_dict))
             .strip()
@@ -2394,12 +2355,10 @@ class TrajectoryContext:
             actor_scope = explicit_scope
         elif delegated_task is True:
             actor_scope = "peer"
-        elif delegated_task is False:
-            actor_scope = "root"
-        elif agent_id and self.root_agent_id:
+        elif explicit_agent and self.root_agent_id:
             actor_scope = (
                 "root"
-                if _normalise_actor_id(agent_id)
+                if _normalise_actor_id(explicit_agent)
                 == _normalise_actor_id(self.root_agent_id)
                 else "peer"
             )
@@ -2419,6 +2378,8 @@ class TrajectoryContext:
         return self._evidence_artifact_id(index, fact)
 
     def _evidence_artifact_id(self, index: int, fact: EvidenceFact) -> str:
+        if self.artifact_organization == "llm":
+            return f"fact:{index}"
         if fact.fact_type == "user_statement":
             return f"user:{index}"
         if fact.fact_type == "policy_rule":
@@ -2808,6 +2769,24 @@ class TrajectoryContext:
         self._update_coordination_metadata(span_dict)
         links = _span_links(span_dict)
         event_types = _coordination_event_types(span_dict, links)
+        span_id = str(span_dict.get("span_id") or "")
+        # Only an adapter work unit binds a preexisting transfer to this exact
+        # span. Linked or parent spans and operation names are not evidence of
+        # another assignment. Keep records separate when edges share a span.
+        sidecar_events = [
+            event
+            for event in self.coordination_events
+            if event.event_type in {"assignment", "handoff"}
+            and (unit := self._work_unit_by_id(event.work_id)) is not None
+            and unit.source == "adapter"
+            and span_id
+            and span_id in unit.source_span_ids
+            and event.event_id in unit.assignment_event_ids
+        ]
+        sidecar_types = {event.event_type for event in sidecar_events}
+        event_types = _ordered_union(
+            event_types, [event.event_type for event in sidecar_events]
+        )
         event_types = _ordered_union(event_types, additional_event_types or [])
         event_types = [
             event_type
@@ -2833,12 +2812,29 @@ class TrajectoryContext:
         )
         sender_agent_ids = [item for item in sender_agent_ids if item]
         span_recipient_ids = _span_recipient_agent_ids(span_dict)
-        if not span_recipient_ids and any(
-            event_type in {"assignment", "handoff"} for event_type in event_types
+        if not span_recipient_ids and sidecar_events:
+            span_recipient_ids = _ordered_union(
+                [],
+                [
+                    recipient
+                    for event in sidecar_events
+                    for recipient in event.recipient_agent_ids
+                ],
+            )
+        if (
+            not span_recipient_ids
+            and not sidecar_events
+            and any(
+                event_type in {"assignment", "handoff"} for event_type in event_types
+            )
         ):
             span_recipient_ids = _infer_operation_recipient_agent_ids(span_dict)
         if self._roster_complete:
-            declared_targets = _declared_recipient_ids(span_dict)
+            declared_targets = (
+                set(span_recipient_ids)
+                if sidecar_events
+                else _declared_recipient_ids(span_dict)
+            )
             kept: List[str] = []
             for recipient in span_recipient_ids:
                 known = self._known_agent_id(recipient)
@@ -2860,12 +2856,10 @@ class TrajectoryContext:
             else span_recipient_ids
         )
 
-        operation = _normalise_operation_text(span_dict)
         link_handoff = (
             "handoff" in event_types
-            and not re.search(
-                r"\b(?:delegat|handoff|hand_off|return_to|transfer)\w*\b", operation
-            )
+            and "handoff" not in sidecar_types
+            and "handoff" not in _coordination_event_types(span_dict, [])
             and not span_recipient_ids
         )
         handoff_recipient_ids: List[str] = []
@@ -2904,11 +2898,31 @@ class TrajectoryContext:
                 event_types = [item for item in event_types if item != "handoff"]
 
         def recipients_for(event_type: str) -> List[str]:
+            if event_type in sidecar_types:
+                return _ordered_union(
+                    [],
+                    [
+                        recipient
+                        for event in sidecar_events
+                        if event.event_type == event_type
+                        for recipient in event.recipient_agent_ids
+                    ],
+                )
             if event_type == "handoff" and link_handoff:
                 return handoff_recipient_ids
             return recipient_agent_ids
 
         def senders_for(event_type: str) -> List[str]:
+            if event_type in sidecar_types:
+                return _ordered_union(
+                    [],
+                    [
+                        sender
+                        for event in sidecar_events
+                        if event.event_type == event_type
+                        for sender in event.sender_agent_ids
+                    ],
+                )
             if event_type == "handoff" and link_handoff:
                 return handoff_sender_ids
             if event_type == "assignment" and actor_override:
@@ -2936,7 +2950,9 @@ class TrajectoryContext:
             intent_ids = self._scope_intent_ids(span_dict, span_index=span_index)
 
         duplicate_types = [
-            event_type for event_type in event_types if event_type in parent_types
+            event_type
+            for event_type in event_types
+            if event_type in parent_types and event_type not in sidecar_types
         ]
         for event_type in duplicate_types:
             self._merge_parent_coordination_event(
@@ -2955,7 +2971,6 @@ class TrajectoryContext:
         if not event_types:
             return
 
-        span_id = str(span_dict.get("span_id") or "")
         if request_override or source_override == "message":
             request_text = request_override
         elif actor_override:
@@ -2973,9 +2988,25 @@ class TrajectoryContext:
             _span_call_id(span_dict) if span_dict.get("entity_type") == "tool" else ""
         )
         span_unit: Optional[WorkUnit] = None
-        for event_type in event_types:
-            type_recipient_ids = recipients_for(event_type)
-            type_sender_ids = senders_for(event_type)
+        event_records = [
+            (event_type, event)
+            for event_type in event_types
+            for event in (
+                [item for item in sidecar_events if item.event_type == event_type]
+                or [None]
+            )
+        ]
+        for event_type, sidecar_event in event_records:
+            type_recipient_ids = (
+                list(sidecar_event.recipient_agent_ids)
+                if sidecar_event is not None
+                else recipients_for(event_type)
+            )
+            type_sender_ids = (
+                list(sidecar_event.sender_agent_ids)
+                if sidecar_event is not None
+                else senders_for(event_type)
+            )
             event_intent_ids = list(intent_ids)
             assignment_intent_ids: List[str] = []
             event_unit: Optional[WorkUnit] = None
@@ -2991,13 +3022,28 @@ class TrajectoryContext:
                         assignment_intent_ids, event_intent_ids
                     )
             elif event_type in {"assignment", "handoff"}:
+                if sidecar_event is not None:
+                    event_unit = self._work_unit_by_id(sidecar_event.work_id)
                 assignment_intent_ids = self._ensure_assignment_intent(
                     span_dict,
                     span_index,
                     event_type=event_type,
                     recipient_agent_ids=type_recipient_ids,
-                    description_override=request_text if actor_override else "",
-                    actor_override=actor_override,
+                    description_override=(
+                        event_unit.request
+                        if event_unit is not None
+                        else request_text
+                        if actor_override
+                        else ""
+                    ),
+                    actor_override=(
+                        sidecar_event.actor_agent_id
+                        if sidecar_event is not None
+                        else actor_override
+                    ),
+                    existing_intent_id=(
+                        event_unit.intent_id if event_unit is not None else ""
+                    ),
                 )
                 event_intent_ids = _ordered_union(
                     assignment_intent_ids,
@@ -3009,8 +3055,10 @@ class TrajectoryContext:
                         for parent_id in intent.parent_intent_ids
                     ],
                 )
-                if span_unit is None and (
-                    event_type == "assignment" or "assignment" not in event_types
+                if (
+                    sidecar_event is None
+                    and span_unit is None
+                    and (event_type == "assignment" or "assignment" not in event_types)
                 ):
                     span_unit = self._open_work_unit(
                         allocator_agent_id=actor_agent_id,
@@ -3022,7 +3070,8 @@ class TrajectoryContext:
                         source_span_ids=[span_id] if span_id else [],
                         intent_ids=assignment_intent_ids,
                     )
-                event_unit = span_unit
+                if sidecar_event is None:
+                    event_unit = span_unit
             if event_type == "peer_message" and actor_agent_id:
                 recipient_ids = [actor_agent_id]
             else:
@@ -3032,7 +3081,7 @@ class TrajectoryContext:
             else:
                 event_senders = list(type_sender_ids)
 
-            existing_event = self._coordination_event_for_span(
+            existing_event = sidecar_event or self._coordination_event_for_span(
                 event_type,
                 span_id,
                 linked_span_ids,
@@ -3051,6 +3100,7 @@ class TrajectoryContext:
                     recipient_agent_ids=recipient_ids,
                     linked_span_ids=linked_span_ids,
                     link_types=link_types,
+                    preserve_native_identity=sidecar_event is not None,
                 )
                 if event_unit is None and existing_event.work_id:
                     event_unit = self._work_unit_by_id(existing_event.work_id)
@@ -3178,6 +3228,7 @@ class TrajectoryContext:
         recipient_agent_ids: List[str],
         linked_span_ids: List[str],
         link_types: List[str],
+        preserve_native_identity: bool = False,
     ) -> None:
         """Enrich an adapter event with canonical span artifacts and provenance."""
         new_intent_ids = [
@@ -3185,11 +3236,12 @@ class TrajectoryContext:
             for intent_id in related_intent_ids
             if intent_id not in event.related_intent_ids
         ]
-        event.span_index = span_index
+        if not preserve_native_identity:
+            event.span_index = span_index
+            event.actor_agent_id = _span_agent_id(span_dict) or event.actor_agent_id
         event.operation_name = str(
             span_dict.get("entity_name") or event.operation_name or "unknown"
         )
-        event.actor_agent_id = _span_agent_id(span_dict) or event.actor_agent_id
         event.sender_agent_ids = _ordered_union(
             event.sender_agent_ids,
             sender_agent_ids,
@@ -3215,17 +3267,26 @@ class TrajectoryContext:
             linked_span_ids,
         )
         event.link_types = _ordered_union(event.link_types, link_types)
-        event.status = _coordination_event_status(span_dict, event.event_type)
-        canonical_content = _coordination_content(span_dict)
-        if canonical_content:
-            event.content = canonical_content
-        event.phase = _span_phase(span_dict) or event.phase
-        event.round_index = _span_round_index(span_dict) or event.round_index
-        event.span_id = str(span_dict.get("span_id") or event.span_id)
-        event.parent_span_id = str(
-            span_dict.get("parent_span_id") or event.parent_span_id
-        )
-        event.trace_id = str(span_dict.get("trace_id") or event.trace_id)
+        if not _is_sidecar_verification_event(event):
+            status = _coordination_event_status(span_dict, event.event_type)
+            if status != "unknown" or not event.status:
+                event.status = status
+            canonical_content = _coordination_content(span_dict)
+            if canonical_content:
+                event.content = canonical_content
+        if not preserve_native_identity:
+            event.phase = _span_phase(span_dict) or event.phase
+            event.round_index = _span_round_index(span_dict) or event.round_index
+            event.span_id = str(span_dict.get("span_id") or event.span_id)
+            event.parent_span_id = str(
+                span_dict.get("parent_span_id") or event.parent_span_id
+            )
+            event.trace_id = str(span_dict.get("trace_id") or event.trace_id)
+        elif event.span_id == str(span_dict.get("span_id") or ""):
+            event.parent_span_id = event.parent_span_id or str(
+                span_dict.get("parent_span_id") or ""
+            )
+            event.trace_id = event.trace_id or str(span_dict.get("trace_id") or "")
 
         self._remember_span(span_dict, event.event_id)
         if event.span_id:
@@ -3275,6 +3336,7 @@ class TrajectoryContext:
         description_override: str = "",
         actor_override: str = "",
         root_turn_call_id: Optional[str] = None,
+        existing_intent_id: str = "",
     ) -> List[str]:
         """Create one child work item for an explicit assignment or handoff.
 
@@ -3298,6 +3360,8 @@ class TrajectoryContext:
         for index, intent in enumerate(self.intents):
             if intent.source != "agent_plan":
                 continue
+            if existing_intent_id and existing_intent_id != f"intent:{index}":
+                continue
             same_span = any(
                 event.get("span_id") == span_id
                 and event.get("type") in {"assignment", "handoff"}
@@ -3306,7 +3370,7 @@ class TrajectoryContext:
             same_work = _normalise_semantic_text(intent.description) == (
                 _normalise_semantic_text(description)
             ) and bool(set(intent.owner_agent_ids) & set(recipient_agent_ids))
-            if same_span or same_work:
+            if existing_intent_id or same_span or same_work:
                 intent_id = f"intent:{index}"
                 if intent_id in self._unobserved_work_items:
                     self._unobserved_work_items.discard(intent_id)
@@ -3474,10 +3538,13 @@ class TrajectoryContext:
             parent_event.link_types,
             link_types,
         )
-        child_content = _coordination_content(span_dict)
-        if child_content:
-            parent_event.content = child_content
-        parent_event.status = _span_operation_status(span_dict)
+        if not _is_sidecar_verification_event(parent_event):
+            child_content = _coordination_content(span_dict)
+            if child_content:
+                parent_event.content = child_content
+            status = _coordination_event_status(span_dict, event_type)
+            if status != "unknown" or not parent_event.status:
+                parent_event.status = status
 
         self._remember_span(span_dict, parent_event.event_id)
         child_span_id = str(span_dict.get("span_id") or "")
@@ -3730,14 +3797,15 @@ class TrajectoryContext:
         self._tool_fact_by_call_id = {}
         self._work_item_by_inner_span_id = {}
         # The adapter's root turn names the root agent; else the first root claim.
-        self.root_agent_id = next(
-            (
-                turn.agent_id
-                for turn in self.coordination_context.root_turns
-                if turn.agent_id
-            ),
-            "",
-        )
+        if self.artifact_organization != "llm":
+            self.root_agent_id = next(
+                (
+                    turn.agent_id
+                    for turn in self.coordination_context.root_turns
+                    if turn.agent_id
+                ),
+                "",
+            )
         recorded_turn_keys = {
             intent.events[0].get("turn_key")
             for intent in self.intents
@@ -3769,7 +3837,8 @@ class TrajectoryContext:
         for index, claim in enumerate(self.claims):
             claim_id = f"claim:{index}"
             if (
-                not self.root_agent_id
+                self.artifact_organization != "llm"
+                and not self.root_agent_id
                 and claim.agent_id
                 and claim.actor_scope == "root"
             ):
@@ -4231,26 +4300,38 @@ class TrajectoryContext:
         return "\n\n".join(sections)
 
     _INTERNAL_PREFIXES = ("REASONING:", "THOUGHT:", "PLAN:")
-    _SYSTEM_PROMPT_MARKERS = (
-        "you are a moderator",
-        "you are an agent",
-        "you are a coordinator",
-        "available agents:",
-    )
 
     def get_final_answer_context(self) -> Dict[str, Any]:
-        """Return user-facing agent claims and all tool-output evidence for cross-validation."""
+        """Return a final reply and its known origin with tool-output evidence."""
+        if self.artifact_organization == "llm":
+            return {
+                "final_answer": self.latest_root_answer,
+                "final_answer_span_index": self.latest_root_answer_span_index,
+                "user_question": self.root_request,
+                "all_tool_outputs": [
+                    fact for fact in self.evidence if fact.fact_type == "tool_output"
+                ],
+                "coordination_context": self.coordination_context.compact_payload(),
+            }
         user_facing: list[ClaimEntry] = []
+        unattributed: list[ClaimEntry] = []
         for claim in self.claims:
-            if claim.claim_type not in ("assertion", "completion_claim"):
+            if claim.claim_type not in (
+                "assertion",
+                "completion_claim",
+            ) or claim.actor_scope not in ("", "root"):
                 continue
             text = claim.content.strip()
             if not text:
                 continue
             if any(text.upper().startswith(p) for p in self._INTERNAL_PREFIXES):
                 continue
-            user_facing.append(claim)
+            if claim.actor_scope == "root":
+                user_facing.append(claim)
+            else:
+                unattributed.append(claim)
 
+        final_answer_origin = ""
         if self.latest_root_answer:
             final_answer = self.latest_root_answer
             final_answer_span_index = self.latest_root_answer_span_index
@@ -4263,6 +4344,11 @@ class TrajectoryContext:
             latest = user_facing[-1]
             final_answer = latest.content
             final_answer_span_index = latest.span_index
+        elif unattributed:
+            latest = unattributed[-1]
+            final_answer = latest.content
+            final_answer_span_index = latest.span_index
+            final_answer_origin = "unattributed_candidate"
         else:
             final_answer = ""
             final_answer_span_index = -1
@@ -4270,10 +4356,6 @@ class TrajectoryContext:
         user_facts: list[EvidenceFact] = []
         for fact in self.evidence:
             if fact.fact_type != "user_statement":
-                continue
-            text = fact.content.strip()
-            lower = text.lower()
-            if any(marker in lower for marker in self._SYSTEM_PROMPT_MARKERS):
                 continue
             user_facts.append(fact)
 
@@ -4292,13 +4374,16 @@ class TrajectoryContext:
 
         all_tool_outputs = [f for f in self.evidence if f.fact_type == "tool_output"]
 
-        return {
+        result = {
             "final_answer": final_answer,
             "final_answer_span_index": final_answer_span_index,
             "user_question": user_question,
             "all_tool_outputs": all_tool_outputs,
             "coordination_context": self.coordination_context.compact_payload(),
         }
+        if final_answer_origin:
+            result["final_answer_origin"] = final_answer_origin
+        return result
 
     def get_intent_events(self) -> List[Dict[str, Any]]:
         """Return intent tracking data for result building."""
@@ -4674,36 +4759,18 @@ def _span_phase(span_dict: Dict[str, Any]) -> str:
 
 
 def _span_actor_scope(span_dict: Dict[str, Any]) -> str:
+    """Read native topology scope; a role label does not establish topology."""
     attrs = _span_attributes(span_dict)
-    role = (
+    value = (
         str(
-            span_dict.get("agent_role")
-            or _first_populated(attrs, "mas.agent.role", "agent.role")
+            span_dict.get("actor_scope")
+            or _first_populated(attrs, "mas.actor.scope", "actor.scope", "actor_scope")
             or ""
         )
         .strip()
         .lower()
     )
-    if role in {"lead", "leader", "moderator", "orchestrator", "coordinator"}:
-        return "root"
-    if role in {
-        "peer",
-        "worker",
-        "specialist",
-        "reviewer",
-        "verifier",
-        "executor",
-    }:
-        return "peer"
-    if _span_round_index(span_dict) is not None and role not in {
-        "lead",
-        "leader",
-        "moderator",
-        "orchestrator",
-        "coordinator",
-    }:
-        return "peer"
-    return ""
+    return value if value in {"root", "peer"} else ""
 
 
 def _span_links(span_dict: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -4890,19 +4957,28 @@ def _truthy(value: Any) -> bool:
     return value is True or str(value or "").strip().lower() in {"1", "true", "yes"}
 
 
-def _normalise_operation_text(span_dict: Dict[str, Any]) -> str:
-    attrs = _span_attributes(span_dict)
-    return " ".join(
-        str(value or "")
-        for value in (
-            _first_populated(
-                attrs,
-                "mas.operation.kind",
-                "coordination.operation.kind",
-                "operation.kind",
-            ),
-            span_dict.get("entity_name"),
+_COORDINATION_TYPES = {
+    "assignment",
+    "handoff",
+    "verification",
+    "selection",
+    "synthesis",
+    "commit",
+    "peer_message",
+    "revision",
+}
+
+
+def _span_operation_kind(span_dict: Dict[str, Any]) -> str:
+    """Read an explicitly recorded event kind, without interpreting its name."""
+    return str(
+        _first_populated(
+            _span_attributes(span_dict),
+            "mas.operation.kind",
+            "coordination.operation.kind",
+            "operation.kind",
         )
+        or ""
     ).casefold()
 
 
@@ -4910,71 +4986,31 @@ def _coordination_event_types(
     span_dict: Dict[str, Any],
     links: List[Dict[str, str]],
 ) -> List[str]:
-    operation = _normalise_operation_text(span_dict)
-    attrs = _span_attributes(span_dict)
-    event_types: List[str] = []
-
-    is_delegation = bool(re.search(r"\bdelegat\w*\b", operation))
-    if re.search(r"\b(?:delegat|assign|route_to|routing)\w*\b", operation):
-        event_types.append("assignment")
-    if is_delegation or re.search(
-        r"\b(?:handoff|hand_off|return_to|transfer)\w*\b",
-        operation,
-    ):
-        event_types.append("handoff")
-    role = str(
-        span_dict.get("agent_role")
-        or _first_populated(attrs, "mas.agent.role", "agent.role")
-        or ""
-    ).casefold()
-    operation_kind = str(
+    """Keep coordination facts supplied by structured trace metadata."""
+    kind = _span_operation_kind(span_dict)
+    event_types = [kind] if kind in _COORDINATION_TYPES else []
+    if kind == "delegation":
+        event_types.extend(["assignment", "handoff"])
+    if _truthy(
         _first_populated(
-            attrs,
-            "mas.operation.kind",
-            "coordination.operation.kind",
-            "operation.kind",
+            _span_attributes(span_dict), "mas.response.final", "response.final"
         )
-        or ""
-    ).casefold()
-    entity_name = str(span_dict.get("entity_name") or "").casefold()
-    actor_agent_id = _normalise_actor_id(_span_agent_id(span_dict))
-    is_assignment_or_handoff = any(
-        event_type in {"assignment", "handoff"} for event_type in event_types
-    )
-    explicit_verification = bool(
-        re.search(r"\b(?:verif|validat|review|critic|check)\w*\b", operation_kind)
-        or re.match(r"(?:verif|validat|review|critic|check)\w*", entity_name)
-        or role in {"critic", "reviewer", "verifier", "validator"}
-        or re.match(
-            r"(?:critic|reviewer|verifier|validator)(?:[_\-.].*)?$",
-            actor_agent_id,
-        )
-    )
-    if explicit_verification and not (
-        is_assignment_or_handoff
-        and role not in {"critic", "reviewer", "verifier", "validator"}
     ):
-        event_types.append("verification")
-    if re.search(r"\b(?:select|vote|consensus|winner)\w*\b", operation):
-        event_types.append("selection")
-    if re.search(
-        r"\b(?:synthesi|aggregate|final_response|materiali)\w*\b", operation
-    ) or _truthy(_first_populated(attrs, "mas.response.final", "response.final")):
         event_types.append("synthesis")
-    if re.search(
-        r"\b(?:commit|state_write|apply_action|run_action|execute_action)\w*\b",
-        operation,
-    ):
-        event_types.append("commit")
-
-    if links:
-        typed_links = " ".join(link["link_type"].casefold() for link in links)
-        if re.search(r"handoff|delegat|transfer", typed_links):
+    for link in links:
+        link_type = str(link.get("link_type") or "").casefold()
+        if link_type in {"handoff", "agent_handoff", "delegation", "transfer"}:
             event_types.append("handoff")
-        elif re.search(
-            r"peer|message|context|influence|blackboard|pipeline|coordination",
-            typed_links,
-        ):
+        elif link_type in {
+            "peer",
+            "message",
+            "context",
+            "influence",
+            "blackboard",
+            "pipeline",
+            "coordination",
+            "peer_message",
+        }:
             event_types.append("peer_message")
     if _payload_contains_coordination_context(span_dict.get("input_payload")):
         event_types.append("peer_message")
@@ -4984,17 +5020,7 @@ def _coordination_event_types(
 
 
 def _is_revision_span(span_dict: Dict[str, Any]) -> bool:
-    operation = _normalise_operation_text(span_dict)
-    if re.search(r"\b(?:revis|refin|critique|reconsider)\w*\b", operation):
-        return True
-    return (
-        span_dict.get("entity_type") == "llm"
-        and (_span_round_index(span_dict) or 0) > 1
-        and (
-            bool(_span_links(span_dict))
-            or _payload_contains_coordination_context(span_dict.get("input_payload"))
-        )
-    )
+    return _span_operation_kind(span_dict) == "revision"
 
 
 def _span_operation_status(span_dict: Dict[str, Any]) -> str:
@@ -5007,18 +5033,43 @@ def _span_operation_status(span_dict: Dict[str, Any]) -> str:
     return values[0] if values else "observed"
 
 
+def _is_sidecar_verification_event(event: CoordinationEvent) -> bool:
+    """Recognize the structured gate record emitted by sidecar ingestion."""
+    if event.event_type != "verification":
+        return False
+    try:
+        payload = json.loads(event.content)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and {
+        "verdict",
+        "action_after_verification",
+        "verification_gate_observed",
+    }.issubset(payload)
+
+
 def _coordination_event_status(span_dict: Dict[str, Any], event_type: str) -> str:
-    """Return an event-level outcome while preserving generic span status."""
-    if event_type == "verification":
-        output_text = _extract_agent_output(span_dict.get("output_payload") or {})
-        match = re.search(
-            r"\bverification\s*:\s*(approved|flagged|rejected)\b",
-            output_text,
-            flags=re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).casefold()
-    return _span_operation_status(span_dict)
+    """Use explicit review decisions; ordinary execution status is not a verdict."""
+    if event_type != "verification" or span_dict.get("contains_error"):
+        return _span_operation_status(span_dict)
+    attrs = _span_attributes(span_dict)
+    values = [
+        _first_populated(
+            attrs,
+            "mas.verification.status",
+            "verification.status",
+            "verification.verdict",
+        ),
+        *_find_payload_values(
+            span_dict.get("output_payload"),
+            {"verification_status", "verification_verdict", "verdict", "status"},
+        ),
+    ]
+    for value in values:
+        normalized = str(value or "").casefold()
+        if normalized in {"approved", "flagged", "rejected"}:
+            return normalized
+    return "unknown"
 
 
 def _coordination_content(span_dict: Dict[str, Any]) -> str:
@@ -5196,11 +5247,6 @@ _AGENT_OUTPUT_MAP_KEYS = {
     "prior_agent_outputs",
 }
 
-_EMBEDDED_USER_REQUEST_RE = re.compile(
-    r"(?:original\s+)?user\s+request\s*:\s*(.+?)(?:\n\s*begin!?\s*$|$)",
-    re.IGNORECASE | re.DOTALL,
-)
-
 
 def _payload_contains_coordination_context(payload: Any) -> bool:
     stack: List[Any] = [payload]
@@ -5246,103 +5292,13 @@ def _payload_agent_references(payload: Any) -> List[str]:
     return _ordered_union([], agent_ids)
 
 
-def _extract_embedded_user_request(text: str) -> str:
-    """Extract an external request carried inside an agent task envelope."""
-    match = _EMBEDDED_USER_REQUEST_RE.search(str(text or "").strip())
-    return match.group(1).strip() if match else ""
-
-
 def _is_coordination_context_message(text: str) -> bool:
-    """Identify machine-injected peer, handoff, review, or shared context."""
-    normalized = " ".join(str(text or "").casefold().split())
-    if _extract_embedded_user_request(text) and any(
-        marker in normalized
-        for marker in (
-            "objective and guidance",
-            "coordination round",
-            "guidance from the lead",
-        )
-    ):
-        return True
+    """Read explicit structured peer, handoff, review, or shared context."""
     try:
         payload = json.loads(text)
     except (TypeError, json.JSONDecodeError):
         return False
     return _payload_contains_coordination_context(payload)
-
-
-def _is_runtime_feedback_message(text: str) -> bool:
-    """Identify tool/runtime feedback represented as a user-role message."""
-    normalized = " ".join(str(text or "").casefold().split())
-    if not re.match(
-        r"^(?:error|warning|budget warning|step warning|system notice):",
-        normalized,
-    ):
-        return False
-    return any(
-        marker in normalized
-        for marker in (
-            "available tools",
-            "completion tool",
-            "continue or submit",
-            "steps remain",
-            "tool call",
-            "use one of the",
-        )
-    )
-
-
-def _extract_system_messages(input_payload: Dict[str, Any]) -> List[str]:
-    """Pull system messages from flattened or native structured payloads."""
-    messages = _extract_prompt_messages(input_payload)
-    system_messages = [
-        message["content"]
-        for message in messages
-        if message["role"] == "system" and message["content"]
-    ]
-    explicit = _first_text_value(input_payload, ("system_prompt", "system_message"))
-    if explicit:
-        system_messages.append(explicit)
-    return _ordered_union([], system_messages)
-
-
-def _normalized_contract_text(text: str) -> str:
-    """Normalize a system contract for stable root-agent identity checks."""
-    return " ".join(text.split()).casefold()
-
-
-def _is_delegated_agent_input(
-    input_payload: Dict[str, Any],
-    *,
-    root_policy_text: str = "",
-) -> bool:
-    """Distinguish a peer-agent task from an external user turn.
-
-    The root policy is extracted once from the trajectory and is a more stable
-    identity signal than role-specific words such as ``moderator``.  Keep the
-    marker fallback for callers that construct a context without policy text.
-    """
-    system_messages = _extract_system_messages(input_payload)
-    system_text = " ".join(system_messages)
-    if not system_text:
-        return False
-
-    normalized_root = _normalized_contract_text(root_policy_text)
-    if normalized_root and any(
-        _normalized_contract_text(message) == normalized_root
-        for message in system_messages
-    ):
-        return False
-
-    normalized_system = _normalized_contract_text(system_text)
-    moderator_markers = (
-        "you are a moderator",
-        "you are a coordinator",
-        "coordinating a team",
-        "available agents",
-        "delegate sub-tasks",
-    )
-    return not any(marker in normalized_system for marker in moderator_markers)
 
 
 def _external_turn_key(span_dict: Dict[str, Any]) -> str:
@@ -5471,86 +5427,6 @@ _CAPABILITY_LINE_RE = re.compile(
     r"(?P<capability>[^\n]{8,})$",
     re.MULTILINE,
 )
-_DELEGATION_FAILED_RE = re.compile(
-    r"^\s*\[delegation\][^\n]*\bfailed\b",
-    re.IGNORECASE,
-)
-_FLAG_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
-    (
-        # First person only: "threads hang while waiting for the gateway"
-        # describes a system, not an agent that is blocked.
-        "waiting",
-        re.compile(
-            r"\b(?:I|we)(?:'ll| will| shall| am going to| are going to) wait\b"
-            r"|\b(?:I|we)(?:'m| am|'re| are) (?:still |currently )?waiting\b"
-            r"|\b(?:I|we)(?:'ll| will| can)\b[^.\n]{0,80}?\bonce (?!you\b)(?:the |an? )?"
-            r"[\w -]{0,40}?(?:provides?|responds?|returns?|replies|reply"
-            r"|is available|has (?:provided|finished))\b"
-            r"|\bonce (?!you\b)(?:the |an? )?[\w -]{0,40}?(?:provides?|responds?"
-            r"|returns?|replies|reply|is available|has (?:provided|finished))\b"
-            r"[^.\n]{0,80}?\b(?:I|we)(?:'ll| will| can)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "needs_input",
-        re.compile(
-            r"\b(?:please (?:provide|share|specify|clarify|send)"
-            r"|(?:could|can) you (?:please )?(?:provide|share|specify|clarify|send)"
-            r"|(?:I|we) (?:would )?(?:need|require) (?:some |more |additional "
-            r"|further |the following )?(?:information|details|input|data|context)"
-            r"|before (?:I|we) can (?:proceed|continue|complete|finish|start)"
-            r"|if you (?:can )?provide)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "cannot_do",
-        re.compile(
-            r"\b(?:I|we)(?: cannot| can't| can not| couldn't| could not"
-            r"|(?:'m| am| was|'re| are| were) (?:unable|not able) to)"
-            r" (?:complete|perform|do|carry out|access|retrieve|fetch|obtain|get"
-            r"|provide|calculate|compute|determine|book|process|proceed|continue"
-            r"|fulfil+|help|answer|verify|look up|query|execute|run|finish"
-            r"|finalize|generate|produce|create|plan|check)\b"
-            r"|\b(?:I|we) (?:do not|don't) have (?:access|the ability|the tools?"
-            r"|permission)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "out_of_scope",
-        re.compile(
-            r"\b(?:(?:is |are )?not (?:my|within my|in my|part of my)"
-            r" (?:responsibility|role|scope|job|remit)"
-            r"|outside (?:of )?(?:my|the) (?:scope|role|responsibilit\w+|remit)"
-            r"|not the one in charge"
-            r"|(?:is|are) handled by (?:another|the other|a different) agent)\b",
-            re.IGNORECASE,
-        ),
-    ),
-)
-
-
-def _flag_matches(text: str) -> List[tuple[str, str]]:
-    """Return ``(kind, quote)`` for self-reported blocks in an agent's text."""
-    body = str(text or "")
-    if not body.strip():
-        return []
-    matches: List[tuple[str, str]] = []
-    for kind, pattern in _FLAG_PATTERNS:
-        match = pattern.search(body)
-        if not match:
-            continue
-        start = max(0, body.rfind(".", 0, match.start()) + 1)
-        end_candidates = [
-            index
-            for index in (body.find(".", match.end()), body.find("\n", match.end()))
-            if index >= 0
-        ]
-        end = min(end_candidates) + 1 if end_candidates else len(body)
-        matches.append((kind, body[start:end].strip()[:400]))
-    return matches
 
 
 def _classify_work_response(
@@ -5562,8 +5438,6 @@ def _classify_work_response(
         return "failed", "error_status"
     if not stripped or stripped.casefold() in {"null", "none", "{}", "[]", '""'}:
         return "no_response", "empty_reply"
-    if _DELEGATION_FAILED_RE.search(stripped):
-        return "failed", "delegation_failed"
     try:
         parsed = json.loads(stripped)
     except (TypeError, json.JSONDecodeError):
@@ -5576,14 +5450,9 @@ def _classify_work_response(
         )
     ):
         return "failed", "error_payload"
-    kinds = [kind for kind, _ in _flag_matches(stripped)]
-    if "waiting" in kinds:
-        return "waiting", "waiting_reply"
-    if "needs_input" in kinds:
-        return "needs_input", "needs_input_reply"
-    if kinds and set(kinds) <= {"cannot_do", "out_of_scope"}:
-        return "declined", "declined_reply"
-    return "completed", "reply"
+    # A nonempty reply alone does not establish whether the work was completed,
+    # declined, or deferred. The judges assess its preserved raw content.
+    return "unknown", "unassessed_reply"
 
 
 def _is_tool_call_only(text: str) -> bool:
@@ -5759,8 +5628,6 @@ def _tool_outcome(span_dict: Dict[str, Any], output_payload: Any) -> str:
         if not values:
             return "no_output"
     text = _tool_reply_text(output_payload)
-    if _DELEGATION_FAILED_RE.search(text):
-        return "error"
     if text.casefold() in {"null", "none"}:
         return "no_output"
     return "output"

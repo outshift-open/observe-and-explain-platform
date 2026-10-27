@@ -178,7 +178,7 @@ def _parse(raw: Any, source: str) -> Dict[str, ModelPrice]:
     return lookup
 
 
-def _packaged_lookup() -> Dict[str, ModelPrice]:
+def _packaged_lookup(*, proxy_only: bool = False) -> Dict[str, ModelPrice]:
     try:
         raw = json.loads(_PRICE_FILE.read_text(encoding="utf-8"))
     except Exception:
@@ -187,6 +187,13 @@ def _packaged_lookup() -> Dict[str, ModelPrice]:
     if not isinstance(raw, dict):
         logger.warning("Local model pricing file is not a JSON object: %s", _PRICE_FILE)
         return {}
+    if proxy_only:
+        raw = {
+            name: metadata
+            for name, metadata in raw.items()
+            if isinstance(metadata, dict)
+            and metadata.get("stateful_evals_source") == "proxy_model_info_snapshot"
+        }
     return _parse(raw, "local_model_prices_json")
 
 
@@ -230,7 +237,9 @@ def _price_lookup() -> Dict[str, ModelPrice]:
         if _refresh_enabled() and time.monotonic() >= _next_refresh:
             url = os.getenv("MODEL_PRICES_URL", _DEFAULT_URL)
             try:
-                _lookup = _fetched_lookup(url)
+                # Proxy aliases may be absent upstream. Keep their packaged
+                # prices while allowing refreshed entries to take precedence.
+                _lookup = {**_packaged_lookup(proxy_only=True), **_fetched_lookup(url)}
                 _next_refresh = time.monotonic() + _ttl_seconds()
                 logger.info("Refreshed %d model prices from %s", len(_lookup), url)
             except Exception as exc:

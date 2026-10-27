@@ -4241,6 +4241,7 @@ dependencies = [
     { name = "litellm" },
     { name = "mdt-metrics" },
     { name = "metrics-computation-engine" },
+    { name = "openai" },
     { name = "pydantic" },
 ]
 
@@ -4261,6 +4262,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.83.0" },
     { name = "mdt-metrics", directory = "stateful-evals/stateful_evals_be/plugins/mdt_metrics" },
     { name = "metrics-computation-engine", specifier = ">=1.2.7" },
+    { name = "openai", specifier = ">=2.8.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
 ]
 provides-extras = ["import"]
