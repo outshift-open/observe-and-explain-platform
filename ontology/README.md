@@ -55,7 +55,7 @@ Structural types, their execution instances, and the normalized trajectory each 
 Semantic embedding layer for MAS trajectories: `SemanticElement`, `Embedding`, and links from State/Execution nodes to embeddings. Versioned independently from the other four ontologies — see [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ### 3. `metrics-ontology.ttl` — Metrics
-Metric/MetricResult definition-observation split, integrated with `mas-ontology.ttl` via `hasMetric`. Concrete metric catalog instances live outside of this package.
+Metric/MetricResult definition-observation split, integrated with `mas-ontology.ttl` via `ofMetricType` (result to definition) and `measures` (result to the Session or execution element it measures). Concrete metric catalog instances live outside of this package.
 
 ### 4. `analysis-ontology.ttl` — Post-hoc Analysis
 Group-scoped analysis reports (consistency, anomaly, normal-behaviour) computed over a `SemanticGroup` of sessions — an `mas:AnalysisElement` companion to `mas-ontology.ttl`.

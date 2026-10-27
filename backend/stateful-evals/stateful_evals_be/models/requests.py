@@ -114,6 +114,16 @@ class TemporalMetricOptions(BaseModel):
             "diagnostic and never change trajectory_score or trajectory_reasoning."
         ),
     )
+    span_pass_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Legacy span metrics (Groundedness, IntentRecognition, Relevancy) use a 1-5 rubric normalized to "
+            "0.0-1.0 ((score-1)/4). A legacy span metric passes when its normalized "
+            "value is >= this threshold. LLM artifact organization uses binary span scores."
+        ),
+    )
     use_fatal_mode: bool = Field(
         default=True,
         description="Use trajectory-level fatal/minor audit and binary scoring.",
@@ -215,9 +225,9 @@ class TemporalEvalRequest(BaseModel):
 
     metrics: List[str] = Field(
         default=[
-            "mdt.Groundedness",
-            "mdt.IntentRecognition",
-            "mdt.Relevancy",
+            "Groundedness",
+            "IntentRecognition",
+            "Relevancy",
         ],
         description="List of metric names to compute.",
     )
@@ -344,8 +354,18 @@ class SpanMetricResult(BaseModel):
     span_type: str = ""
     entity_name: str = ""
     metric_name: str
-    score: float
+    score: float  # normalized rubric value in [0, 1]: (raw_score - 1) / 4
+    raw_score: Optional[int] = None  # judge's 1-5 rubric score; None if auto-failed
     reasoning: str = ""
+    # Judge usage for this span, split evenly across the metrics judged for it so
+    # that the per-metric values sum to the span's total. Unset when unmeasured.
+    evaluation_model: Optional[str] = None
+    evaluation_prompt_tokens: Optional[int] = None
+    evaluation_completion_tokens: Optional[int] = None
+    evaluation_total_tokens: Optional[int] = None
+    evaluation_cost_usd: Optional[float] = None
+    # Trajectory input only: the step the span result belongs to.
+    transition_id: str = ""
 
 
 class SessionResult(BaseModel):
@@ -373,6 +393,11 @@ class SessionResult(BaseModel):
     high_level_metrics: List[Dict[str, Any]] = Field(default_factory=list)
     trajectory_metric_set: Optional[str] = None
     trajectory_metrics: List[Dict[str, Any]] = Field(default_factory=list)
+    # Trajectory input only: what each step added to the trajectory context,
+    # keyed by step (transition) id. Each value maps a constituent (evidence,
+    # claims, intents, work_units, provenance_links, coordination_events, flags,
+    # final_answer) to the items it contributed, with absolute indexes.
+    transition_contexts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     cost_estimate: TokenCostEstimate = Field(default_factory=TokenCostEstimate)
     eval_duration_seconds: Optional[float] = None
@@ -401,7 +426,7 @@ class EvalSummary(BaseModel):
 
 @dataclass
 class MetricFailure:
-    """Represents a metric that scored less than 1."""
+    """Represents a span metric whose value fell below ``span_pass_threshold``."""
 
     metric_name: str
     score: float

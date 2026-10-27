@@ -14,14 +14,16 @@ from oxp_ontology import OntologyValidationError, verify_kg_object
 from oxp_ontology.models.edges import (
     aboutMetric,
     containsSession,
+    hasContext,
     hasMedioidSession,
     ofSemanticGroup,
 )
-from oxp_ontology.models.nodes import SemanticGroup
+from oxp_ontology.models.nodes import SemanticGroup, TrajectoryContext
 
 from oxp.connectors.base import Connector
 from oxp.core.exceptions import DatabaseError
 from oxp.query_builders import dal as dal_queries
+from oxp.query_builders import trajectory as trajectory_queries
 
 logger = logging.getLogger(__name__)
 
@@ -407,6 +409,40 @@ def _ingest_node(db: Connector, label: str, properties: Dict[str, Any]) -> None:
         db.execute(query, params)
     except Exception as exc:
         raise DatabaseError(f"Failed to ingest {label} node: {exc}") from exc
+
+
+def _metric_definition_ids(db: Connector, metric_name: str) -> List[str]:
+    """Ids of every ``Metric`` definition named ``metric_name`` (one per provider).
+
+    Falls back to ``[metric_name]`` when none exists yet, so the report is
+    still verified against the ontology's mandatory ``aboutMetric`` edge.
+    """
+    rows = db.execute(
+        query="MATCH (d:Metric {name: $name}) RETURN DISTINCT d.id AS id",
+        params={"name": metric_name},
+    )
+    ids = [str(r["id"]) for r in rows or [] if r.get("id")]
+    return ids or [metric_name]
+
+
+def _link_report_to_metric_definitions(
+    db: Connector, report_label: str, report_id: str, metric_name: str
+) -> None:
+    """Link a report to every ``Metric`` definition named ``metric_name``.
+
+    Group reports are computed over a metric name across sessions, so
+    ``aboutMetric`` targets the definition(s) (one per provider), not results.
+    """
+    _create_rel(
+        db,
+        report_label,
+        ["id"],
+        [report_id],
+        "Metric",
+        ["name"],
+        [metric_name],
+        "aboutMetric",
+    )
 
 
 def _create_rel(
@@ -1061,11 +1097,13 @@ def ingest_consistency_report(
     """
     metadata = getattr(source, "metadata", None) or {}
     metric_name = metadata.get("metric", "")
-    session_ids = getattr(source, "session_ids", None) or []
 
     verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
     if report.dataType == "metric" and metric_name:
-        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+        for definition_id in _metric_definition_ids(db, metric_name):
+            verify_edges.append(
+                aboutMetric(source_id=report.id, target_id=definition_id)
+            )
 
     verification = verify_kg_object(report, edges=verify_edges)
     if not verification.conforms:
@@ -1110,17 +1148,7 @@ def ingest_consistency_report(
         "ofSemanticGroup",
     )
     if report.dataType == "metric" and metric_name:
-        for session_id in session_ids:
-            _create_rel(
-                db,
-                label,
-                ["id"],
-                [props["id"]],
-                "Metric",
-                ["metricName", "sessionId"],
-                [metric_name, session_id],
-                "aboutMetric",
-            )
+        _link_report_to_metric_definitions(db, label, props["id"], metric_name)
     return True
 
 
@@ -1168,7 +1196,10 @@ def ingest_anomaly_report(
 
     verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
     if report.dataType == "metric" and metric_name:
-        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+        for definition_id in _metric_definition_ids(db, metric_name):
+            verify_edges.append(
+                aboutMetric(source_id=report.id, target_id=definition_id)
+            )
 
     verification = verify_kg_object(report, edges=verify_edges)
     if not verification.conforms:
@@ -1215,19 +1246,9 @@ def ingest_anomaly_report(
         "ofSemanticGroup",
     )
     if metric_name:
-        for session_id in sorted({*inlier_sessions, *outlier_sessions}):
-            _create_rel(
-                db,
-                label,
-                ["id"],
-                [props["id"]],
-                "Metric",
-                ["metricName", "sessionId"],
-                [metric_name, session_id],
-                "aboutMetric",
-            )
+        _link_report_to_metric_definitions(db, label, props["id"], metric_name)
 
-    # link each outlier session and metric → anomaly report
+    # link each outlier session → anomaly report
     report_id: str = props["id"]
 
     for session_id in outlier_sessions:
@@ -1241,17 +1262,6 @@ def ingest_anomaly_report(
             [report_id],
             "hasAnomalyReport",
         )
-        if metric_name:
-            _create_rel(
-                db,
-                "Metric",
-                ["metricName", "sessionId"],
-                [metric_name, session_id],
-                label,
-                ["id"],
-                [report_id],
-                "hasAnomalyReport",
-            )
     return True
 
 
@@ -1291,11 +1301,13 @@ def ingest_normal_behaviour_report(
     """
     metadata = getattr(source, "metadata", None) or {}
     metric_name = metadata.get("metric", "")
-    session_ids = getattr(source, "session_ids", None) or []
 
     verify_edges: List[Any] = [ofSemanticGroup(source_id=report.id, target_id=group_id)]
     if report.dataType == "metric" and metric_name:
-        verify_edges.append(aboutMetric(source_id=report.id, target_id=metric_name))
+        for definition_id in _metric_definition_ids(db, metric_name):
+            verify_edges.append(
+                aboutMetric(source_id=report.id, target_id=definition_id)
+            )
 
     verification = verify_kg_object(report, edges=verify_edges)
     if not verification.conforms:
@@ -1341,17 +1353,7 @@ def ingest_normal_behaviour_report(
         "ofSemanticGroup",
     )
     if report.dataType == "metric" and metric_name:
-        for session_id in session_ids:
-            _create_rel(
-                db,
-                label,
-                ["id"],
-                [props["id"]],
-                "Metric",
-                ["metricName", "sessionId"],
-                [metric_name, session_id],
-                "aboutMetric",
-            )
+        _link_report_to_metric_definitions(db, label, props["id"], metric_name)
     return True
 
 
@@ -1374,8 +1376,6 @@ def get_all_metrics_for_a_group_of_sessions(
         metric_result = record["metricResult"]
         if isinstance(metric_result, (int, float)):
             metric_value = metric_result
-        elif isinstance(metric_result, str):
-            metric_value = float(json.loads(metric_result)["value"])
         else:
             raise ValueError(
                 f"Unknown metric result type for session_id : {session_id}"
@@ -1778,7 +1778,7 @@ def get_analysis_data_for_semantic_group(
             continue
         metrics_raw: List[Dict[str, Any]] = row.get("metrics") or []
         formatted_metrics = {
-            m.get("metricName"): m.get("metricResult", m.get("value"))
+            m.get("metricName"): m.get("metricResult")
             for m in metrics_raw
             if m.get("metricName")
         }
@@ -2249,3 +2249,118 @@ def ingest_wasted_resources_feature_scores(
             )
         )
         db.execute(query=query, params=params)
+
+
+# ── session trajectory (Transition/State chain) ──────────────────────────────
+
+
+def get_session_trajectory(db: Connector, session_id: str) -> Dict[str, Any]:
+    """Return a session's LLM, tool and agent calls in execution order.
+
+    One query: every ``LLMCall``/``ToolCall``/``AgentCall`` of the session with the
+    ``Transition`` it corresponds to and the text of its initial and final
+    ``State``.
+
+    Returns
+    -------
+    dict
+        ``session_id`` and ``steps``, each step holding ``transition_id``,
+        ``call_id``, ``kind`` (``llm``/``tool``/``agent``), ``name`` (model, tool
+        or agent), ``description`` (tools), ``agent_id`` (the acting agent),
+        ``parent_id`` (the agent call that owns an LLM/tool call), ``success``,
+        ``start_time``, ``duration_ms``, ``input_text`` and ``output_text``.
+    """
+    if not session_id or not session_id.strip():
+        raise ValueError("session_id must not be empty")
+    try:
+        rows = db.execute(*trajectory_queries.trajectory_steps_query(session_id))
+    except Exception as exc:
+        raise DatabaseError(
+            f"Failed to get trajectory for session '{session_id}': {exc}"
+        ) from exc
+
+    steps: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        steps.setdefault(
+            str(row["transition_id"]),
+            {
+                "transition_id": str(row["transition_id"]),
+                "call_id": str(row["call_id"]),
+                "kind": row["kind"],
+                "name": str(row.get("name") or ""),
+                "description": str(row.get("description") or ""),
+                "agent_id": str(row.get("agent") or ""),
+                "parent_id": str(row.get("parent_id") or ""),
+                "success": bool(row.get("success", True)),
+                "start_time": float(row.get("start_time") or 0.0),
+                "duration_ms": float(row.get("duration_ms") or 0.0),
+                "input_text": row.get("input_text"),
+                "output_text": row.get("output_text"),
+            },
+        )
+    return {"session_id": session_id, "steps": list(steps.values())}
+
+
+# Constituent of a trajectory context (as the evaluator names it) -> TrajectoryContext field.
+_CONTEXT_FIELDS = {
+    "evidence": "evidence",
+    "claims": "claims",
+    "intents": "intents",
+    "work_units": "workUnits",
+    "provenance_links": "provenanceLinks",
+    "coordination_events": "coordinationEvents",
+    "flags": "flags",
+}
+
+
+def write_transition_context(
+    db: Connector,
+    session_id: str,
+    transition_id: str,
+    context: Dict[str, Any],
+) -> bool:
+    """Store a ``Transition``'s context as a ``TrajectoryContext`` node.
+
+    ``context`` maps each constituent the transition contributed (``evidence``,
+    ``claims``, ``intents``, ``work_units``, ``provenance_links``,
+    ``coordination_events``, ``flags``: lists of items; ``final_answer``:
+    ``{"text": ...}``) to the field of the ontology's ``TrajectoryContext``,
+    JSON-encoded. The node is verified against the ontology and hangs off the
+    transition via ``hasContext``. Returns False if the transition does not
+    exist.
+    """
+    fields: Dict[str, Any] = {}
+    for key, value in context.items():
+        if key in _CONTEXT_FIELDS:
+            fields[_CONTEXT_FIELDS[key]] = json.dumps(
+                value, ensure_ascii=False, default=str
+            )
+        elif key == "final_answer":
+            fields["finalAnswer"] = str(value.get("text") or "")
+        else:
+            logger.warning("Ignoring unknown trajectory context entry %r", key)
+
+    node = TrajectoryContext(
+        id=trajectory_queries.trajectory_context_id(transition_id), **fields
+    )
+    verification = verify_kg_object(
+        node, edges=[hasContext(source_id=transition_id, target_id=node.id)]
+    )
+    if not verification.conforms:
+        raise OntologyValidationError(verification)
+
+    properties = {
+        "id": node.id,
+        "name": node.name,
+        "layer": node.layer,
+        **node.model_dump(exclude_unset=True, exclude={"id", "name"}),
+    }
+    query, params = trajectory_queries.write_transition_context_query(
+        session_id, transition_id, properties
+    )
+    try:
+        return bool(db.execute(query, params))
+    except Exception as exc:
+        raise DatabaseError(
+            f"Failed to write context to transition '{transition_id}': {exc}"
+        ) from exc

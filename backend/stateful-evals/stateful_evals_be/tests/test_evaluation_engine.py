@@ -46,7 +46,7 @@ def offline_engine(monkeypatch):
         LLM_BASE_MODEL_URL="https://example.invalid/v1",
         LLM_API_KEY="test-only",
     )
-    options = TemporalMetricOptions(use_fatal_mode=False, batch_size=2)
+    options = TemporalMetricOptions(artifact_organization="legacy", use_fatal_mode=False, batch_size=2)
     return (
         EvaluationEngine(llm_config=config, options=options),
         config,
@@ -164,17 +164,6 @@ def test_empty_batch_does_not_instantiate_judges(offline_engine):
     assert summary.total_token_usage.total_tokens == 0
     loader.assert_not_called()
     clients.assert_not_called()
-
-
-def test_legacy_batch_uses_isolated_engine(monkeypatch, offline_engine):
-    _, config, options, _ = offline_engine
-    processors, _ = install_judge(monkeypatch, barrier=Barrier(2))
-    legacy = TemporalMetricsProcessor(llm_config=config, options=options)
-    legacy.fetch_spans_for_session = lambda sid: [recorded_span(sid)]
-    result = legacy.run_evaluation(["alpha", "beta"])
-    assert result.errors == []
-    assert result.total_token_usage.total_tokens == 330
-    assert all(processor is not legacy for processor in processors)
 
 
 @pytest.mark.parametrize("batch", [False, True])

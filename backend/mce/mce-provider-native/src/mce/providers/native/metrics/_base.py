@@ -36,6 +36,7 @@ class _BaseLLMJudgeConversationMetric(Metric):
                 value=0.0,
                 metric_class=self.ontology_class,
                 reasoning="No conversation data",
+                error="No conversation data",
             )
         prompt = self.PROMPT_TEMPLATE.format(conversation=conversation)
         score, reasoning, raw = llm_g_eval_score(self, prompt)
@@ -73,6 +74,7 @@ class _BaseLLMJudgeQAMetric(Metric):
                 value=0.0,
                 metric_class=self.ontology_class,
                 reasoning="Missing query/response data",
+                error="Missing query/response data",
             )
         prompt = self.PROMPT_TEMPLATE.format(query=query, response=response)
         score, reasoning, raw = llm_g_eval_score(self, prompt)

@@ -181,6 +181,7 @@ jobs:
                 - Norm Worker: workers/norm-worker.md
                 - Normal Behaviour Worker: workers/normal-behaviour-worker.md
                 - Stateful Eval Worker: workers/stateful-eval-worker.md
+                - Cognitive Failure Worker: workers/cognitive-failure-worker.md
           EOF
           mkdocs build -f mkdocs.yml
           rm -f mkdocs.yml

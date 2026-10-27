@@ -2,14 +2,14 @@
 
 `mdt-metrics` is a focused metrics plugin for stateful-evals style scoring.
 
-It provides namespaced metric IDs so users can request MDT metrics explicitly:
+It provides the span-level metrics stateful-evals scores on a 1-5 rubric:
 
-- `mdt.Groundedness`
-- `mdt.IntentRecognitionAccuracy`
-- `mdt.ResponseRelevance`
+- `Groundedness`
+- `IntentRecognition`
+- `Relevancy`
 
-The plugin registers metric entry points as `Groundedness`, `IntentRecognitionAccuracy`, and `ResponseRelevance`,
-so `mdt.<MetricName>` works with MCE's dotted-name metric resolution.
+The plugin registers them as MCE entry points under these names. Results are persisted by the OXP API with the
+`StatefulEvals` provider, which tells them apart from MCE metrics of the same name.
 
 ## Installation
 
@@ -30,9 +30,9 @@ pip install mdt-metrics
 ```json
 {
   "metrics": [
-    "mdt.Groundedness",
-    "mdt.IntentRecognitionAccuracy",
-    "mdt.ResponseRelevance"
+    "Groundedness",
+    "IntentRecognition",
+    "Relevancy"
   ]
 }
 ```
@@ -43,8 +43,8 @@ pip install mdt-metrics
 import mdt_metrics as mdt
 
 metrics = [
-    mdt.Groundedness,
-    mdt.IntentRecognitionAccuracy,
-    mdt.ResponseRelevance,
+    Groundedness,
+    IntentRecognition,
+    Relevancy,
 ]
 ```

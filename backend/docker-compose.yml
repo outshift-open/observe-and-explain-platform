@@ -32,6 +32,8 @@ x-worker-base: &worker-base
       condition: service_healthy
   volumes:
     - ./mce_config.yaml:/oxp/mce_config.yaml
+    - ./stateful_eval_config.yaml:/oxp/stateful_eval_config.yaml
+    - ./cognitive_failure_config.yaml:/oxp/cognitive_failure_config.yaml
     - /dev/null:/app/workflows/.env
   environment: *worker-env
 
@@ -91,7 +93,7 @@ services:
     environment:
       <<: *worker-env
       MAX_INFLIGHT_MESSAGES: ${EMBEDDING_MAX_INFLIGHT_MESSAGES:-16}
-      EMBEDDING_OUTPUT_QUEUE: ${EMBEDDING_OUTPUT_QUEUE:-new_session_to_grouping,new_session_to_stateful_eval}
+      EMBEDDING_OUTPUT_QUEUE: ${EMBEDDING_OUTPUT_QUEUE:-new_session_to_grouping,new_session_to_stateful_eval,new_session_to_cognitive_failure}
     restart: always
     depends_on:
       rabbitmq:
@@ -206,11 +208,30 @@ services:
     build:
       context: .
       dockerfile: workers/stateful-eval-worker/deploy/docker/Dockerfile
+    command: ["--config-file", "/oxp/stateful_eval_config.yaml"]
     environment:
       <<: *worker-env
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${AI_GATEWAY_API_KEY:-}}
       STATEFUL_EVAL_INPUT_QUEUE: ${STATEFUL_EVAL_INPUT_QUEUE:-new_session_to_stateful_eval}
       MAX_INFLIGHT_MESSAGES: ${STATEFUL_EVAL_MAX_INFLIGHT_MESSAGES:-8}
+    restart: always
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  cognitive-failure:
+    <<: *worker-base
+    build:
+      context: .
+      dockerfile: workers/cognitive-failure-worker/deploy/docker/Dockerfile
+    command: ["--config-file", "/oxp/cognitive_failure_config.yaml"]
+    environment:
+      <<: *worker-env
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${AI_GATEWAY_API_KEY:-}}
+      COGNITIVE_FAILURE_INPUT_QUEUE: ${COGNITIVE_FAILURE_INPUT_QUEUE:-new_session_to_cognitive_failure}
+      MAX_INFLIGHT_MESSAGES: ${COGNITIVE_FAILURE_MAX_INFLIGHT_MESSAGES:-8}
     restart: always
     depends_on:
       rabbitmq:

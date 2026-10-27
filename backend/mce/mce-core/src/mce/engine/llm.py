@@ -4,15 +4,58 @@ from __future__ import annotations
 import json
 import hashlib
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from pathlib import Path
+
+from mce.engine.usage import record_usage
 
 # Try to import openai, handle if missing
 try:
     from openai import OpenAI as _OpenAI
 except ImportError:
     _OpenAI = None
+
+
+@dataclass
+class CompletionResult:
+    """One LLM completion with the usage and (optionally) token log-probabilities.
+
+    ``logprobs`` is a list of ``{"token", "logprob", "top": [{"token",
+    "logprob"}, ...]}`` entries, one per generated token, when requested and
+    supported by the endpoint; otherwise ``None``.
+    """
+
+    text: str
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    logprobs: list[dict[str, Any]] | None = field(default=None, repr=False)
+
+
+# Sampling options some OpenAI-compatible endpoints reject. When a call that
+# used them fails it is retried once without them, and they are then left out
+# of every later call on that service.
+_OPTIONAL_PARAMS = ("logprobs", "top_logprobs", "temperature")
+
+
+def _logprobs_from_response(response: Any) -> list[dict[str, Any]] | None:
+    choice_logprobs = getattr(response.choices[0], "logprobs", None)
+    content = getattr(choice_logprobs, "content", None) if choice_logprobs else None
+    if not content:
+        return None
+    return [
+        {
+            "token": item.token,
+            "logprob": item.logprob,
+            "top": [
+                {"token": top.token, "logprob": top.logprob}
+                for top in (item.top_logprobs or [])
+            ],
+        }
+        for item in content
+    ]
 
 
 class LLMService:
@@ -59,6 +102,7 @@ class LLMService:
         # to avoid requiring OPENAI_API_KEY at configure() time.
         self._client: Any | None = None
         self._client_lock = threading.Lock()  # Guards lazy client creation
+        self._dropped_params: set[str] = set()  # optional params the endpoint rejects
 
     @classmethod
     def get_instance(cls):
@@ -128,19 +172,49 @@ class LLMService:
         system_prompt: str | None = None,
         **kwargs,
     ) -> str:
-        """
-        Execute completion for a prompt.
+        """Execute a completion and return its text (see :meth:`complete`)."""
+        return self.complete(prompt, model, system_prompt, **kwargs).text
+
+    def complete(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        *,
+        sample: int = 0,
+        **kwargs,
+    ) -> CompletionResult:
+        """Execute a completion; adds its token usage to the current usage scope.
+
+        ``sample`` distinguishes repeated calls with the same prompt (for
+        example when averaging several judge samples) in the record/replay
+        cache. Extra keyword arguments (``temperature``, ``logprobs``, ...)
+        are passed to the chat completions API.
         """
         # Determine model: explicit arg → instance default → hardcoded default
         if model is None:
             model = self._default_model or "gpt-4o"
 
         key = self._hash_prompt(prompt, model)
+        if sample:
+            key = f"{key}:{sample}"
 
         # REPLAY MODE: Strict cache lookup — a miss is a test configuration error.
         if self.mode == "replay":
             if key in self.cache:
-                return self.cache[key]["output"]
+                entry = self.cache[key]
+                usage = entry.get("usage") or {}
+                result = CompletionResult(
+                    text=entry["output"],
+                    model=entry.get("model", model),
+                    prompt_tokens=int(usage.get("prompt_tokens", 0)),
+                    completion_tokens=int(usage.get("completion_tokens", 0)),
+                    logprobs=entry.get("logprobs"),
+                )
+                record_usage(
+                    result.model, result.prompt_tokens, result.completion_tokens
+                )
+                return result
             raise KeyError(
                 f"Replay cache miss for model='{model}'. "
                 "Record the interaction first (mode='record') or add the entry manually."
@@ -155,13 +229,33 @@ class LLMService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
+            kwargs = {k: v for k, v in kwargs.items() if k not in self._dropped_params}
             try:
                 response = client.chat.completions.create(
                     model=model, messages=messages, **kwargs
                 )
             except Exception as e:
-                raise RuntimeError(f"LLM call failed: {e}") from e
+                optional = [p for p in _OPTIONAL_PARAMS if p in kwargs]
+                if not optional:
+                    raise RuntimeError(f"LLM call failed: {e}") from e
+                self._dropped_params.update(optional)
+                kwargs = {k: v for k, v in kwargs.items() if k not in optional}
+                try:
+                    response = client.chat.completions.create(
+                        model=model, messages=messages, **kwargs
+                    )
+                except Exception as retry_error:
+                    raise RuntimeError(f"LLM call failed: {retry_error}") from e
             content = response.choices[0].message.content or ""
+            usage = getattr(response, "usage", None)
+            result = CompletionResult(
+                text=content,
+                model=model,
+                prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                logprobs=_logprobs_from_response(response),
+            )
+            record_usage(model, result.prompt_tokens, result.completion_tokens)
 
             if self.mode == "record":
                 self.cache[key] = {
@@ -170,10 +264,15 @@ class LLMService:
                     "model": model,
                     "timestamp": datetime.now().isoformat(),
                     "params": kwargs,
+                    "usage": {
+                        "prompt_tokens": result.prompt_tokens,
+                        "completion_tokens": result.completion_tokens,
+                    },
+                    "logprobs": result.logprobs,
                 }
                 self._save_cache()
 
-            return content
+            return result
         except Exception as e:
             raise RuntimeError(f"LLM call failed (model={model!r}): {e}") from e
 
@@ -220,6 +319,16 @@ class ErrorLLMService:
             "If this test needs LLM evaluation, pass --llm-mode replay with a "
             "pre-populated cache file."
         )
+
+    def complete(
+        self,
+        prompt: str,
+        model: str | None = None,
+        system_prompt: str | None = None,
+        **kwargs,
+    ) -> CompletionResult:
+        self.get_completion(prompt, model, system_prompt, **kwargs)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     # No-op stubs — keep interface compatible with code that calls these.
     def _load_cache(self) -> None:  # pragma: no cover

@@ -40,6 +40,7 @@ jobs:
           - normal-behaviour-worker
           - intelligence-worker
           - stateful-eval-worker
+          - cognitive-failure-worker
     permissions:
       contents: read  # required for actions/checkout
       packages: write # required to push the image to GHCR

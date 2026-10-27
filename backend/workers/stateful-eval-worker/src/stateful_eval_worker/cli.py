@@ -37,6 +37,7 @@ def _build_worker(
     llm_api_key: Optional[str],
     llm_model_name: Optional[str],
     llm_base_model_url: Optional[str],
+    config_path: Optional[str],
     debug: bool,
 ) -> StatefulEvalWorker:
     return StatefulEvalWorker(
@@ -49,6 +50,7 @@ def _build_worker(
         llm_api_key=llm_api_key,
         llm_model_name=llm_model_name,
         llm_base_model_url=llm_base_model_url,
+        config_path=config_path,
         debug=debug,
     )
 
@@ -110,6 +112,13 @@ def _build_worker(
     help="LLM base URL (default: LLM_BASE_MODEL_URL_MCE env var)",
 )
 @click.option(
+    "--config-file",
+    "config_file",
+    type=str,
+    default=None,
+    help="Path to stateful_eval_config.yaml (default: STATEFUL_EVAL_CONFIG_PATH env var)",
+)
+@click.option(
     "--debug",
     is_flag=True,
     default=False,
@@ -150,6 +159,7 @@ def main(
     llm_api_key: Optional[str],
     llm_model_name: Optional[str],
     llm_base_model_url: Optional[str],
+    config_file: Optional[str],
     debug: bool,
     run_once: bool,
     input: Optional[str],
@@ -184,6 +194,7 @@ def main(
     _llm_api_key = llm_api_key or os.getenv("OPENAI_API_KEY", "")
     _llm_model_name = llm_model_name or os.getenv("LLM_MODEL_NAME", "gpt-4o")
     _llm_base_model_url = llm_base_model_url or os.getenv("LLM_BASE_MODEL_URL_MCE", "https://api.openai.com/v1")
+    _config_path = config_file or os.getenv("STATEFUL_EVAL_CONFIG_PATH")
     _max_inflight = resolve_max_inflight_messages(max_inflight_messages, error_subject="stateful-eval-worker")
 
     logger.info("=" * 60)
@@ -193,6 +204,7 @@ def main(
     logger.info(f"Input Queue:         {_input_queue}")
     logger.info(f"Output Queues:       {_output_queue}")
     logger.info(f"LLM Model:           {_llm_model_name}")
+    logger.info(f"Config File:         {_config_path}")
     logger.info(f"Max Inflight:        {_max_inflight}")
     logger.info(f"Debug Mode:          {debug}")
     logger.info(f"Run-once Mode:       {run_once}")
@@ -208,6 +220,7 @@ def main(
         llm_api_key=_llm_api_key,
         llm_model_name=_llm_model_name,
         llm_base_model_url=_llm_base_model_url,
+        config_path=_config_path,
         debug=debug,
     )
 

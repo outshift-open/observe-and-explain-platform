@@ -202,8 +202,9 @@ def export_llmcall_tokens_to_excel(
             return 0.0
 
         cost_query = """
-            MATCH (m:MAS {masName: $mas_name})-[]-(s:Session {sessionId: $session_id})-[]-(me:Metric {metricName: "Cost"})
-            RETURN coalesce(SUM(toFloat(me.value)), 0.0) AS mas_cost_sum
+            MATCH (m:MAS {masName: $mas_name})-[]-(s:Session {sessionId: $session_id})
+            MATCH (r:MetricResult)-[:measures]->(s), (r)-[:ofMetricType]->(me:Metric {name: "Cost"})
+            RETURN coalesce(SUM(toFloat(r.result)), 0.0) AS mas_cost_sum
         """
         cost_rows = connector.execute(
             cost_query,

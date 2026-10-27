@@ -4,6 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 import logging
+import threading
 from .types import MetricResult
 from .metadata import (
     MetricMetadata,
@@ -100,19 +101,25 @@ class Metric(ABC):
         """
         Compute metric for a batch of resources.
         Default implementation iterates compute(). Override for optimization.
+
+        The LLM calls each computation makes are accounted for: the token usage
+        and estimated cost are added to the result's metadata
+        (``evaluation_*`` keys).
         """
+        from mce.engine.usage import track_usage
+
         results = []
         for rid, ctx in zip(resources, contexts):
-            try:
-                results.append(self.compute(rid, ctx))
-            except Exception as e:
-                # Log with traceback so programming errors are visible in DEBUG mode;
-                # then capture as an error result rather than stopping the batch.
-                logger.exception(
-                    "compute() raised on metric=%s resource=%s", self.metric_id, rid
-                )
-                results.append(
-                    MetricResult(
+            with track_usage() as usage:
+                try:
+                    result = self.compute(rid, ctx)
+                except Exception as e:
+                    # Log with traceback so programming errors are visible in DEBUG mode;
+                    # then capture as an error result rather than stopping the batch.
+                    logger.exception(
+                        "compute() raised on metric=%s resource=%s", self.metric_id, rid
+                    )
+                    result = MetricResult(
                         metric_id=self.metric_id,
                         resource_id=rid,
                         provider="System",
@@ -121,16 +128,36 @@ class Metric(ABC):
                         error=str(e),
                         reasoning=f"Execution Failed: {str(e)}",
                     )
-                )
+            result.metadata.update(usage.to_metadata())
+            results.append(result)
         return results
 
-    def call_llm(self, prompt: str) -> str:
+    def call_llm(self, prompt: str, **kwargs: Any) -> str:
         """
         Call LLM using the centralized LLMService.
         Propagates exceptions so callers receive clear failures rather than
         silent garbage scores.
+
+        Keyword arguments (``temperature``, ``logprobs``, ``top_logprobs``,
+        ``sample``) are passed on to the service. The full completion (token
+        log-probabilities included) can be fetched afterwards, in the same
+        thread, with :meth:`pop_completion`.
         """
         from mce.engine.llm import LLMService
 
         service = LLMService.get_instance()
-        return service.get_completion(prompt)
+        if isinstance(service, LLMService):
+            completion = service.complete(prompt, **kwargs)
+            self._completion_tls().last = completion
+            return completion.text
+        return service.get_completion(prompt, **kwargs)
+
+    def pop_completion(self) -> Any:
+        """The last :meth:`call_llm` completion of this thread, once; else ``None``."""
+        tls = self._completion_tls()
+        completion = getattr(tls, "last", None)
+        tls.last = None
+        return completion
+
+    def _completion_tls(self) -> threading.local:
+        return self.__dict__.setdefault("_completion_local", threading.local())

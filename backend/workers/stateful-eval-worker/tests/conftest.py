@@ -6,6 +6,12 @@ import pytest
 from worker_base.queue_message import SessionDetailMessage
 
 
+@pytest.fixture(autouse=True)
+def no_price_refresh(monkeypatch):
+    """Keep the tests off the network: the LLM price table is not refreshed from LiteLLM."""
+    monkeypatch.setenv("MODEL_PRICES_REFRESH", "false")
+
+
 @pytest.fixture
 def rabbit_url():
     return "amqp://guest:guest@localhost/"
@@ -58,7 +64,10 @@ def make_session_result(
     trajectory_reasoning='{"total_fatal": 0, "fatal_failures": []}',
     unsatisfied_intents=0,
     span_metric_results=None,
+    trajectory_metrics=None,
     fatal_failures=None,
+    token_usage=None,
+    estimated_cost_usd=0.0,
 ):
     return SimpleNamespace(
         session_id=session_id,
@@ -67,5 +76,8 @@ def make_session_result(
         trajectory_reasoning=trajectory_reasoning,
         unsatisfied_intents=unsatisfied_intents,
         span_metric_results=span_metric_results or [],
+        trajectory_metrics=trajectory_metrics or [],
         fatal_failures=fatal_failures or [],
+        token_usage=SimpleNamespace(**(token_usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})),
+        cost_estimate=SimpleNamespace(estimated_cost_usd=estimated_cost_usd),
     )

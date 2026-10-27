@@ -766,10 +766,11 @@ class SymbolicClient:
         )
 
         score_query = (
-            "MATCH (s:Session {sessionId: $session_id})-[:hasMetric]->(m:Metric) "
-            "WHERE m.metricName = 'trajectory_score' "
-            "  AND m.source = 'SymbolicDiscovery' "
-            "RETURN m.value AS value, m.source AS source "
+            "MATCH (r:MetricResult)-[:measures]->(s:Session {sessionId: $session_id}), "
+            "  (r)-[:ofMetricType]->(d:Metric) "
+            "WHERE d.name = 'TrajectoryScore' "
+            "  AND d.metricProvider = 'symbolic_discovery' "
+            "RETURN r.result AS value, d.metricProvider AS source "
             "LIMIT 1"
         )
         score_records = self._fetch_all(
@@ -1147,10 +1148,11 @@ class SymbolicClient:
 
         scores_query = (
             "MATCH (mas:MAS {id: $mas_name})<-[:executesSession]-(s:Session) "
-            "MATCH (s)-[:hasMetric]->(m:Metric) "
-            "WHERE m.metricName = 'trajectory_score' "
-            "  AND m.source = 'SymbolicDiscovery' "
-            "RETURN s.sessionId AS sessionId, m.value AS score"
+            "MATCH (r:MetricResult)-[:measures]->(s), "
+            "  (r)-[:ofMetricType]->(d:Metric) "
+            "WHERE d.name = 'TrajectoryScore' "
+            "  AND d.metricProvider = 'symbolic_discovery' "
+            "RETURN s.sessionId AS sessionId, r.result AS score"
         )
         scores_records = self._fetch_all(
             scores_query,
@@ -1310,11 +1312,12 @@ class SymbolicClient:
             "MATCH (s:Session)-[]-(ma:MAS) "
             f"WHERE true {time_filter}"
             "WITH DISTINCT s, ma "
-            "MATCH (s)-[:hasMetric]->(m:Metric) "
-            "WHERE m.metricName IN ['trajectory_score', 'statefulEval'] "
-            "  AND m.reasoning IS NOT NULL "
+            "MATCH (r:MetricResult)-[:measures]->(s), "
+            "  (r)-[:ofMetricType]->(d:Metric) "
+            "WHERE d.name IN ['TrajectoryScore', 'statefulEval'] "
+            "  AND r.reasoning IS NOT NULL "
             "RETURN ma.id AS applicationName, "
-            "  collect(m.reasoning) AS reasonings"
+            "  collect(r.reasoning) AS reasonings"
         )
         rows = self._fetch_all(
             query,

@@ -75,8 +75,8 @@ spec:
               value: "{{ .Values.featureFlags.neurosymbolicEval }}"
             - name: VITE_FF_COGNITIVE_OBSERVABILITY
               value: "{{ .Values.featureFlags.cognitiveObservability }}"
-            - name: VITE_FF_L9_PROTOCOLS
-              value: "{{ .Values.featureFlags.l9Protocols }}"
+            - name: VITE_FF_COGNITION_PROTOCOLS
+              value: "{{ .Values.featureFlags.cognitionProtocols }}"
             {{- end }}
             {{- with .Values.environment }}
             {{- toYaml . | nindent 12 }}

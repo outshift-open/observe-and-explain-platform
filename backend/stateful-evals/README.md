@@ -77,7 +77,6 @@ other trace formats; write one that produces the record shape above.
 | --- | --- |
 | `evaluate_spans(spans, ...)` | Spans already in memory |
 | `evaluate_file(path, ...)` | A JSON file with a `spans` array, a JSON array of spans, or span JSONL |
-| `evaluate_session(session_id, ...)` | A session stored in the OXP database, read through the API library |
 | `EvaluationEngine(llm_config=..., options=...)` | Reusing one configuration across many trajectories |
 | `available_metrics()` | Listing the registered trajectory metrics |
 
@@ -90,8 +89,9 @@ summary = engine.evaluate_sessions(sessions.keys(), span_loader=sessions.__getit
 ```
 
 Each trajectory gets fresh state, so runs never share context or token counts.
-`evaluate_session` needs the repository's API package (`./api`, Python 3.13+) and
-its `CLICKHOUSE_*` settings.
+The library does no database access. Database sessions are read by the
+Stateful Eval worker through the OXP API (`get_session_trajectory`) and evaluated
+with `TemporalMetricsProcessor.evaluate_trajectory`.
 
 ### Async evaluation and artifact extraction
 
@@ -110,6 +110,12 @@ Span reasoning defaults to `none`; final reasoning defaults to `low`.
 Async callers use `await engine.aevaluate_spans(spans, session_id=...)` on one
 event loop and one shared HTTP client. Synchronous entry points remain available.
 
+LLM artifact organization applies to OTel input through `evaluate_spans`,
+`aevaluate_spans`, and `evaluate_file`. Normalized input through
+`TemporalMetricsProcessor.evaluate_trajectory` retains the compatibility pipeline:
+Python organizes its artifacts and span judges use the normalized 1-5 rubric.
+`artifact_organization` does not select a different pipeline for normalized input.
+
 ## Options
 
 `TemporalMetricOptions` fields most callers set:
@@ -118,6 +124,7 @@ event loop and one shared HTTP client. Synchronous entry points remain available
 | --- | --- | --- |
 | `trajectory_metrics` | `None` | Metric codes to evaluate over the trajectory context, or `["all"]`. Diagnostic only; never changes `trajectory_score` |
 | `high_level_metric_suite` | `"legacy_v1"` | Metric suite used by the final audit: `legacy_v1`, `paper_v1`, or `paper_v2` |
+| `span_pass_threshold` | `0.5` | Span metrics (`Groundedness`, `IntentRecognition`, `Relevancy`) are judged on a 1-5 rubric and normalized to `(score-1)/4` (0, 0.25, 0.5, 0.75, 1). A span metric passes at or above this value and fails below it |
 | `use_fatal_mode` | `True` | Fatal/minor audit with a binary trajectory score |
 | `fatality_threshold` | `0.69` | Severity at or above which a failure is fatal |
 | `reasoning_effort` | `"low"` | Reasoning effort for final audits and trajectory metric judges |
@@ -159,7 +166,7 @@ can change individual span judgments.
 | --- | --- |
 | `trajectory_score`, `trajectory_reasoning` | Binary trajectory verdict and why |
 | `fatal_failures`, `minor_failures` | Failures found by the audit, with span index and evidence |
-| `span_metric_results` | Per-span judgments |
+| `span_metric_results` | Per-span judgments: normalized `score` (0-1), judge `raw_score` (1-5), and `evaluation_*` usage and cost, with the span's judge usage split evenly across its metrics |
 | `trajectory_metrics` | Results of the metrics named in `trajectory_metrics` (`status` is `pass`, `fail`, `not_applicable`, or `unknown`) |
 | `token_usage`, `cost_estimate` | Model usage for the run |
 | `error` | Set when the run failed; check it first |
@@ -190,8 +197,7 @@ describes the format.
 
 ## Scripts and services
 
-- `python -m stateful_evals_be.scripts.run_session_eval` evaluates a database session (`SESSION_ID=...`)
-- The [Stateful Eval worker](../workers/stateful-eval-worker/README.md) fetches spans, calls `evaluate_spans`, and persists its metrics
+- The [Stateful Eval worker](../workers/stateful-eval-worker/README.md) reads the session trajectory from the KG, calls `evaluate_trajectory`, and persists its metrics
 
 The standalone FastAPI server is retired. Callers that used
 `POST /compute_temporal_metrics` should fetch spans themselves and call

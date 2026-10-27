@@ -94,12 +94,16 @@ async def evaluate_llm_spans(processor, spans, *, session_id, policy_override=No
             add_usage(usage, verdict["usage"])
             evaluated += 1
             operation = state.context.raw_spans[-1]
-            for metric in verdict["metrics"]:
+            for metric_index, metric in enumerate(verdict["metrics"]):
                 result = SpanMetricResult(
                     span_index=index, span_id=str(span.get("SpanId", "")),
                     trace_id=str(span.get("TraceId", "")),
                     span_type=operation["operation_type"], entity_name=operation["entity_name"],
                     metric_name=metric["metric_name"], score=metric["score"], reasoning=metric["reasoning"],
+                    **processor._metric_usage_share(
+                        verdict["usage"], metric_index, len(verdict["metrics"]),
+                        processor.llm_config.LLM_MODEL_NAME,
+                    ),
                 )
                 results.append(result)
                 if result.score == 0:

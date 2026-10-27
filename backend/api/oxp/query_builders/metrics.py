@@ -5,6 +5,15 @@
 Provides Cypher query builders for session-level and span-level metric
 retrieval from Neo4j, with optional sub-graph expansion controlled by
 a ``hops`` parameter.
+
+Metrics are read from the ontology model written by
+:mod:`oxp.query_builders.metric_graph`::
+
+    (r:MetricResult)-[:ofMetricType]->(d:Metric)   # d is the definition
+    (r:MetricResult)-[:measures]->(t)              # Session or execution element
+
+The "span" of the API is the execution element (``LLMCall``, ``ToolCall``,
+``AgentCall``...) carrying that ``spanId``.
 """
 
 from __future__ import annotations
@@ -33,50 +42,43 @@ def _to_iso(value: str) -> str:
     return value
 
 
-def session_metrics_query(
-    session_id: str,
-    *,
-    hops: int = 1,
-) -> tuple[str, dict[str, Any]]:
-    """Return metrics for a session, with optional sub-graph of *hops* depth.
+# Execution elements carry the span id (everything but the Session).
+_EXECUTION_LABELS = "LLMCall|ToolCall|AgentCall|CapabilityCall|MASCall|ProcessingCall"
 
-    When ``hops`` is 0, only the metrics directly attached to the session node
-    are returned.  Each additional hop expands the traversal through related
-    nodes (states, spans, embeddings, etc.) and collects any metric nodes
-    encountered along the way.
-    """
+# Dict projected for each result in the ``metrics`` list of a session/span lookup.
+_METRIC_MAP = """{
+                name: d.name,
+                result: r.result,
+                value: r.result,
+                provider: d.metricProvider,
+                metric_id: d.name,
+                source: d.metricProvider,
+                reasoning: r.reasoning
+            }"""
+
+# Sub-graph expansion must not walk through a (shared) ``Metric`` definition:
+# it links every result of that metric, so it would pull in unrelated sessions.
+_NO_DEFINITION = "none(n IN nodes(path) WHERE n:Metric)"
+
+
+def _metrics_with_subgraph(anchor: str, var: str, key: str, hops: int) -> str:
+    """Query returning the results measuring ``var`` plus, if ``hops`` > 0, its sub-graph."""
     if hops <= 0:
-        query = """
-        MATCH (session:Session {sessionId: $session_id})
-        OPTIONAL MATCH (session)-[:hasMetric]->(m:Metric)
+        return f"""
+        {anchor}
+        OPTIONAL MATCH (r:MetricResult)-[:measures]->({var}), (r)-[:ofMetricType]->(d:Metric)
         RETURN
-            session.sessionId AS sessionId,
-            collect(DISTINCT {
-                name: m.metricName,
-                result: m.metricResult,
-                value: m.value,
-                provider: m.provider,
-                metric_id: coalesce(m.metricId, m.metricName),
-                source: m.source,
-                reasoning: m.reasoning
-            }) AS metrics,
+            {var}.{key} AS {key},
+            collect(DISTINCT {_METRIC_MAP}) AS metrics,
             null AS subgraph
         """
-    else:
-        query = f"""
-        MATCH (session:Session {{sessionId: $session_id}})
-        OPTIONAL MATCH (session)-[:hasMetric]->(m:Metric)
-        WITH session, collect(DISTINCT {{
-            name: m.metricName,
-            result: m.metricResult,
-            value: m.value,
-            provider: m.provider,
-            metric_id: coalesce(m.metricId, m.metricName),
-            source: m.source,
-            reasoning: m.reasoning
-        }}) AS metrics
-        OPTIONAL MATCH path = (session)-[*1..{hops}]-(related)
-        WITH session, metrics,
+    return f"""
+        {anchor}
+        OPTIONAL MATCH (r:MetricResult)-[:measures]->({var}), (r)-[:ofMetricType]->(d:Metric)
+        WITH {var}, collect(DISTINCT {_METRIC_MAP}) AS metrics
+        OPTIONAL MATCH path = ({var})-[*1..{hops}]-(related)
+        WHERE {_NO_DEFINITION}
+        WITH {var}, metrics,
              collect(DISTINCT {{
                  id: elementId(related),
                  labels: labels(related),
@@ -88,10 +90,30 @@ def session_metrics_query(
                  endId: elementId(endNode(relationships(path)[-1]))
              }}) AS edges
         RETURN
-            session.sessionId AS sessionId,
+            {var}.{key} AS {key},
             metrics,
             {{nodes: nodes, edges: edges}} AS subgraph
         """
+
+
+def session_metrics_query(
+    session_id: str,
+    *,
+    hops: int = 1,
+) -> tuple[str, dict[str, Any]]:
+    """Return metrics for a session, with optional sub-graph of *hops* depth.
+
+    When ``hops`` is 0, only the results measuring the session node are
+    returned.  Each additional hop expands the traversal through related
+    nodes (states, calls, embeddings, results...) and returns them as a
+    sub-graph; ``Metric`` definitions are not traversed.
+    """
+    query = _metrics_with_subgraph(
+        "MATCH (session:Session {sessionId: $session_id})",
+        "session",
+        "sessionId",
+        hops,
+    )
     return query, {"session_id": session_id}
 
 
@@ -103,151 +125,30 @@ def span_metrics_query(
 ) -> tuple[str, dict[str, Any]]:
     """Return metrics for a span, with optional sub-graph of *hops* depth.
 
-    If *session_id* is also given the match is stricter, but it is not
-    required — the query works with ``span_id`` alone.
+    The span is the execution element (call) with that ``spanId``.  If
+    *session_id* is also given the match is stricter (the element must belong
+    to that session), but it is not required.
     """
-    # Build the anchor match
-    if session_id:
-        anchor = (
-            "MATCH (session:Session {sessionId: $session_id})"
-            "-[:hasSpan]->(span:Span {spanId: $span_id})"
-        )
-    else:
-        anchor = "MATCH (span:Span {spanId: $span_id})"
-
-    if hops <= 0:
-        query = f"""
-        {anchor}
-        OPTIONAL MATCH (span)-[:hasMetric]->(m:Metric)
-        RETURN
-            span.spanId AS spanId,
-            collect(DISTINCT {{
-                name: m.metricName,
-                result: m.metricResult,
-                value: m.value,
-                provider: m.provider,
-                metric_id: coalesce(m.metricId, m.metricName),
-                source: m.source,
-                reasoning: m.reasoning
-            }}) AS metrics,
-            null AS subgraph
-        """
-    else:
-        query = f"""
-        {anchor}
-        OPTIONAL MATCH (span)-[:hasMetric]->(m:Metric)
-        WITH span, collect(DISTINCT {{
-            name: m.metricName,
-            result: m.metricResult,
-            value: m.value,
-            provider: m.provider,
-            metric_id: coalesce(m.metricId, m.metricName),
-            source: m.source,
-            reasoning: m.reasoning
-        }}) AS metrics
-        OPTIONAL MATCH path = (span)-[*1..{hops}]-(related)
-        WITH span, metrics,
-             collect(DISTINCT {{
-                 id: elementId(related),
-                 labels: labels(related),
-                 properties: properties(related)
-             }}) AS nodes,
-             collect(DISTINCT {{
-                 type: type(relationships(path)[-1]),
-                 startId: elementId(startNode(relationships(path)[-1])),
-                 endId: elementId(endNode(relationships(path)[-1]))
-             }}) AS edges
-        RETURN
-            span.spanId AS spanId,
-            metrics,
-            {{nodes: nodes, edges: edges}} AS subgraph
-        """
-
+    anchor = f"MATCH (span:{_EXECUTION_LABELS} {{spanId: $span_id}})"
     params: dict[str, Any] = {"span_id": span_id}
     if session_id:
+        anchor += "\n        WHERE span.sessionId = $session_id"
         params["session_id"] = session_id
-    return query, params
-
-
-# ── write queries ─────────────────────────────────────────────────────────────
-
-
-def write_session_metric_query(
-    session_id: str,
-    metric_name: str,
-    metric_value: float | None,
-    provider: str = "API",
-    metric_id: str = "",
-    source: str = "",
-    reasoning: str = "",
-) -> tuple[str, dict[str, Any]]:
-    """Build a MERGE query to attach a metric to a session node."""
-    now = datetime.now(timezone.utc).isoformat()
-    query = """
-    MERGE (session:Session {sessionId: $session_id})
-    MERGE (session)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $session_id})
-    SET m.metricResult = $metric_result,
-        m.value        = $metric_value,
-        m.provider     = $provider,
-        m.metricId     = $metric_id,
-        m.source       = $source,
-        m.reasoning    = $reasoning,
-        m.timestamp    = datetime($timestamp)
-    RETURN session.sessionId AS sessionId, m.metricName AS metricName
-    """
-    return query, {
-        "session_id": session_id,
-        "metric_name": metric_name,
-        "metric_result": metric_value,
-        "metric_value": metric_value,
-        "provider": provider,
-        "metric_id": metric_id,
-        "source": source,
-        "reasoning": reasoning,
-        "timestamp": now,
-    }
-
-
-def write_span_metric_query(
-    session_id: str,
-    span_id: str,
-    metric_name: str,
-    metric_value: float | None,
-    provider: str = "API",
-    metric_id: str = "",
-    source: str = "",
-    reasoning: str = "",
-) -> tuple[str, dict[str, Any]]:
-    """Build a MERGE query to attach a metric to a span node."""
-    now = datetime.now(timezone.utc).isoformat()
-    query = """
-    MERGE (session:Session {sessionId: $session_id})
-    MERGE (session)-[:hasSpan]->(span:Span {spanId: $span_id})
-    MERGE (span)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $span_id})
-    SET m.metricResult = $metric_result,
-        m.value        = $metric_value,
-        m.provider     = $provider,
-        m.metricId     = $metric_id,
-        m.source       = $source,
-        m.reasoning    = $reasoning,
-        m.timestamp    = datetime($timestamp)
-    RETURN span.spanId AS spanId, m.metricName AS metricName
-    """
-    return query, {
-        "session_id": session_id,
-        "span_id": span_id,
-        "metric_name": metric_name,
-        "metric_result": metric_value,
-        "metric_value": metric_value,
-        "provider": provider,
-        "metric_id": metric_id,
-        "source": source,
-        "reasoning": reasoning,
-        "timestamp": now,
-    }
+    return _metrics_with_subgraph(anchor, "span", "spanId", hops), params
 
 
 # ── category / application-level read queries ────────────────────────────────
+
+_ROW_PROJECTION = """
+                s.sessionId    AS sessionId,
+                d.name         AS metricName,
+                r.result       AS metricResult,
+                r.result       AS value,
+                d.metricProvider AS provider,
+                d.name         AS metricId,
+                d.metricProvider AS source,
+                r.reasoning    AS reasoning,
+                r.timestamp    AS timestamp"""
 
 
 def metrics_query(
@@ -261,14 +162,13 @@ def metrics_query(
     """Return metrics for an application filtered by a list of metric names.
 
     Traversal (no agent filter):
-        ``Session -[:executesSession]-> MAS {id}``
-        ``Session -[:hasMetric|measuresCall]- Metric``
-    Traversal (with agent filter):
-        ``Session -[:executesSession]-> MAS {id}``
-        ``Session -[:hasSpan]-> Span {agentId} -[:hasMetric|measuresCall]- Metric``
+        ``MAS {id} <-[:executesSession]- Session <-[:measures]- MetricResult``
+    Traversal (with agent filter), additionally the results measuring the
+    calls of that agent in the session:
+        ``Session <- AgentCall {agentName} -[:hasLLMCall|hasToolCall*0..1]-> t
+        <-[:measures]- MetricResult``
 
-    Both ``hasMetric`` (Session→Metric) and ``measuresCall``
-    (Metric→Session) relationship directions are supported.
+    The definition (name, provider) is reached through ``ofMetricType``.
     """
     time_clauses: list[str] = []
     params: dict[str, Any] = {
@@ -278,69 +178,38 @@ def metrics_query(
 
     if start_time:
         params["start_time"] = _to_iso(start_time)
-        time_clauses.append("m.timestamp >= datetime($start_time)")
+        time_clauses.append("r.timestamp >= datetime($start_time)")
     if end_time:
         params["end_time"] = _to_iso(end_time)
-        time_clauses.append("m.timestamp <= datetime($end_time)")
+        time_clauses.append("r.timestamp <= datetime($end_time)")
 
     where = ""
     if time_clauses:
         where = "AND " + " AND ".join(time_clauses)
 
-    span_metric_filter = ""
-
     if agent_id:
         params["agent_id"] = agent_id
-        # Filter to sessions where the named agent participated.
-        # Return both session-attached metrics and span-attached metrics
-        # for spans associated with the requested agent.
+        # Return both session-measuring results and results measuring the
+        # agent's calls (the agent call itself and its LLM/tool calls).
         query = f"""
         MATCH (s:Session)-[:executesSession]->(:MAS {{id: $application_id}})
         WHERE EXISTS {{
             MATCH (a:AgentCall {{sessionId: s.sessionId, agentName: $agent_id}})
         }}
         CALL (s) {{
-            MATCH (s)-[:hasMetric|measuresCall]-(m:Metric)
-            WHERE m.metricName IN $metric_names
+            MATCH (s)<-[:measures]-(r:MetricResult)-[:ofMetricType]->(d:Metric)
+            WHERE d.name IN $metric_names
             {where}
-            RETURN
-                s.sessionId    AS sessionId,
-                m.metricName   AS metricName,
-                m.metricResult AS metricResult,
-                m.value        AS value,
-                m.provider     AS provider,
-                coalesce(m.metricId, m.metricName) AS metricId,
-                m.source       AS source,
-                m.reasoning    AS reasoning,
-                m.timestamp    AS timestamp
+            RETURN {_ROW_PROJECTION}
 
             UNION
 
-            MATCH (s)-[:hasSpan]->(span:Span)-[:hasMetric|measuresCall]-(m:Metric)
-            WHERE m.metricName IN $metric_names
-                        {span_metric_filter}
-                            AND (
-                                coalesce(span.agentId, span.agentName, span.agent_id) = $agent_id
-                                OR EXISTS {{
-                                        MATCH (ac:AgentCall {{sessionId: s.sessionId, agentName: $agent_id}})
-                                        WHERE coalesce(ac.spanId, ac.span_id) = span.spanId
-                                }}
-                                OR EXISTS {{
-                                        MATCH (ac:AgentCall {{sessionId: s.sessionId, agentName: $agent_id}})-[:invokesTool|invokesLLM]->(exec)
-                                        WHERE coalesce(exec.spanId, exec.span_id) = span.spanId
-                                }}
-                            )
+            MATCH (ac:AgentCall {{sessionId: s.sessionId, agentName: $agent_id}})
+                  -[:hasLLMCall|hasToolCall*0..1]->(t)
+            MATCH (t)<-[:measures]-(r:MetricResult)-[:ofMetricType]->(d:Metric)
+            WHERE d.name IN $metric_names
             {where}
-            RETURN
-                s.sessionId    AS sessionId,
-                m.metricName   AS metricName,
-                m.metricResult AS metricResult,
-                m.value        AS value,
-                m.provider     AS provider,
-                coalesce(m.metricId, m.metricName) AS metricId,
-                m.source       AS source,
-                m.reasoning    AS reasoning,
-                m.timestamp    AS timestamp
+            RETURN {_ROW_PROJECTION}
         }}
         RETURN DISTINCT
             sessionId,
@@ -357,48 +226,16 @@ def metrics_query(
     else:
         query = f"""
         MATCH (s:Session)-[:executesSession]->(:MAS {{id: $application_id}})
-        MATCH (s)-[:hasMetric|measuresCall]-(m:Metric)
-        WHERE m.metricName IN $metric_names
+        MATCH (s)<-[:measures]-(r:MetricResult)-[:ofMetricType]->(d:Metric)
+        WHERE d.name IN $metric_names
         {where}
-        RETURN
-            s.sessionId    AS sessionId,
-            m.metricName   AS metricName,
-            m.metricResult AS metricResult,
-            m.value        AS value,
-            m.provider     AS provider,
-            coalesce(m.metricId, m.metricName) AS metricId,
-            m.source       AS source,
-            m.reasoning    AS reasoning,
-            m.timestamp    AS timestamp
-        ORDER BY m.metricName, m.timestamp
+        RETURN {_ROW_PROJECTION}
+        ORDER BY metricName, timestamp
         """
     return query, params
 
 
-# ── delete / aggregation queries ─────────────────────────────────────────────
-
-
-def clean_metrics_query(session_id: str | None) -> tuple[str, dict[str, Any]]:
-    """Build a DELETE query for metric nodes.
-
-    When *session_id* is given only the metrics attached to that session
-    (and its child nodes) are deleted.  When *None* all Metric nodes are
-    removed.
-    """
-    if session_id:
-        return (
-            """
-            MATCH (r)-[:hasMetric]->(m:Metric)
-            WHERE r.sessionId = $sid OR (r:Session AND r.sessionId = $sid)
-            DETACH DELETE m
-            RETURN count(m) AS deleted
-            """,
-            {"sid": session_id},
-        )
-    return (
-        "MATCH (m:Metric) DETACH DELETE m RETURN count(m) AS deleted",
-        {},
-    )
+# ── aggregation queries ──────────────────────────────────────────────────────
 
 
 def metrics_over_time_query(
@@ -415,8 +252,9 @@ def metrics_over_time_query(
     ``bucket`` must be a valid ``datetime.truncate`` unit (minute / hour / day).
     """
     where_parts = [
-        "m.timestamp >= datetime($start)",
-        "m.value IS NOT NULL",
+        "d.name = $metric_id",
+        "r.timestamp >= datetime($start)",
+        "r.result IS NOT NULL",
     ]
     params: dict[str, Any] = {
         "metric_id": metric_id,
@@ -424,23 +262,23 @@ def metrics_over_time_query(
         "bucket": bucket,
     }
     if end is not None:
-        where_parts.append("m.timestamp <= datetime($end)")
+        where_parts.append("r.timestamp <= datetime($end)")
         params["end"] = end.isoformat()
     if app_name is not None:
         where_parts.append("s.appName = $app_name")
         params["app_name"] = app_name
     if agent_id is not None:
         where_parts.append(
-            "EXISTS { MATCH (s)-[:hasSpan]->(:Span {agentId: $agent_id}) }"
+            "EXISTS { MATCH (:AgentCall {sessionId: s.sessionId, agentName: $agent_id}) }"
         )
         params["agent_id"] = agent_id
 
     where_clause = "\n  AND ".join(where_parts)
     query = f"""
-    MATCH (s:Session)-[:hasMetric]->(m:Metric {{metricName: $metric_id}})
+    MATCH (r:MetricResult)-[:measures]->(s:Session), (r)-[:ofMetricType]->(d:Metric)
     WHERE {where_clause}
-    WITH datetime.truncate($bucket, m.timestamp) AS bucket,
-         toFloat(m.value) AS v
+    WITH datetime.truncate($bucket, r.timestamp) AS bucket,
+         toFloat(r.result) AS v
     RETURN toString(bucket) AS bucket,
            avg(v)          AS avg_value,
            min(v)          AS min_value,
@@ -451,55 +289,6 @@ def metrics_over_time_query(
     return query, params
 
 
-def write_generic_metric_query(
-    resource_id: str,
-    metric_name: str,
-    metric_value: float | None,
-    provider: str = "API",
-    metric_id: str = "",
-    source: str = "",
-    reasoning: str = "",
-) -> tuple[str, dict[str, Any]]:
-    """Build a MERGE query to attach a metric to a Session OR Span node.
-
-    This handles both Session nodes (sessionId) and Span nodes (spanId)
-    without forcing the creation of a restricted :Session node when the ID
-    actually belongs to a Span.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-
-    query = """
-    OPTIONAL MATCH (s:Session {sessionId: $resource_id})
-    OPTIONAL MATCH (p:Span {spanId: $resource_id})
-    WITH coalesce(s, p) as node
-    WHERE node IS NOT NULL
-    MERGE (node)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $resource_id})
-    SET m.metricResult = $metric_result,
-        m.value        = $metric_value,
-        m.provider     = $provider,
-        m.metricId     = $metric_id,
-        m.source       = $source,
-        m.reasoning    = $reasoning,
-        m.timestamp    = datetime($timestamp)
-    RETURN elementId(node) as nodeId, m.metricName AS metricName
-    """
-    return query, {
-        "resource_id": resource_id,
-        "metric_name": metric_name,
-        "metric_result": metric_value,
-        "metric_value": metric_value,
-        "provider": provider,
-        "metric_id": metric_id,
-        "source": source,
-        "reasoning": reasoning,
-        "timestamp": now,
-    }
-
-
-# Needed for demo
-# TODO fix
-
-
 def get_application_metrics_timeline(
     application_id: str,
     metrics: list[str],
@@ -508,13 +297,12 @@ def get_application_metrics_timeline(
 ) -> tuple[str, dict[str, Any]]:
     params = {"application_id": application_id, "metrics": metrics}
     query = """
-    MATCH (s:Session)-[]-(mas:MAS {id: $application_id})
-        MATCH (s)-[]-(m:Metric)
-    WHERE m.metricName IN $metrics
-            AND m.metricName IS NOT NULL
+    MATCH (s:Session)-[:executesSession]->(:MAS {id: $application_id})
+    MATCH (s)<-[:measures]-(r:MetricResult)-[:ofMetricType]->(d:Metric)
+    WHERE d.name IN $metrics
             AND s.startTime IS NOT NULL
-            AND m.metricResult IS NOT NULL
-    WITH m.metricName AS metricName, s.startTime AS startTime, m.metricResult AS metricValue
+            AND r.result IS NOT NULL
+    WITH d.name AS metricName, s.startTime AS startTime, r.result AS metricValue
     ORDER BY s.startTime
     RETURN
         metricName,
@@ -553,9 +341,10 @@ def reliability_metrics(
     WITH collect({col1: DataType, col2: Reliability}) AS reliabilityStats
 
     // Completion Rate
-    MATCH (m:Metric)-[]-(s:Session)-[]-(mas:MAS {id:$application_id})
-    WHERE m.metricName IN ['ToolErrorRate', 'LLMErrorRate']
-    WITH reliabilityStats, 1 - AVG(m.metricResult) AS CompletionRate
+    MATCH (:MAS {id: $application_id})<-[:executesSession]-(s:Session)
+        <-[:measures]-(r:MetricResult)-[:ofMetricType]->(d:Metric)
+    WHERE d.name IN ['ToolErrorRate', 'LLMErrorRate']
+    WITH reliabilityStats, 1 - AVG(r.result) AS CompletionRate
 
     WITH reliabilityStats + [{col1: "CompletionRate", col2: CompletionRate}] AS finalResults
     UNWIND finalResults AS row

@@ -1,0 +1,288 @@
+{
+  "failures": [
+    {
+      "code": "IR-1",
+      "name": "Individual Representational Failure",
+      "locus": "Individual",
+      "function": "Representational",
+      "summary": "Agent loses earlier instructions as its context window fills.",
+      "signature": [
+        "The agent's output contradicts or omits a constraint present earlier in the same conversation, with no indication it was intentionally dropped",
+        "Providing a compressed summary of earlier turns materially improves output quality, confirming the failure is a storage issue rather than a reasoning one",
+        "The agent, when asked to repeat its current task constraints, omits one or more explicit in the original prompt"
+      ],
+      "heuristic": "Mark as present if an output defect is traceable to a specific instruction present in the prompt but absent from the agent's evident working representation, and the distance in tokens between the instruction and the defect is large."
+    },
+    {
+      "code": "DR-1",
+      "name": "Semantic and Ontological Misalignment",
+      "locus": "Dyadic",
+      "function": "Representational",
+      "summary": "Agents use the same word to mean different things.",
+      "signature": [
+        "The same input term is mapped to different thresholds or categories by different agents",
+        "The receiving agent's output is internally coherent but violates the sender's intended meaning of at least one key term",
+        "Rephrasing the same concept with explicit operational definitions materially changes output quality",
+        "A semantic oracle or rubric labels at least one key interpretation as incorrect, while the agent reports no uncertainty"
+      ],
+      "heuristic": "Mark as present if 2 or more indicators appear, including at least one explicit meaning or threshold mismatch traceable to the interface between two (or more) specific agents."
+    },
+    {
+      "code": "DR-2",
+      "name": "Representational Fidelity Loss at Interface",
+      "locus": "Dyadic",
+      "function": "Representational",
+      "summary": "Information is physically lost or truncated in transit — the receiver never gets what the sender produced.",
+      "signature": [
+        "Agent B's output is wrong or degraded specifically in dimensions that were present in Agent A's output but are absent from the message B received",
+        "Agent B processes the received message without flagging any missing elements — it does not know what was lost",
+        "The loss is consistent and repeatable: the same information is lost on every message of that format pair (DR-2-FI) or through that relay agent (DR-2-PT)",
+        "Transmitting Agent A's output directly to Agent B, bypassing the format conversion or relay, produces a correct output — confirming the interface transformation as the cause",
+        "Agent A's output, inspected directly, contains the information that is missing from Agent B's input"
+      ],
+      "heuristic": "Mark as present if Agent B's output is missing or degraded on a specific information dimension, Agent A's output contains that dimension, and the loss is traceable to a format transformation or relay compression at the A→B interface rather than to Agent B's interpretation of content it received."
+    },
+    {
+      "code": "CR-1",
+      "name": "Shared Task Model Failure",
+      "locus": "Collective",
+      "function": "Representational",
+      "summary": "Agents start with incompatible understandings of what the task requires.",
+      "signature": [
+        "Agents independently describe the task's success criteria with non-identical answers that cannot both be correct simultaneously",
+        "The final output violates a constraint explicit in the original prompt with no agent acknowledging the violation",
+        "Injecting an explicit shared canonical task model available to all agents materially improves system-level output quality"
+      ],
+      "heuristic": "Mark as present if two or more agents demonstrate incompatible operating assumptions about the task that cannot be attributed to a specific bilateral handoff failure, and at least one assumption causes a downstream failure."
+    },
+    {
+      "code": "CR-2",
+      "name": "Shared State Degradation",
+      "locus": "Collective",
+      "function": "Representational",
+      "summary": "Shared memory becomes inconsistent because agents write to it concurrently without coordination.",
+      "signature": [
+        "Agents operating from the same shared artifact at different times produce different outputs, confirming the artifact's state is inconsistent",
+        "The inconsistency is not attributable to any single agent write or bilateral exchange",
+        "Injecting a canonical reference document materially improves system-level output quality",
+        "The failure does not occur in a system with serialized, governed write access"
+      ],
+      "heuristic": "Mark as present if two or more agents produce outputs inconsistent with each other in ways traceable to reading from a shared artifact at different states, and no single agent or handoff is the identifiable cause."
+    },
+    {
+      "code": "IC-1",
+      "name": "Intention Stability Failure",
+      "locus": "Individual",
+      "function": "Coordinative",
+      "summary": "Agent has the right commitment but drops it under interference.",
+      "signature": [
+        "An agent drops a prior commitment mid-run when presented with a competing input, without principled justification",
+        "The abandonment occurs despite no new evidence that the commitment is unachievable",
+        "Re-issuing the original commitment restores correct behavior",
+        "The failure occurs even when no communication breakdown is present"
+      ],
+      "heuristic": "Mark as present if an agent abandons a commitment without new evidence that the commitment is unachievable, and re-issuance of the commitment restores correct behavior."
+    },
+    {
+      "code": "IC-2",
+      "name": "Plan Revision Failure",
+      "locus": "Individual → Dyadic",
+      "function": "Coordinative",
+      "summary": "Agent has the right plan but fails to revise it when context changes.",
+      "signature": [
+        "An agent continues executing a plan valid at formation but whose preconditions have changed, without acknowledging the change",
+        "The partner's state has visibly changed in the trace but no plan revision event follows",
+        "Introducing an explicit partner-state monitoring step resolves the failure",
+        "IC-2 and CC-4 can co-occur: when no state broadcast mechanism exists (CC-4), the partner state change never reaches the agent, making the absence of revision appear as IC-2. Distinguish by checking whether the agent had access to the state change — if it did not, the root is CC-4; if it did but still failed to revise, the root is IC-2"
+      ],
+      "heuristic": "Mark as present if a plan continues execution after the partner state change that invalidates its preconditions, and an explicit re-evaluation step resolves the failure."
+    },
+    {
+      "code": "DC-1",
+      "name": "Communication Policy Inefficiency",
+      "locus": "Dyadic",
+      "function": "Coordinative",
+      "summary": "Agents communicate too much, too little, or with the wrong signal density.",
+      "signature": [
+        "Repeated verbose exchanges where later turns mostly restate prior information with little net-new decision content",
+        "Critical decision variables remain unresolved despite high communication volume",
+        "Final synthesis quality is impacted by communication overhead",
+        "In a multicast channel, at least one recipient misses or misweights a decision-relevant signal that a differentiated (audience-designed) message would have surfaced for it specifically"
+      ],
+      "heuristic": "Mark as present if both hold: (1) communication-overhead evidence is present, and (2) there is observable decision impact attributable to policy inefficiency rather than semantic or normative failures."
+    },
+    {
+      "code": "DC-2",
+      "name": "Illocutionary Misidentification",
+      "locus": "Dyadic",
+      "function": "Coordinative",
+      "summary": "Agent mistakes what kind of speech act it received — a directive treated as a suggestion.",
+      "signature": [
+        "An agent treats a directive as optional and proceeds with a prior plan without flagging the conflict",
+        "An agent treats a commissive as informational and does not update behavioral expectations",
+        "A soft recommendation escalates to a hard constraint through successive agents",
+        "Re-issuing the same content with an explicit illocutionary marker materially changes agent behavior"
+      ],
+      "heuristic": "Mark as present if agent behavior is inconsistent with the normative force of the received message, and re-issuing the same content with an explicit illocutionary marker changes the outcome."
+    },
+    {
+      "code": "DC-3",
+      "name": "Negotiation and Consensus Failure",
+      "locus": "Dyadic",
+      "function": "Coordinative",
+      "summary": "Agents exchange positions but never issue binding proposals that create obligations.",
+      "signature": [
+        "Conflicting recommendations are produced without any proposal-counterproposal cycle",
+        "Agents proceed as if a prior commitment were settled when no commissive was issued or acknowledged",
+        "Misaligned commitments accumulate across turns without triggering repair",
+        "Introducing an explicit negotiation turn with required commissive-acknowledgment structure resolves the conflict"
+      ],
+      "heuristic": "Mark as present if conflicting agent outputs co-exist at any point in the trace and no proposal-counterproposal-acknowledgment sequence precedes them, and the system architecture requires negotiation (peer or iterative orchestrator) rather than synthesis (collect-and-synthesise)."
+    },
+    {
+      "code": "DC-4",
+      "name": "Task Delegation Failure",
+      "locus": "Dyadic",
+      "function": "Coordinative",
+      "summary": "Agent delegates a task to the wrong peer because its model of peer capabilities is inaccurate.",
+      "signature": [
+        "The receiving agent produces an output that is internally coherent and complete by its own understanding of the task, but violates the delegating agent's intent on at least one dimension (scope, capability match, completion standard, or operating constraint)",
+        "Neither agent flags the failure — both believe the delegation was adequate",
+        "The failure is fully resolved by adding the missing element (scope enumeration, correct agent selection, acceptance criteria, or constraint) to the delegation message",
+        "The failure is traceable to a specific delegation event, not to the system's overall decomposition structure"
+      ],
+      "heuristic": "Mark as present if a specific delegation event can be identified where the delegation message did not fully encode what the receiving agent needed, and adding the missing element to that message resolves the failure. Classify the sub-type by identifying which dimension was inadequate: task boundary (SS), agent selection (CM), completion condition (AC), or operating constraint (CO)."
+    },
+    {
+      "code": "CC-1",
+      "name": "Task Decomposition and Role Allocation Failure",
+      "locus": "Collective",
+      "function": "Coordinative",
+      "summary": "The system's task or role allocation has structural gaps or conflicts — whether roles were defined wrongly or never defined at all.",
+      "signature": [
+        "The overall task allocation does not cover the full scope of the original request, with gaps only detectable at final output evaluation",
+        "Two or more agents independently perform the same subtask, producing duplicate or conflicting outputs with no coordination mechanism",
+        "The orchestrator or system must re-plan mid-run due to structural allocation errors *Variant A (directed MAS) additionally:*",
+        "A critical subtask is performed by no agent and no agent recognises the gap *Variant B (undirected MAS) additionally:*",
+        "Two agents independently produce outputs assuming the same unassigned coordination role with inconsistent decisions",
+        "Neither agent flags the role overlap; each proceeds as if its role claim is uncontested",
+        "Introducing an explicit role-negotiation protocol at initialization resolves the failure"
+      ],
+      "heuristic": "Mark as present if a structural gap or conflict in the task or role allocation is observable that cannot be attributed to any single delegation decision. For Variant B, additionally check whether the conflict involves two agents claiming the same unassigned coordination role rather than a defined role being incorrectly filled. If the failure is traceable to one specific A→B delegation event, classify as DC-4 instead."
+    },
+    {
+      "code": "CC-2",
+      "name": "Collective Goal Coordination Failure",
+      "locus": "Collective",
+      "function": "Coordinative",
+      "summary": "No mechanism exists — at design time or runtime — for agents to jointly hold and coordinate their pursuit of the collective goal.",
+      "signature": [
+        "Individual agent outputs are each locally valid, but the aggregate fails the original goal",
+        "No single agent output shows evidence of failure, yet the system output does",
+        "Agents show no evidence of modelling each other's role in the joint pursuit",
+        "Agents resolve trade-offs or ambiguity independently and differently, with no coordination event to align their resolutions",
+        "The failure persists when all agents are given the same unambiguous task specification",
+        "Introducing a joint goal coordination structure — not just a clearer brief — materially improves the outcome"
+      ],
+      "heuristic": "Mark as present if individual outputs are locally acceptable but the system output fails the original goal, and the failure persists when all agents are given the same unambiguous task specification. If providing a clearer specification resolves the failure, classify as CR-1 instead."
+    },
+    {
+      "code": "CC-3",
+      "name": "Incomplete Synthesis",
+      "locus": "Collective",
+      "function": "Coordinative",
+      "summary": "Orchestrator commits a final output without reconciling conflicting sub-agent results.",
+      "signature": [
+        "Conflicting agent outputs for the same decision variable are present in the trace and no reconciliation event precedes commit",
+        "The final output is a locally selected but globally unjustified synthesis",
+        "No agent raises the conflict at synthesis; each assumes the others have resolved it",
+        "Introducing an explicit synthesis protocol with reconciliation criteria resolves the failure"
+      ],
+      "heuristic": "Mark as present if conflicting agent outputs exist for the same decision variable at synthesis time, no reconciliation step is present, and the system architecture designates a central synthesiser."
+    },
+    {
+      "code": "CC-4",
+      "name": "Situational State Synchronisation Failure",
+      "locus": "Individual → Collective",
+      "function": "Coordinative",
+      "summary": "No mechanism broadcasts situational updates to all agents, so models of current state silently diverge during execution.",
+      "signature": [
+        "An agent acts on a situational assumption that a peer has already updated without broadcasting the change",
+        "Agents proceed as if a prior decision were settled when it was not, or open when already committed, with no synchronisation event having occurred",
+        "Mid-run outputs from different agents are mutually inconsistent with respect to current system state, not just final outputs",
+        "Introducing an explicit state-broadcast protocol — requiring agents to announce situational updates when they occur — resolves the divergence",
+        "The divergence cannot be traced to a single bilateral handoff failure; it accumulated across multiple turns"
+      ],
+      "heuristic": "Mark as present if agents demonstrably hold incompatible situational models at any point in the run — not only at commit — and no state synchronisation mechanism was in place to prevent the divergence from accumulating. Distinguish from IC-2 by checking whether the failure is a single agent's missed revision (IC-2) or a systemic absence of cross-agent state broadcasting (CC-4)."
+    },
+    {
+      "code": "IE-1",
+      "name": "Individual Metacognitive Blindness",
+      "locus": "Individual",
+      "function": "Epistemic",
+      "summary": "Agent does not know what it does not know, and proceeds with false confidence.",
+      "signature": [
+        "An agent proceeds on unacknowledged unknowns that are later responsible for failure",
+        "An agent uses high-confidence language on claims that are objectively unverified",
+        "The agent, when queried, cannot provide provenance or verification for a key claim it stated confidently"
+      ],
+      "heuristic": "Mark as present if an unresolved-critical-unknown event occurs where the agent shows no awareness of the gap, or if high-confidence language is used on a claim for which no verification evidence exists in the trace."
+    },
+    {
+      "code": "DE-1",
+      "name": "Peer Knowledge Modeling Failure",
+      "locus": "Dyadic",
+      "function": "Epistemic",
+      "summary": "Agent routes a query to a peer that doesn't hold the knowledge, or misjudges which of  several peer replies to trust.",
+      "signature": [
+        "DE-1-MR: An agent queries a peer (or a set of peers via broadcast) that does not own the required knowledge, when a correct knowledge-holding agent was available and reachable but not included or not consulted; clarification loops repeat with no net reduction of uncertainty; a capability directory or explicit routing protocol resolves the failure.",
+        "DE-1-CM: Two or more peer replies conflict on the same query; the less accurate reply is stated with higher confidence; the consuming agent adopts the less accurate reply without documented justification; no designated synthesiser or emergent group dynamic is present to account for the choice; weighting replies by track record or requiring justification resolves the failure."
+      ],
+      "heuristic": "For DE-1-MR, mark as present if a misrouting event occurs where a correct knowledge-holding agent was available but not reached. For DE-1-CM, mark as present if conflicting peer replies exist in the trace, the less accurate one is adopted, the adopting agent is not a designated synthesiser, and the choice is not attributable to an emergent multi-agent dynamic."
+    },
+    {
+      "code": "CE-1",
+      "name": "Verification and Epistemic Control Failure",
+      "locus": "Collective",
+      "function": "Epistemic",
+      "summary": "The system commits a confident output without a collective checking step — with or without contradictions present.",
+      "signature": [
+        "The system commits a final output without any explicit collective verification step in the trace, regardless of whether contradictions are present",
+        "Confidence language is strong while provenance or verification metadata is absent",
+        "The run terminates without meeting explicit convergence or acceptance criteria",
+        "Critical claims in the output are traceable only to parametric generation, not to retrieval, cross-checking, or explicit validation",
+        "Contradictory intermediate facts in the trace are not reconciled before commit *(one possible signal, not a required condition)*"
+      ],
+      "heuristic": "Mark as present if the system commits a confident output and no collective verification step is identifiable in the trace — irrespective of whether contradictions exist. The primary criterion is the absence of checking, not the presence of unresolved conflict."
+    },
+    {
+      "code": "CS-1",
+      "name": "Collective Reasoning Degradation",
+      "locus": "Collective",
+      "function": "Systemic",
+      "summary": "Agents herd toward an early confident output, suppressing independent reasoning.",
+      "signature": [
+        "Multiple agents converge on the same output without evidence of independent reasoning",
+        "A minority agent position is discarded without explicit evaluation of its merit",
+        "Confidence in the collective output increases without a corresponding increase in evidential coverage",
+        "Introducing an adversarial or dissenting agent materially changes the outcome",
+        "An agent revises toward a wrong answer after receiving a confident peer output, with no new evidence introduced"
+      ],
+      "heuristic": "Mark as present if convergence occurs across agents without traceable independent reasoning paths and at least one non-dominant alternative existed in the trace but was not evaluated."
+    },
+    {
+      "code": "CS-2",
+      "name": "Unformalized Coordination Commitments",
+      "locus": "Collective",
+      "function": "Systemic",
+      "summary": "Coordination works until the first perturbation, because it rested on unspoken convention.",
+      "signature": [
+        "Coordination breaks down when a novel input is introduced, despite functioning correctly on prior inputs",
+        "No agent can cite a formal commitment that governs the disrupted coordination",
+        "Re-establishing coordination requires explicit commitment formalization",
+        "The failure does not occur in a system with explicit commitment protocols for the same task"
+      ],
+      "heuristic": "Mark as present if coordination breaks down under perturbation and no agent can cite a formal commitment governing the disrupted coordination, but prior behavior was consistent with an implicit convention."
+    }
+  ]
+}

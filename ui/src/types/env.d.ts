@@ -16,7 +16,7 @@ interface Window {
   ffWasteEstimation?: string;
   ffNeurosymbolicEval?: string;
   ffCognitiveObservability?: string;
-  ffL9Protocols?: string;
+  ffCognitionProtocols?: string;
 }
 
 interface ImportMetaEnv {
@@ -31,7 +31,7 @@ interface ImportMetaEnv {
   VITE_FF_WASTE_ESTIMATION?: string;
   VITE_FF_NEUROSYMBOLIC_EVAL?: string;
   VITE_FF_COGNITIVE_OBSERVABILITY?: string;
-  VITE_FF_L9_PROTOCOLS?: string;
+  VITE_FF_COGNITION_PROTOCOLS?: string;
 }
 
 interface ImportMeta {

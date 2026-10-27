@@ -1,8 +1,7 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-import json
-from uuid import uuid4
 from collections.abc import Iterator
+from uuid import uuid4
 
 import pytest
 from dotenv import load_dotenv
@@ -30,6 +29,12 @@ def provider() -> Iterator[OXPMetricsProvider]:
     yield p
     p._db.execute_command(
         """
+        MATCH (r:MetricResult) WHERE r.id STARTS WITH 'TEST-res-'
+        DETACH DELETE r
+        WITH 1 AS _
+        MATCH (d:Metric) WHERE d.id STARTS WITH 'TEST-def-'
+        DETACH DELETE d
+        WITH 1 AS _
         MATCH (s:Session)
         WHERE s.sessionId = $seed_session
            OR s.sessionId STARTS WITH $session_prefix
@@ -39,7 +44,7 @@ def provider() -> Iterator[OXPMetricsProvider]:
     )
     p._db.execute_command(
         """
-        MATCH (sp:Span)
+        MATCH (sp:LLMCall)
         WHERE sp.spanId STARTS WITH $span_prefix
         DETACH DELETE sp
         """,
@@ -57,8 +62,9 @@ def _cleanup_metric(
 ) -> None:
     provider._db.execute_command(
         """
-        MATCH (m:Metric {resourceId: $resource_id, metricName: $metric_name})
-        DETACH DELETE m
+        MATCH (r:MetricResult {name: $metric_name})-[:measures]->(t)
+        WHERE t.sessionId = $resource_id OR t.spanId = $resource_id
+        DETACH DELETE r
         """,
         {"resource_id": resource_id, "metric_name": metric_name},
     )
@@ -93,7 +99,7 @@ def test_save_metrics_persists_scalar_metric_result_and_explicit_fields(
         assert persisted.value == 0.0
         assert persisted.reasoning == "0/13 LLM calls failed"
         assert persisted.metadata["metric_id"] == metric_name
-        assert persisted.metadata["source"] == "worker"
+        assert persisted.provider == "Native"
     finally:
         _cleanup_metric(provider, session_id, metric_name)
 
@@ -137,18 +143,28 @@ def test_save_span_metrics_falls_back_to_metric_name_for_metric_id(
         metadata={"source": "worker"},
     )
 
+    provider._db.execute_command(
+        "MERGE (:LLMCall {spanId: $span_id, sessionId: $session_id})",
+        {"span_id": span_id, "session_id": session_id},
+    )
     try:
         assert provider.save_span_metrics(session_id, span_id, [result]) is True
-        # Read span metrics directly from Neo4j because provider.get_metrics only targets sessions.
         rows = provider._db.execute(
             """
-            MATCH (span:Span {spanId: $span_id})-[:hasMetric]->(m:Metric {metricName: $metric_name})
-            RETURN coalesce(m.metricId, m.metricName) AS metric_id
+            MATCH (t:LLMCall {spanId: $span_id})<-[:measures]-(r:MetricResult)
+                  -[:ofMetricType]->(d:Metric {name: $metric_name})
+            RETURN d.name AS metric_id, d.metricProvider AS provider
             """,
             {"span_id": span_id, "metric_name": metric_name},
         )
         assert rows
         assert rows[0]["metric_id"] == metric_name
+        assert rows[0]["provider"] == "Native"
+        # and the provider reads it back by span id
+        persisted = _find_metric(
+            provider.get_metrics(span_id, session_id=session_id, hops=0), metric_name
+        )
+        assert persisted.value == 0.91
     finally:
         _cleanup_metric(provider, span_id, metric_name)
 
@@ -162,13 +178,13 @@ def test_get_metrics_reads_new_scalar_metric_result_shape(
     provider._db.execute_command(
         """
         MERGE (s:Session {sessionId: $session_id})
-        MERGE (s)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $session_id})
-        SET m.metricResult = 0.0,
-            m.value = 0.0,
-            m.provider = 'Native',
-            m.metricId = $metric_name,
-            m.source = 'worker',
-            m.reasoning = '0/13 LLM calls failed'
+        MERGE (d:Metric {id: 'TEST-def-' + $metric_name})
+        SET d.name = $metric_name, d.metricProvider = 'Native'
+        MERGE (r:MetricResult {id: 'TEST-res-' + $session_id + $metric_name})
+        SET r.name = $metric_name, r.result = 0.0,
+            r.reasoning = '0/13 LLM calls failed', r.timestamp = datetime()
+        MERGE (r)-[:ofMetricType]->(d)
+        MERGE (r)-[:measures]->(s)
         """,
         {"session_id": session_id, "metric_name": metric_name},
     )
@@ -179,71 +195,6 @@ def test_get_metrics_reads_new_scalar_metric_result_shape(
         assert persisted.provider == "Native"
         assert persisted.reasoning == "0/13 LLM calls failed"
         assert persisted.metadata["metric_id"] == metric_name
-        assert persisted.metadata["source"] == "worker"
-    finally:
-        _cleanup_metric(provider, session_id, metric_name)
-
-
-def test_get_metrics_falls_back_to_metric_name_when_metric_id_missing(
-    provider: OXPMetricsProvider,
-) -> None:
-    session_id = _resource_id("session-metrics-provider")
-    metric_name = "Groundedness"
-
-    provider._db.execute_command(
-        """
-        MERGE (s:Session {sessionId: $session_id})
-        MERGE (s)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $session_id})
-        SET m.metricResult = 0.87,
-            m.value = 0.87,
-            m.provider = 'Native',
-            m.source = 'worker',
-            m.reasoning = 'answer is supported by context'
-        REMOVE m.metricId
-        """,
-        {"session_id": session_id, "metric_name": metric_name},
-    )
-
-    try:
-        persisted = _find_metric(provider.get_metrics(session_id), metric_name)
-        assert persisted.metric_id == metric_name
-        assert persisted.metadata["metric_id"] == metric_name
-    finally:
-        _cleanup_metric(provider, session_id, metric_name)
-
-
-def test_get_metrics_reads_legacy_json_metric_result_shape(
-    provider: OXPMetricsProvider,
-) -> None:
-    session_id = _resource_id("session-metrics-provider")
-    metric_name = "WorkflowEfficiency"
-
-    provider._db.execute_command(
-        """
-        MERGE (s:Session {sessionId: $session_id})
-        MERGE (s)-[:hasMetric]->(m:Metric {metricName: $metric_name, resourceId: $session_id})
-        SET m.metricResult = $legacy_result,
-            m.provider = 'Native'
-        """,
-        {
-            "session_id": session_id,
-            "metric_name": metric_name,
-            "legacy_result": json.dumps(
-                {
-                    "value": 1.0,
-                    "metric_id": metric_name,
-                    "source": "worker",
-                    "reasoning": "agent calls form a single chain",
-                }
-            ),
-        },
-    )
-
-    try:
-        persisted = _find_metric(provider.get_metrics(session_id), metric_name)
-        assert persisted.value == 1.0
-        assert persisted.reasoning == "agent calls form a single chain"
-        assert persisted.metadata["metric_id"] == metric_name
-        assert persisted.metadata["source"] == "worker"
+        assert persisted.metadata["source"] == "Native"
     finally:
         _cleanup_metric(provider, session_id, metric_name)

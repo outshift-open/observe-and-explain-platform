@@ -381,8 +381,9 @@ def build_all_metrics_for_session_query() -> tuple[str, Dict[str, object]]:
     Mirrors ``Neo4jConnector.get_all_metrics_for_a_session`` in *oxp-lib*.
     """
     query = """
-    MATCH (s:Session {sessionId: $session_id})-[:hasMetric]->(m:Metric)
-    RETURN m.metricName AS metricName, m.metricResult AS metricResult
+    MATCH (r:MetricResult)-[:measures]->(s:Session {sessionId: $session_id})
+    MATCH (r)-[:ofMetricType]->(d:Metric)
+    RETURN d.name AS metricName, r.result AS metricResult
     """
     return query, {"session_id": None}
 
@@ -443,8 +444,10 @@ def build_all_mas_metric_pairs_query() -> tuple[str, Dict[str, object]]:
     Mirrors ``Neo4jConnector.get_all_mas_metric_pairs`` in *oxp-lib*.
     """
     query = """
-    MATCH (mas:MAS)<-[:executesSession]-(s:Session)-[:hasMetric]->(m:Metric)
-    RETURN DISTINCT mas.id AS masId, m.metricName AS metricName
+    MATCH (mas:MAS)<-[:executesSession]-(s:Session)
+    MATCH (r:MetricResult)-[:measures]->(s)
+    MATCH (r)-[:ofMetricType]->(d:Metric)
+    RETURN DISTINCT mas.id AS masId, d.name AS metricName
     """
     return query, {}
 
@@ -475,7 +478,7 @@ def build_remove_semantic_groups_query(ids: List[str]) -> tuple[str, Dict[str, o
     MATCH (n:SemanticGroup) WHERE n.id IN $ids
     OPTIONAL MATCH (n)-[]-(r)
     WHERE r:NormalBehaviourReport OR r:ConsistencyReport
-       OR r:AnomalyReport OR r:Metric
+       OR r:AnomalyReport
     DETACH DELETE r, n
     """
     return query, {"ids": ids}
@@ -491,7 +494,7 @@ def build_cleanup_semantic_groups_query(
     OPTIONAL MATCH (n)-[medioid_rel:hasMedioidSession]->()
     OPTIONAL MATCH (n)-[]-(r)
     WHERE r:NormalBehaviourReport OR r:ConsistencyReport
-       OR r:AnomalyReport OR r:Metric
+       OR r:AnomalyReport
     DELETE rel, medioid_rel
     DETACH DELETE r
     """
@@ -595,8 +598,12 @@ def build_analysis_data_for_semantic_group_query(
     MATCH (session:Session {sessionId: session_id})
 
     CALL (session) {
-        OPTIONAL MATCH (session)-[:hasMetric]->(metric:Metric)
-        RETURN [item IN collect(DISTINCT metric {.*}) WHERE item IS NOT NULL] AS metrics
+        OPTIONAL MATCH (mr:MetricResult)-[:measures]->(session)
+        OPTIONAL MATCH (mr)-[:ofMetricType]->(md:Metric)
+        RETURN [item IN collect(DISTINCT CASE
+            WHEN mr IS NULL THEN NULL
+            ELSE {metricName: md.name, metricResult: mr.result, provider: md.metricProvider, reasoning: mr.reasoning}
+        END) WHERE item IS NOT NULL] AS metrics
     }
 
     CALL (session) {
@@ -666,7 +673,8 @@ def build_session_data_for_ia_inference_query(
     """
     query = """
     MATCH (s:Session {sessionId: $session_id})
-    MATCH (s)-[:hasMetric]->(m:Metric {metricName: $metric_name})
+    MATCH (m:MetricResult)-[:measures]->(s)
+    MATCH (m)-[:ofMetricType]->(md:Metric {name: $metric_name})
     MATCH (t:Transition {sessionId: s.sessionId})-[:representsExecution]->(ac:AgentCall)
     OPTIONAL MATCH (ac)-[:executesAgent]->(agentNode:Agent)
     MATCH (input_embedding:Embedding {embeddingModel: $emb_model})-[:represents]->(input:State)-[:inputTo]->(t)
@@ -686,7 +694,7 @@ def build_session_data_for_ia_inference_query(
     RETURN
         s.sessionId AS SessionID,
         triples AS Triples,
-        m.metricResult AS RawMetric
+        m.result AS RawMetric
     """
     return query, {
         "session_id": session_id,
@@ -699,17 +707,17 @@ def build_all_metrics_for_a_group_of_sessions_query(
     session_ids: List[str], subset: Iterable[str] | None
 ) -> Tuple[str, Dict[str, object]]:
     params = {"session_ids": session_ids}
-    match_clause: str = "MATCH p=(s:Session)-[:hasMetric]->(m:Metric)"
+    match_clause: str = "MATCH (m:MetricResult)-[:measures]->(s:Session), (m)-[:ofMetricType]->(d:Metric)"
     condition: str = "(s.sessionId IN $session_ids)"
     if subset is not None:
         params["metric_names"] = list(subset)
-        condition = f"({condition} AND (m.metricName in $metric_names))"
+        condition = f"({condition} AND (d.name in $metric_names))"
     query: str = f"""{match_clause}
     WHERE {condition}
     RETURN Distinct
     s.sessionId as sessionId,
-    m.metricName as metricName, 
-    m.metricResult as metricResult
+    d.name as metricName,
+    m.result as metricResult
     """
     return query, params
 
@@ -773,7 +781,7 @@ def _build_wr_sessions_by_setting_with_metrics_query(
             size(coalesce($excluded_session_ids, [])) = 0
             OR NOT s.sessionId IN $excluded_session_ids
         )
-        AND EXISTS { MATCH (s)-[:hasMetric]->(:Metric) }
+        AND EXISTS { MATCH (:MetricResult)-[:measures]->(s) }
     RETURN DISTINCT s.sessionId AS session_id
     """
     return query, {
@@ -914,9 +922,10 @@ def build_wr_llm_calls_by_session_property_query(
 
 def build_wr_session_metrics_query(sid: str) -> tuple[str, Dict[str, object]]:
     query = """
-    MATCH (s:Session {sessionId: $sid})-[:hasMetric]->(m:Metric)
+    MATCH (m:MetricResult)-[:measures]->(s:Session {sessionId: $sid})
+    MATCH (m)-[:ofMetricType]->(d:Metric)
     RETURN
-        coalesce(m.metricName, m.metric_name, "") AS metric_name,
-        coalesce(m.metricResult, m.metric_result, "") AS metric_result
+        coalesce(d.name, "") AS metric_name,
+        coalesce(m.result, "") AS metric_result
     """
     return query, {"sid": sid}

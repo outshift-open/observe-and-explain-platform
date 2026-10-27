@@ -29,6 +29,7 @@ jobs:
           - normal-behaviour-worker
           - intelligence-worker
           - stateful-eval-worker
+          - cognitive-failure-worker
     permissions:
       contents: read  # required for actions/checkout
       packages: read

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseTimestamp } from '@/utils/dateUtils';
 import {
   MenuItem,
   Select,
@@ -119,8 +120,8 @@ export const ApplicationsGrid = () => {
           .sort((a, b) => {
             if (sortBy === RepositorySortOption.mostRecent) {
               return (
-                new Date(b.timestamp ?? 0).getTime() -
-                new Date(a.timestamp ?? 0).getTime()
+                (parseTimestamp(b.timestamp)?.getTime() ?? 0) -
+                (parseTimestamp(a.timestamp)?.getTime() ?? 0)
               );
             }
             return (

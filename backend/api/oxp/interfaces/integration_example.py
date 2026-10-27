@@ -60,21 +60,22 @@ class Neo4jMetricsProvider(MetricsProvider):
         rids = [resource_ids] if isinstance(resource_ids, str) else resource_ids
         mids = [metric_ids] if isinstance(metric_ids, str) else metric_ids
 
+        # Metrics are ontology MetricResult nodes: each one `measures` a Session
+        # (matched by sessionId) or an execution element such as an LLMCall /
+        # ToolCall (matched by spanId) and is `ofMetricType` of a Metric definition.
         query = """
         UNWIND $rids AS rid
-        MATCH (r)
-        WHERE r.id = rid OR r.executionId = rid
-           OR (r:Session AND r.sessionId = rid)
-        MATCH (r)-[:hasMetric]->(m:Metric)
-        WHERE $mids IS NULL OR m.metricName IN $mids
+        MATCH (t)
+        WHERE (t:Session AND t.sessionId = rid)
+           OR (t.spanId = rid AND NOT t:Session)
+        MATCH (r:MetricResult)-[:measures]->(t), (r)-[:ofMetricType]->(d:Metric)
+        WHERE $mids IS NULL OR d.name IN $mids
         RETURN
-            CASE WHEN 'Session' IN labels(r)
-                 THEN r.sessionId
-                 ELSE coalesce(r.id, r.executionId)
-            END AS resource_id,
-            m.metricName  AS metric_id,
-            m.metricResult AS value_json,
-            m.timestamp    AS timestamp
+            rid AS resource_id,
+            d.name         AS metric_id,
+            d.metricProvider AS provider,
+            r.result       AS value_json,
+            r.timestamp    AS timestamp
         """
 
         results = []
@@ -98,9 +99,13 @@ class Neo4jMetricsProvider(MetricsProvider):
                     NumericMetricResult(
                         metric_id=record["metric_id"],
                         resource_id=record["resource_id"],
-                        provider="neo4j-mce",
+                        provider=record["provider"] or "neo4j-mce",
                         value=val,
-                        timestamp=record.get("timestamp") or datetime.now(timezone.utc),
+                        timestamp=(
+                            record["timestamp"].to_native()
+                            if record.get("timestamp") is not None
+                            else datetime.now(timezone.utc)
+                        ),
                         metadata=metadata,
                     )
                 )
@@ -111,28 +116,34 @@ class Neo4jMetricsProvider(MetricsProvider):
     def save_metrics(self, metrics: MetricResult | list[MetricResult]) -> bool:
         items = [metrics] if isinstance(metrics, MetricResult) else metrics
 
+        # One Metric definition per (name, provider); one MetricResult per
+        # (definition, resource) so recomputing a metric overwrites the old value.
         query = """
         UNWIND $batch AS item
-        MATCH (r)
-        WHERE (NOT r:Metric AND r.id = item.resource_id)
-           OR (NOT r:Metric AND r.executionId = item.resource_id)
-           OR (r:Session AND r.sessionId = item.resource_id)
-        MERGE (m:Metric {metricName: item.metric_id, resourceId: item.resource_id})
-        SET m.metricResult = item.value_json,
-            m.timestamp    = datetime(item.timestamp),
-            m.provider     = item.provider,
-            m.value        = item.value
-        MERGE (r)-[:hasMetric]->(m)
+        MATCH (t)
+        WHERE (t:Session AND t.sessionId = item.resource_id)
+           OR (t.spanId = item.resource_id AND NOT t:Session)
+        MERGE (d:Metric {id: item.definition_id})
+        SET d.name = item.metric_id, d.metricProvider = item.provider
+        MERGE (r:MetricResult {id: item.result_id})
+        SET r.name = item.metric_id,
+            r.result = item.value,
+            r.reasoning = item.reasoning,
+            r.timestamp = datetime(item.timestamp)
+        MERGE (r)-[:ofMetricType]->(d)
+        MERGE (r)-[:measures]->(t)
         """
 
         batch = [
             {
                 "resource_id": m.resource_id,
                 "metric_id": m.metric_id,
-                "value_json": json.dumps({"value": m.value, "provider": m.provider}),
+                "definition_id": f"metric:{m.provider}:{m.metric_id}",
+                "result_id": f"metricresult:{m.provider}:{m.metric_id}:{m.resource_id}",
                 "timestamp": m.timestamp.isoformat(),
                 "provider": m.provider,
                 "value": m.value,
+                "reasoning": m.reasoning or "",
             }
             for m in items
             if not m.error and m.value is not None
@@ -150,15 +161,16 @@ class Neo4jMetricsProvider(MetricsProvider):
     # ── MetricsProvider.clean_metrics ───────────────────────────────────────
 
     def clean_metrics(self, session_id: str | None = None) -> int:
+        # Deletes the results; the Metric definitions stay.
         if session_id:
             q = """
-            MATCH (r)-[:hasMetric]->(m:Metric)
-            WHERE r.sessionId = $sid OR (r:Session AND r.sessionId = $sid)
-            DETACH DELETE m RETURN count(m) AS deleted
+            MATCH (r:MetricResult)-[:measures]->(t)
+            WHERE t.sessionId = $sid
+            DETACH DELETE r RETURN count(r) AS deleted
             """
             p = {"sid": session_id}
         else:
-            q = "MATCH (m:Metric) DETACH DELETE m RETURN count(m) AS deleted"
+            q = "MATCH (r:MetricResult) DETACH DELETE r RETURN count(r) AS deleted"
             p = {}
         with self._driver.session() as s:
             rec = s.run(q, **p).single()

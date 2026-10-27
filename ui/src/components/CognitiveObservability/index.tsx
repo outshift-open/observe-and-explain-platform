@@ -4,6 +4,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useParams } from 'react-router';
 import { Stack, Typography } from '@open-ui-kit/core';
 import { Chip, Slider } from '@mui/material';
 import { format } from 'date-fns';
@@ -19,6 +20,7 @@ import { useSessionsWithCognitiveObservability } from '@/api/oxpApi';
 import { FAILURE_CONFIDENCE_THRESHOLD } from '@/common/cognitiveFailures';
 
 const CognitiveObservability = () => {
+  const { applicationId } = useParams();
   const { startDate, endDate, setStartDate, setEndDate } = useTimeRangeStore();
   const debouncedStartDate = useDebouncedValue(startDate, 500);
   const debouncedEndDate = useDebouncedValue(endDate, 500);
@@ -28,6 +30,7 @@ const CognitiveObservability = () => {
     isLoading,
     refetch
   } = useSessionsWithCognitiveObservability(
+    applicationId ?? '',
     debouncedStartDate,
     debouncedEndDate
   );

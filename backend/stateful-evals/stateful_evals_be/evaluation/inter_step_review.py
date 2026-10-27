@@ -2,7 +2,7 @@
 #  SPDX-License-Identifier: Apache-2.0
 """Inter-step review: post-processing analysis of metric failures.
 
-After span-level metrics identify failures (score=0), this module reviews
+After span-level metrics identify failures (value below span_pass_threshold), this module reviews
 them in the context of the full trajectory and policy to determine:
 1. Which failures are genuinely trajectory-breaking (FATAL)
 2. Which are recoverable intermediate missteps (MINOR)

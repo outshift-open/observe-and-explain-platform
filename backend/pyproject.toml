@@ -39,6 +39,7 @@ members = [
     "workers/anomaly-detection-worker",
     "workers/analysis-worker",
     "workers/stateful-eval-worker",
+    "workers/cognitive-failure-worker",
     "workers/intelligence-worker",
     "worker-base",
     "stateful-evals",

@@ -34,8 +34,8 @@ import {
   AgenticProtocolsMetrics,
   SpanDetails,
   SessionsWithCognitiveObservability,
-  SessionL9Protocols,
-  SessionsWithL9Protocols
+  SessionCognitionProtocols,
+  SessionsWithCognitionProtocols
 } from '@/types/oxp.type';
 import {
   ApplicationsResponse,
@@ -45,9 +45,6 @@ import {
   LiveTopologySessionResponse,
   SessionsCountResponse
 } from '@/types/oxpApi.type';
-import { mockSessionsWithCognitiveObservability } from './mock/sessionsWithCognitiveObservability';
-import { mockSessionL9Protocols } from './mock/sessionL9Protocols';
-import { mockSessionsWithL9Protocols } from './mock/sessionsWithL9Protocols';
 
 const OCE_API_BASE_URL = window.restApiUrl ?? import.meta.env.VITE_REST_API_URL;
 // const OCE_API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -1350,23 +1347,25 @@ export const useApplicationsWithStatefulEval = (
 };
 
 const fetchSessionsWithCognitiveObservability = async (
+  applicationId: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  sessionId?: string
 ): Promise<SessionsWithCognitiveObservability> => {
   const params = new URLSearchParams();
   if (startTime != null) params.set('start_time', String(startTime));
   if (endTime != null) params.set('end_time', String(endTime));
+  if (sessionId) params.set('session_id', sessionId);
 
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions-with-cognitive-observability?${params.toString()}`
-  // );
-
-  const response = {
-    ok: true,
-    json: () => mockSessionsWithCognitiveObservability,
-    statusText: 'OK'
-  };
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-cognitive-observability?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
@@ -1378,82 +1377,97 @@ const fetchSessionsWithCognitiveObservability = async (
 };
 
 export const useSessionsWithCognitiveObservability = (
+  applicationId: string,
   startTime?: number,
-  endTime?: number
+  endTime?: number,
+  sessionId?: string
 ) => {
   return useQuery<SessionsWithCognitiveObservability>({
-    queryKey: ['sessionsWithCognitiveObservability', startTime, endTime],
-    queryFn: () => fetchSessionsWithCognitiveObservability(startTime, endTime)
+    queryKey: [
+      'sessionsWithCognitiveObservability',
+      applicationId,
+      startTime,
+      endTime,
+      sessionId
+    ],
+    queryFn: () =>
+      fetchSessionsWithCognitiveObservability(
+        applicationId,
+        startTime,
+        endTime,
+        sessionId
+      ),
+    enabled: !!applicationId
   });
 };
 
-const fetchSessionL9Protocols = async (
+const fetchSessionCognitionProtocols = async (
   sessionId: string
-): Promise<SessionL9Protocols> => {
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions/${sessionId}/l9-protocols`
-  // );
-
-  const response = {
-    ok: true,
-    json: () =>
-      // Sessions without any L9 protocol have an empty list.
-      mockSessionL9Protocols[sessionId] ?? { sessionId, protocols: [] },
-    statusText: 'OK'
-  };
+): Promise<SessionCognitionProtocols> => {
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/sessions/${sessionId}/cognition-protocols`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch session L9 protocols: ${response.statusText}`
+      `Failed to fetch session Cognition protocols: ${response.statusText}`
     );
   }
 
   return response.json();
 };
 
-export const useSessionL9Protocols = (sessionId?: string) => {
-  return useQuery<SessionL9Protocols>({
-    queryKey: ['sessionL9Protocols', sessionId],
-    queryFn: () => fetchSessionL9Protocols(sessionId ?? ''),
+export const useSessionCognitionProtocols = (sessionId?: string) => {
+  return useQuery<SessionCognitionProtocols>({
+    queryKey: ['sessionCognitionProtocols', sessionId],
+    queryFn: () => fetchSessionCognitionProtocols(sessionId ?? ''),
     enabled: !!sessionId
   });
 };
 
-const fetchSessionsWithL9Protocols = async (
+const fetchSessionsWithCognitionProtocols = async (
+  applicationId: string,
   startTime?: number,
   endTime?: number
-): Promise<SessionsWithL9Protocols> => {
+): Promise<SessionsWithCognitionProtocols> => {
   const params = new URLSearchParams();
   if (startTime != null) params.set('start_time', String(startTime));
   if (endTime != null) params.set('end_time', String(endTime));
 
-  // TODO: Remove this once the API is implemented
-  // const response = await fetch(
-  //   `${OCE_API_BASE_URL}/sessions-with-l9-protocols?${params.toString()}`
-  // );
-
-  const response = {
-    ok: true,
-    json: () => mockSessionsWithL9Protocols,
-    statusText: 'OK'
-  };
+  const response = await fetch(
+    `${OCE_API_BASE_URL}/applications/${applicationId}/sessions-with-cognition-protocols?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    }
+  );
 
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch sessions with L9 protocols: ${response.statusText}`
+      `Failed to fetch sessions with Cognition protocols: ${response.statusText}`
     );
   }
 
   return response.json();
 };
 
-export const useSessionsWithL9Protocols = (
+export const useSessionsWithCognitionProtocols = (
+  applicationId: string,
   startTime?: number,
   endTime?: number
 ) => {
-  return useQuery<SessionsWithL9Protocols>({
-    queryKey: ['sessionsWithL9Protocols', startTime, endTime],
-    queryFn: () => fetchSessionsWithL9Protocols(startTime, endTime)
+  return useQuery<SessionsWithCognitionProtocols>({
+    queryKey: ['sessionsWithCognitionProtocols', applicationId, startTime, endTime],
+    queryFn: () =>
+      fetchSessionsWithCognitionProtocols(applicationId, startTime, endTime),
+    enabled: !!applicationId
   });
 };

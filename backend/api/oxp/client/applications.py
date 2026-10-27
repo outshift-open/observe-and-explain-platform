@@ -58,6 +58,9 @@ from oxp.models.otel_traces import (
     ApplicationNamesResponse,
     ApplicationsResponse,
     CollectByApplicationResponse,
+    CognitiveFailure,
+    CognitiveObservabilityMetric,
+    CognitiveSessionItem,
     CollectSessionItem,
     Filters,
     ImpactAssementAgentItem,
@@ -71,6 +74,7 @@ from oxp.models.otel_traces import (
     MultipleValuesData,
     SemanticGroupNode,
     SemanticgroupsResponse,
+    SessionsWithCognitiveObservabilityResponse,
     SingleValueData,
     TimelineData,
 )
@@ -1560,11 +1564,11 @@ def _get_application_sessions_with_stateful_eval_multiquery(
     get_session_metrics_fn: Callable | None = None,
 ) -> CollectByApplicationResponse:
     """Return collect-by-application data for an application, including a
-    session-attached stateful evaluation metric (e.g. `trajectory_score`).
+    session-attached stateful evaluation metric (e.g. `TrajectoryScore`).
 
     For Neo4j this performs a single Cypher query that returns both the
     session aggregates and any attached Metric nodes matching
-    `trajectory_score` / `statefulEval`.
+    `TrajectoryScore` / `statefulEval`.
     """
     start_epoch, end_epoch = parse_epoch_range(start_time, end_time)
 
@@ -1662,43 +1666,6 @@ def _get_application_sessions_with_stateful_eval_multiquery(
     )
 
 
-def _parse_metric_result_single_query(
-    raw_result: object,
-) -> tuple[float | None, str | None, str | None, str | None]:
-    """Parse stored metric payload for single-query session metric mapping."""
-    if raw_result is None:
-        return None, None, None, None
-
-    if isinstance(raw_result, Real) and not isinstance(raw_result, bool):
-        return float(raw_result), None, None, None
-
-    parsed = raw_result
-    if isinstance(raw_result, str):
-        try:
-            parsed = json.loads(raw_result)
-        except (json.JSONDecodeError, TypeError):
-            return None, None, None, None
-
-    if isinstance(parsed, Real) and not isinstance(parsed, bool):
-        return float(parsed), None, None, None
-
-    if not isinstance(parsed, dict):
-        return None, None, None, None
-
-    value = parsed.get("value")
-    parsed_value = (
-        float(value)
-        if isinstance(value, Real) and not isinstance(value, bool)
-        else None
-    )
-    return (
-        parsed_value,
-        parsed.get("metric_id"),
-        parsed.get("source"),
-        parsed.get("reasoning"),
-    )
-
-
 def _build_session_metrics_single_query(
     raw_metrics: object,
 ) -> list[dict[str, object]]:
@@ -1715,30 +1682,21 @@ def _build_session_metrics_single_query(
         if not name:
             continue
 
-        value, metric_id, source, reasoning = _parse_metric_result_single_query(
-            metric.get("result")
+        value = metric.get("result")
+        value = (
+            float(value)
+            if isinstance(value, Real) and not isinstance(value, bool)
+            else None
         )
-        if value is None:
-            raw_value = metric.get("value")
-            if isinstance(raw_value, Real) and not isinstance(raw_value, bool):
-                value = float(raw_value)
-
-        if metric_id is None:
-            metric_id = metric.get("metric_id") or name
-        if source is None:
-            source = metric.get("source")
-        if reasoning is None:
-            reasoning = metric.get("reasoning")
-
-        provider = metric.get("provider") or source or "oxp"
+        provider = metric.get("provider") or "oxp"
 
         session_metrics.append(
             {
                 "name": name,
                 "value": value,
-                "metric_id": metric_id,
-                "source": source or provider,
-                "reasoning": reasoning,
+                "metric_id": name,
+                "source": provider,
+                "reasoning": metric.get("reasoning"),
                 "error": None,
             }
         )
@@ -1836,6 +1794,150 @@ def _get_application_sessions_with_stateful_eval(
         errorRate=0.0,
         sessionList=session_list,
     )
+
+
+# ── get_application_sessions_with_cognitive_observability ────────────────────
+
+# Canonical names of the cognitive metrics shown in the UI.
+COGNITIVE_METRIC_NAMES = (
+    "Policy Safety",
+    "Delegation Accuracy",
+    "Goal Alignment",
+    "Instruction Following",
+    "Handoff Quality",
+    "Semantic Consistency",
+    "Context Preservation",
+    "Confidence Calibration",
+    "Verification Quality",
+    "Communication Efficiency",
+    "Groundedness",
+    "Task Completion",
+    "Constraint Satisfaction",
+)
+
+
+def _normalize_metric_name(name: object) -> str:
+    """Lowercase *name* and drop separators so ``task_completion`` == ``Task Completion``."""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+_COGNITIVE_METRICS_BY_KEY = {
+    _normalize_metric_name(n): n for n in COGNITIVE_METRIC_NAMES
+}
+
+
+def _build_cognitive_metrics(
+    raw_metrics: object,
+) -> list[CognitiveObservabilityMetric]:
+    """Keep only the cognitive metrics of a session, with canonical names."""
+    found: dict[str, CognitiveObservabilityMetric] = {}
+    for metric in _build_session_metrics_single_query(raw_metrics):
+        canonical = _COGNITIVE_METRICS_BY_KEY.get(
+            _normalize_metric_name(metric["name"])
+        )
+        value = metric.get("value")
+        if canonical is None or value is None:
+            continue
+        found[canonical] = CognitiveObservabilityMetric(
+            name=canonical,
+            value=SingleValueData(value=float(value), unit="PERCENTAGE"),
+        )
+    return [found[n] for n in COGNITIVE_METRIC_NAMES if n in found]
+
+
+def _as_str_list(raw: object) -> list[str]:
+    """Coerce a stored remediation property (list, JSON string or text) to ``list[str]``."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return [raw] if raw.strip() else []
+    if isinstance(raw, str):
+        return [raw] if raw.strip() else []
+    if isinstance(raw, (list, tuple)):
+        return [str(r) for r in raw if r is not None and str(r).strip()]
+    return []
+
+
+def _build_cognitive_failures(raw_failures: object) -> list[CognitiveFailure]:
+    """Map ``CognitiveFailuresReport`` node properties to :class:`CognitiveFailure`."""
+    if not isinstance(raw_failures, (list, tuple)):
+        return []
+
+    failures: list[CognitiveFailure] = []
+    for props in raw_failures:
+        if not isinstance(props, dict):
+            continue
+        name = props.get("name")
+        confidence = props.get("presenceProbability")
+        if not name or isinstance(confidence, bool) or not isinstance(confidence, Real):
+            continue
+        failures.append(
+            CognitiveFailure(
+                name=str(name),
+                confidence=float(confidence),
+                remediations=_as_str_list(props.get("remediation")),
+                description=str(props.get("description") or ""),
+            )
+        )
+    return sorted(failures, key=lambda f: f.confidence, reverse=True)
+
+
+def _get_application_sessions_with_cognitive_observability(
+    db: Connector,
+    dialect: Dialect,
+    *,
+    application_id: str,
+    start_time: str = "",
+    end_time: str = "",
+    session_id: str = "",
+) -> SessionsWithCognitiveObservabilityResponse:
+    """Return the sessions of an application with their cognitive observability.
+
+    Metrics come from ``Session-[:hasMetric]->Metric`` nodes and failures from
+    the session's ``CognitiveFailuresReport`` nodes (one node per failure).
+    """
+    del dialect  # Neo4j-only query.
+    start_epoch, end_epoch = parse_epoch_range(start_time, end_time)
+    if start_epoch > end_epoch:
+        raise ValueError("invalid time range")
+
+    query, params = ui_queries.neo4j_sessions_with_cognitive_observability_query(
+        application_id=application_id,
+        start_epoch=start_epoch,
+        end_epoch=end_epoch,
+        session_id=session_id or None,
+    )
+    try:
+        rows = db.execute(query, params)
+    except Exception as exc:
+        raise DatabaseError(
+            f"Failed to get cognitive observability for '{application_id}': {exc}"
+        ) from exc
+
+    sessions = [
+        CognitiveSessionItem(
+            sessionId=str(row["sessionId"]),
+            timestamp=str(row["startTime"]),
+            agents=row.get("agents") or [],
+            llms=[],
+            tokens=row.get("tokens") or 0,
+            status=TASK_STATUS_DONE,
+            cost=row.get("cost") or 0.0,
+            duration=row.get("duration") or 0.0,
+            session_metrics=_build_session_metrics_single_query(
+                row.get("sessionMetrics")
+            ),
+            cognitiveObservabilityMetrics=_build_cognitive_metrics(
+                row.get("sessionMetrics")
+            ),
+            cognitiveFailures=_build_cognitive_failures(row.get("failures")),
+        )
+        for row in rows or []
+    ]
+    return SessionsWithCognitiveObservabilityResponse(sessions=sessions)
 
 
 # ── get_application_topology ─────────────────────────────────────────────────

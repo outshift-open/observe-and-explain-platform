@@ -33,7 +33,7 @@ import json
 import logging
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 from stateful_evals_be.evaluation.coordination import CoordinationContext, RootTurn
@@ -1568,6 +1568,101 @@ class TrajectoryContext:
     # ------------------------------------------------------------------
     # Ingestion: called after each span is evaluated
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Context deltas (what one span added to the running context)
+    # ------------------------------------------------------------------
+
+    _APPEND_ONLY = (
+        "evidence",
+        "claims",
+        "coordination_events",
+        "provenance_links",
+        "flags",
+    )
+    _UPSERT = ("intents", "work_units")
+
+    @staticmethod
+    def _dump(item: Any) -> Dict[str, Any]:
+        return json.loads(json.dumps(asdict(item), default=str))
+
+    @classmethod
+    def merge_context_delta(
+        cls, base: Dict[str, Any], extra: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Fold ``extra`` (a later delta) into ``base`` and return ``base``.
+
+        Append-only collections are extended, upserts replace the item with the
+        same index (or are appended), and a final answer overwrites the earlier
+        one.
+        """
+        for name in cls._APPEND_ONLY:
+            if name in extra:
+                base.setdefault(name, []).extend(extra[name])
+        for name in cls._UPSERT:
+            if name in extra:
+                items = base.setdefault(name, [])
+                position = {item["index"]: i for i, item in enumerate(items)}
+                for item in extra[name]:
+                    if item["index"] in position:
+                        items[position[item["index"]]] = item
+                    else:
+                        position[item["index"]] = len(items)
+                        items.append(item)
+        if "final_answer" in extra:
+            base["final_answer"] = extra["final_answer"]
+        return base
+
+    def context_marker(self) -> Dict[str, Any]:
+        """Snapshot the context so ``context_delta`` can report what changed."""
+        marker: Dict[str, Any] = {
+            name: len(getattr(self, name)) for name in self._APPEND_ONLY
+        }
+        for name in self._UPSERT:
+            marker[name] = [
+                json.dumps(self._dump(item), sort_keys=True)
+                for item in getattr(self, name)
+            ]
+        marker["final_answer"] = self.latest_root_answer
+        return marker
+
+    def context_delta(self, marker: Dict[str, Any]) -> Dict[str, Any]:
+        """Items appended or changed since ``marker``; ``{}`` when nothing moved.
+
+        Append-only collections report their new items with absolute indexes.
+        Intents and work units are mutable, so they are reported as upserts
+        (new or changed since the marker). Replaying the deltas of a session's
+        steps in order rebuilds the context at any point of the trajectory.
+        """
+        delta: Dict[str, Any] = {}
+        for name in self._APPEND_ONLY:
+            items = getattr(self, name)
+            start = marker.get(name, 0)
+            if len(items) > start:
+                delta[name] = [
+                    {"index": index, **self._dump(items[index])}
+                    for index in range(start, len(items))
+                ]
+        for name in self._UPSERT:
+            before = marker.get(name, [])
+            changed = []
+            for index, item in enumerate(getattr(self, name)):
+                dumped = self._dump(item)
+                if (
+                    index >= len(before)
+                    or json.dumps(dumped, sort_keys=True) != before[index]
+                ):
+                    changed.append({"index": index, **dumped})
+            if changed:
+                delta[name] = changed
+        if self.latest_root_answer and self.latest_root_answer != marker.get(
+            "final_answer"
+        ):
+            delta["final_answer"] = {
+                "span_index": self.latest_root_answer_span_index,
+                "text": self.latest_root_answer,
+            }
+        return delta
 
     def ingest_span(self, span_dict: Dict[str, Any], span_index: int) -> None:
         """Extract and store information from a processed span."""
@@ -5579,7 +5674,14 @@ def _timestamp_ns(value: Any) -> Optional[int]:
 
 
 def _span_duration_ns(span_dict: Dict[str, Any]) -> Optional[int]:
-    """Read the OTel span ``Duration``, which is recorded in nanoseconds."""
+    """Read the step duration in nanoseconds.
+
+    Steps read from the KG carry ``duration_ns``; OTel spans carry ``Duration``
+    (also nanoseconds) on the raw span.
+    """
+    explicit = span_dict.get("duration_ns")
+    if isinstance(explicit, (int, float)) and not isinstance(explicit, bool):
+        return int(explicit) if explicit >= 0 else None
     raw_span = span_dict.get("raw_span_data")
     value = raw_span.get("Duration") if isinstance(raw_span, dict) else None
     if value is None or value == "" or isinstance(value, bool):

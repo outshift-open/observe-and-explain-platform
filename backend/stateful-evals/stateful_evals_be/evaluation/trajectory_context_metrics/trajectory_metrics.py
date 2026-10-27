@@ -602,6 +602,7 @@ def _definition_aliases(
     return (
         definition.code,
         _selector_key(definition.name),
+        _selector_key(definition.name).replace("_", ""),  # PolicySafety
         definition.name.casefold(),
     )
 

@@ -7,11 +7,12 @@ In-process stateful evaluation worker — runs temporal metric computation direc
 ## Overview
 
 The Stateful Eval worker scores agent sessions with the [Stateful Evals](../components/stateful-evals.md)
-library. It takes a session ID off a RabbitMQ queue, loads the session's spans from ClickHouse
-through the OXP API library (`oxp.client.local.LocalClient`), and evaluates them in-process with
-`stateful_evals_be.TemporalMetricsProcessor`. It writes per-span Groundedness, IntentRecognition,
-and Relevancy scores and a session `trajectory_score` to the Neo4j knowledge graph, then forwards
-the message. Evaluation makes model calls, which can cost money.
+library. It takes a session ID off a RabbitMQ queue, reads the session's normalized trajectory (the
+LLM, tool, and agent calls, with their `Transition` and `State` nodes) from the Neo4j
+knowledge graph, and evaluates it in-process with `stateful_evals_be.TemporalMetricsProcessor`. It
+writes per-step Groundedness, IntentRecognition, and Relevancy scores, the trajectory context each
+step contributed, and a session `TrajectoryScore` back to the knowledge graph, then forwards the
+message. No OTel store is read. Evaluation makes model calls, which can cost money.
 
 `StatefulEvalWorker` (`src/stateful_eval_worker/worker.py`) subclasses the shared
 [`worker-base`](../components/worker-base.md) `BaseWorker`.
@@ -27,34 +28,61 @@ certain from this worker's own source is its queue name:
 
 For each message, `StatefulEvalWorker.handle_message`:
 
-1. Fetches every span of `session_id` with `stateful_evals_be.integrations.oxp.fetch_session_spans`
-   (500 per page, oldest first, converted by `oxp_span_to_otel`).
-2. Builds a new `TemporalMetricsProcessor` and calls `evaluate_spans(spans, session_id=...)` — the
-   same processor `stateful_evals_be.evaluate_spans` uses. No policy override is passed, so the
-   policy is whatever system message is found in the spans.
-3. Writes the metrics to Neo4j when `PUSH_METRICS` is on and `result.error` is empty.
+1. Builds a new `TemporalMetricsProcessor` and calls `evaluate_trajectory(trajectory)`
+   on the trajectory read by the OXP API library's `oxp.client.dal.get_session_trajectory`: every
+   `LLMCall`, `ToolCall`, and `AgentCall` of the session, in start-time order, with the `Transition` it
+   corresponds to and the text of its initial and final `State`, in one query. Steps are
+   identified by their KG ids; there is no span id or de-duplication. The policy is the
+   first LLM call's system prompt, the request is its first user message, and each agent's own system prompt is recorded as its contract. No
+   policy override is passed.
+2. Judges each LLM and tool step against the context built from the steps before it, then runs the
+   final trajectory audit.
+3. Writes the results to Neo4j when `PUSH_METRICS` is on and `result.error` is empty.
 4. Publishes one output message to each configured output queue.
 
-Fetching, evaluation, and metric writes run in threads; up to `MAX_INFLIGHT_MESSAGES` messages run
-at once, sharing one `LocalClient`. If the processor reports an error (e.g. "No spans found for
-session"), the worker writes no metrics but still publishes. If fetching or writing raises, it logs
-the error, sends an `error` feedback event, and publishes nothing. Either way the message is
-acknowledged, not requeued.
+Reading, evaluation, and writes run in threads; up to `MAX_INFLIGHT_MESSAGES` messages run at once,
+sharing the base worker's Neo4j connector. If the processor reports an error (e.g. "No trajectory
+steps found for session"), the worker writes nothing but still publishes. If reading or writing
+raises, it logs the error, sends an `error` feedback event, and publishes nothing. Either way the
+message is acknowledged, not requeued.
 
 ### What it writes
 
-The worker only reads ClickHouse; it writes to Neo4j via `LocalClient.write_span_metrics` and
-`write_session_metrics`:
+The worker reads and writes Neo4j only, through the shared connector
+(`oxp.dependencies.get_neo4j_connector()`):
 
-| Metric | Attached to | Value |
+| Written | Attached to | Value |
 |---|---|---|
-| `mdt.Groundedness`, `mdt.IntentRecognition`, `mdt.Relevancy` | `(:Session {sessionId})-[:hasSpan]->(:Span {spanId})`, created if missing | `0` or `1` per judged `llm` or `tool` span; `tool` spans get no Groundedness |
-| `trajectory_score` | An existing `Session` node with that `sessionId`; nothing is written if there is none | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `Groundedness`, `IntentRecognition`, `Relevancy` | `(:MetricResult)-[:measures]->(:LLMCall\|:ToolCall)`, matched by the call's id; written only if that call exists | `0`, `0.25`, `0.5`, `0.75` or `1` per judged `llm` or `tool` step (1-5 rubric normalized to `(score-1)/4`; passes at or above `span_pass_threshold`, default `0.5`); `tool` steps get no Groundedness |
+| `TrajectoryContext` node | `(:Transition)-[:hasContext]->(:TrajectoryContext {id, evidence, claims, ...})`, one per step (`PUSH_TRANSITION_CONTEXT`) | one JSON property per constituent: what the step added to the trajectory context (see below) |
+| `TrajectoryScore` | `(:MetricResult)-[:measures]->(:Session {sessionId})`; nothing is written if there is no such session | `0` or `1`; `reasoning` is `trajectory_reasoning` |
+| `PolicySafety`, `TaskCompletion`, `Groundedness`, ... (only the ones in the config file) | `(:MetricResult)-[:measures]->(:Session {sessionId})`, like `TrajectoryScore` | `0` or `1` each; a metric that was not applicable or could not be judged has no score and is not written. They are diagnostic: they never change `TrajectoryScore`. `Groundedness` here measures the session, where the step metric of the same name measures a call |
 
-Each metric is a `Metric` node linked by `hasMetric`, with `provider` `stateful_evals`, `source`
-`StatefulEval`, `metricId` equal to the name, and `reasoning`. It's matched on `metricName` and
-`resourceId`, so a re-run overwrites it. The OXP API's `quality` category reads `trajectory_score`
-as a source of `MDT` (`trajectoryQuality`) in [`api/oxp/core/config.py`](../../api/oxp/core/config.py).
+Each metric also carries the evaluation cost when measured, as `evaluation_model`,
+`evaluation_prompt_tokens`, `evaluation_completion_tokens`, `evaluation_total_tokens` and
+`evaluation_cost_usd`, passed in the `MetricResult` metadata and stored as the evaluation fields of the node. For a step
+metric these are the step's judge usage split evenly across the metrics judged for it (token remainders go to
+the first metrics, so the shares sum to the call's usage). For `TrajectoryScore` they are the whole session's usage
+across all phases and its estimated cost. A field is omitted when it was not measured, and auto-failed `ERROR` steps
+carry none.
+
+Each value is a `MetricResult` node (`result`, `reasoning`, `timestamp`) linked by `ofMetricType` to a `Metric`
+definition (one per name and provider, here `metricProvider` `StatefulEvals`) and by `measures` to its target: the
+LLM or tool call for step metrics, the `Session` for `TrajectoryScore`. A result is keyed by
+definition and measured resource, so a re-run overwrites it. `Span` nodes are not written.
+The OXP API's `quality` category reads `TrajectoryScore` as a source of `MDT`
+(`trajectoryQuality`) in [`api/oxp/core/config.py`](../../api/oxp/core/config.py).
+
+A `TrajectoryContext` node (a semantic-ontology class) has one JSON property per
+constituent, present only when the step contributed it: `evidence`,
+`claims`, `coordinationEvents`, `provenanceLinks` and
+`flags` (new items with their absolute `index`), `intents` and
+`workUnits` (new or changed items, keyed by `index`), and
+`finalAnswer` (the answer text). Context that exists before the first step (policy, root
+request, agent contracts) is part of the first transition's node, and the context finalized after
+the last step part of the last one. The node's id is derived from its transition's and its
+properties are replaced, so a re-run overwrites it. Applying the nodes in step order rebuilds the
+context at any step.
 
 ## Usage
 
@@ -76,7 +104,7 @@ uv run --package stateful-eval-worker stateful-eval-worker-cli --run-once \
 `--run-once` writes `{"workflow_id": ..., "session_id": ...}` to `--output`, generating a
 `workflow_id` if the input has none. `--input` also accepts inline JSON; a JSON array is processed
 as a batch and written back as an array. In queue mode, `--max-sessions N` caps the number of
-messages processed (`-1`, the default, means no limit). Both modes read spans from ClickHouse —
+messages processed (`-1`, the default, means no limit). Both modes read the trajectory from Neo4j —
 the worker has no file input for sessions. To evaluate a sample trajectory without a database, use
 `stateful_evals_be.evaluate_file` directly, as the
 [stateful-evals quickstart](../components/stateful-evals.md#quickstart) does.
@@ -99,15 +127,37 @@ Flags override environment variables, except `MAX_INFLIGHT_MESSAGES`, which over
 | `LLM_MODEL_NAME` | `--llm-model-name` | `gpt-4o` | Judge model |
 | `LLM_BASE_MODEL_URL_MCE` | `--llm-base-model-url` | `https://api.openai.com/v1` | Judge model endpoint |
 | `SAMPLING_STRATEGY`, `SAMPLING_EARLY_RATE`, `SAMPLING_MID_RATE` | _(env only)_ | none / `0.25` / `0.60` | `tail_weighted` judges these shares of spans in the first 40% and next 30%; the rest and anchor spans are always judged |
-| `PUSH_METRICS` | _(env only)_ | `true` | `false`/`0`/`no` skips all Neo4j writes |
-| `CLICKHOUSE_HOST` / `CLICKHOUSE_PORT` / `CLICKHOUSE_USERNAME` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | _(env only)_ | `localhost` / `8123` / `admin` / `admin` / `default` | Span store (raw OTel traces) |
-| `NEO4J_HOST` / `NEO4J_PORT` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | _(env only)_ | `localhost` / `7687` / `neo4j` / empty / `neo4j` | Knowledge graph, used when `PUSH_METRICS` is on; `NEO4J_AUTH=user/password` also sets credentials |
+| `STATEFUL_EVAL_CONFIG_PATH` | `--config-file` | none | Path to `stateful_eval_config.yaml`, which declares the opt-in trajectory metrics (see below). With no file, none run |
+| `PUSH_METRICS` | _(env only)_ | `true` | `false`/`0`/`no` skips all Neo4j writes (the trajectory is still read) |
+| `PUSH_TRANSITION_CONTEXT` | _(env only)_ | `true` | `false`/`0`/`no` skips writing `TrajectoryContext` nodes |
+| `NEO4J_HOST` / `NEO4J_PORT` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` / `NEO4J_DATABASE` | _(env only)_ | `localhost` / `7687` / `neo4j` / empty / `neo4j` | Knowledge graph, read and written; `NEO4J_AUTH=user/password` also sets credentials |
+| `MODEL_PRICES_REFRESH` | _(env only)_ | `true` | `false`/`0`/`no` stops the run-time refresh of the LLM price table from LiteLLM and uses the table packaged in the image |
+| `MODEL_PRICES_URL` | _(env only)_ | LiteLLM's published file | Where to fetch the price table from |
+| `MODEL_PRICES_TTL_SECONDS` | _(env only)_ | `86400` | How long a fetched price table is used before the next fetch; a failed fetch is retried after an hour and the table already loaded keeps being used |
 
-ClickHouse and Neo4j defaults come from `oxp.core.config.settings` in the [`api`](../components/api.md)
-package. `LocalClient.from_settings` connects to `bolt://<NEO4J_HOST>:<NEO4J_PORT>` unless
-`NEO4J_HOST` is already a URI — a bare host must not include a port. The `worker-base` Neo4j
-connector created at startup isn't used by this worker; if it fails to connect, it only logs a
-warning.
+The connector is `oxp.dependencies.get_neo4j_connector()`, the one `BaseWorker` creates at startup
+and every other worker uses, so this worker does not close it. It reads `NEO4J_URI` first, else
+`NEO4J_HOST`, which may be a bare host, `host:port`, or a URI, and uses `NEO4J_PORT` when the host
+has no port.
+
+### Trajectory metrics
+
+The trajectory metrics (Policy Safety, Delegation Accuracy, Goal Alignment, Instruction Following, Handoff
+Quality, Semantic Consistency, Context Preservation, Confidence Calibration, Verification Quality, Communication
+Efficiency, Groundedness, Task Completion and Constraint Satisfaction) are opt-in. Which ones run is declared in
+`stateful_eval_config.yaml` (repo `backend/stateful_eval_config.yaml`, mounted into the worker container by
+`docker-compose.yml`; in the Helm chart it is the `workers.stateful-eval.config` value, mounted at `configPath`):
+
+```yaml
+trajectory_metrics:
+  - PolicySafety
+  - TaskCompletion
+```
+
+List the metrics to run, or `- all`. Names are matched ignoring case and spaces, so `PolicySafety`,
+`Policy Safety` and `policy_safety` are the same metric. With no file, or an empty list, none run. A metric you
+list adds one judge call per session, so `all` adds up to 13. A misspelt metric or setting stops the worker at
+startup. Results are written as session metrics (see above) and never change `TrajectoryScore`.
 
 ### Build & Run
 
@@ -129,8 +179,7 @@ docker run --rm stateful-eval-worker --test
 
 `entrypoint.sh` forwards the container arguments to `stateful-eval-worker-cli` (or the
 `INPUT_WORKFLOW` string when none are given) and logs the `--input` file. `docker compose up
-stateful-eval` also starts RabbitMQ and Neo4j; ClickHouse isn't a compose service, so
-`CLICKHOUSE_HOST` defaults to `host.docker.internal`.
+stateful-eval` also starts RabbitMQ and Neo4j.
 
 ### Development
 

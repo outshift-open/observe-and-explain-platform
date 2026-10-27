@@ -8,7 +8,7 @@ Orchestrates temporal evaluation of agent sessions using three core primitives:
 3. Relevancy — no contradictions, valid reasoning chains
 
 Flow:
-  1. Accept spans supplied by the caller
+  1. Accept spans (or a normalized trajectory) supplied by the caller
   2. Iterate spans sequentially, accumulating trajectory context
   3. For each span, run primitive judges concurrently and apply extracted state
   4. Post-processing: run independent final metric audits concurrently
@@ -21,7 +21,7 @@ import logging
 import re
 from collections.abc import Iterable
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -29,7 +29,10 @@ from metrics_computation_engine.llm_judge.llm import LLMClient
 from metrics_computation_engine.models.requests import LLMJudgeConfig
 
 from stateful_evals_be.evaluation.async_utils import model_query_scope, query, run_sync
-from stateful_evals_be.evaluation.cost_estimator import estimate_token_cost
+from stateful_evals_be.evaluation.cost_estimator import (
+    estimate_token_cost,
+    estimate_usage_cost_usd,
+)
 from stateful_evals_be.evaluation.inter_step_review import run_inter_step_review
 from stateful_evals_be.evaluation.span_judge import SpanJudge
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
@@ -38,9 +41,7 @@ from stateful_evals_be.evaluation.trajectory_context import (
     _normalise_semantic_text,
     _timestamp_ns,
 )
-from stateful_evals_be.integrations.oxp import SessionSpanClient
 from stateful_evals_be.models.requests import (
-    EvalSummary,
     FailureDetail,
     MetricFailure,
     SamplingConfig,
@@ -50,6 +51,7 @@ from stateful_evals_be.models.requests import (
     TokenUsage,
 )
 from stateful_evals_be.models.spans import SpanInput
+from stateful_evals_be.models.trajectory import Trajectory
 
 if TYPE_CHECKING:
     from metrics_computation_engine.llm_judge.jury import Jury
@@ -64,25 +66,43 @@ def _empty_usage() -> Dict[str, int]:
 logger = logging.getLogger("stateful_evals_be.processor")
 
 CORE_METRICS = [
-    "mdt.Groundedness",
-    "mdt.IntentRecognition",
-    "mdt.Relevancy",
+    "Groundedness",
+    "IntentRecognition",
+    "Relevancy",
 ]
 
-INTENT_METRIC = "mdt.IntentRecognition"
-GROUNDEDNESS_METRIC = "mdt.Groundedness"
-RELEVANCY_METRIC = "mdt.Relevancy"
+INTENT_METRIC = "IntentRecognition"
+GROUNDEDNESS_METRIC = "Groundedness"
+RELEVANCY_METRIC = "Relevancy"
 
-_INTENT_METRIC_NAMES = {"mdt.IntentRecognition", "IntentRecognition"}
-_GROUNDEDNESS_METRIC_NAMES = {"mdt.Groundedness", "Groundedness"}
-_RELEVANCY_METRIC_NAMES = {"mdt.Relevancy", "Relevancy"}
+
+@dataclass
+class _PreparedSession:
+    """Everything the evaluation loop needs, independent of where it came from.
+
+    Built either from OTel spans (``evaluate_spans``) or from a normalized
+    trajectory (``evaluate_trajectory``). ``raw_spans`` is only set for OTel
+    input; the trajectory path derives the final answer and the user request
+    from the steps instead.
+    """
+
+    span_dicts: List[Dict[str, Any]]
+    system_message: str
+    tool_defs: Dict[str, Any]
+    coordination_context: Any
+    roster: List[tuple]
+    root_request: str
+    contracts: List[tuple]
+    app_name: str
+    raw_spans: Optional[List[Dict[str, Any]]] = None
+    final_answer: tuple = ("", -1)
 
 
 class TemporalMetricsProcessor:
     """Temporal evaluation processor using three core primitives.
 
     Flow:
-      1. Accept spans from the caller (or fetch through the in-process API library)
+      1. Accept spans (or a normalized trajectory) from the caller
       2. For each span: jointly compute Groundedness + IntentRecognition + Relevancy
       3. Accumulate trajectory context between spans
       4. Run deterministic prechecks and one shared final audit
@@ -93,15 +113,15 @@ class TemporalMetricsProcessor:
         self,
         llm_config: LLMJudgeConfig,
         options: Optional[TemporalMetricOptions] = None,
-        *,
-        api_client: SessionSpanClient | None = None,
     ):
         self.llm_config = deepcopy(llm_config)
-        self.metric_names = list(CORE_METRICS)
         self.options = (
             deepcopy(options) if options is not None else TemporalMetricOptions()
         )
-        self.api_client = api_client
+        self.metric_names = [
+            f"mdt.{name}" if self.options.artifact_organization == "llm" else name
+            for name in CORE_METRICS
+        ]
 
         import threading
 
@@ -135,34 +155,10 @@ class TemporalMetricsProcessor:
         except Exception:
             logger.exception("Failed to warm in-process metric catalog cache.")
 
-    # ================================================================
-    # Database retrieval through the in-process API library
-    # ================================================================
-
-    @staticmethod
-    def _oxp_span_to_otel_format(span: Dict[str, Any]) -> Dict[str, Any]:
-        """Compatibility alias for the OXP integration's normalizer."""
-        from stateful_evals_be.integrations.oxp import oxp_span_to_otel
-
-        return oxp_span_to_otel(span)
-
-    def fetch_spans_for_session(self, session_id: str) -> List[Dict[str, Any]]:
-        """Fetch all session spans directly through the API library's LocalClient."""
-        from stateful_evals_be.integrations.oxp import (
-            fetch_session_spans,
-            local_api_client,
-        )
-
-        if self.api_client is not None:
-            return fetch_session_spans(self.api_client, session_id)
-        with local_api_client() as client:
-            return fetch_session_spans(client, session_id)
-
     def close(self) -> None:
-        """Compatibility hook; database connections are scoped to retrieval.
+        """Compatibility hook; the processor owns no service transports.
 
-        The processor owns no service transports. Caller-supplied API clients
-        remain open; MCE model-client lifecycle is unchanged.
+        MCE model-client lifecycle is unchanged.
         """
 
     def __enter__(self):
@@ -429,18 +425,6 @@ class TemporalMetricsProcessor:
                 self, spans, session_id=session_id, policy_override=policy_override
             )
 
-    async def aevaluate_session(self, session_id, policy_override=None):
-        try:
-            spans = self.fetch_spans_for_session(session_id)
-        except Exception as exc:
-            return SessionResult(session_id=session_id, error=str(exc))
-        return await self.aevaluate_spans(
-            spans, session_id=session_id, policy_override=policy_override
-        )
-
-    # ================================================================
-    # Context synchronization
-    # ================================================================
 
     @staticmethod
     def _sort_spans_chronologically(
@@ -494,6 +478,8 @@ class TemporalMetricsProcessor:
         raw_spans: List[Dict[str, Any]],
     ) -> None:
         """Record one canonical final answer while honoring adapter provenance."""
+        if not raw_spans:
+            return
         raw_answer, raw_index = self._extract_final_answer_from_raw_spans(raw_spans)
         coordination = traj_ctx.coordination_context
         final_answer = coordination.final_response or raw_answer
@@ -537,6 +523,16 @@ class TemporalMetricsProcessor:
     # Metric selection
     # ================================================================
 
+    @staticmethod
+    def _span_has_routing_or_answer(span_dict: Dict[str, Any]) -> bool:
+        """Whether an agent step's output carries a routing decision or answer."""
+        output = span_dict.get("output_payload")
+        if not isinstance(output, dict):
+            return False
+        return bool(output.get("final_answer")) or bool(
+            output.get("next_agent") and output.get("reasoning")
+        )
+
     def _metrics_for_span(self, span_dict: Dict[str, Any]) -> List[str]:
         entity_type = span_dict.get("entity_type", "")
 
@@ -565,7 +561,7 @@ class TemporalMetricsProcessor:
 
     @staticmethod
     def _is_intent_metric(metric_name: str) -> bool:
-        return metric_name in _INTENT_METRIC_NAMES
+        return metric_name == INTENT_METRIC
 
     # ================================================================
     # Intent state resolution
@@ -587,6 +583,7 @@ class TemporalMetricsProcessor:
     def _resolve_intent_states(
         intent_events: List[Dict[str, Any]],
         total_spans: int,
+        pass_threshold: float,
     ) -> List["IntentState"]:
         from stateful_evals_be.models.requests import IntentEvent, IntentState
 
@@ -635,11 +632,11 @@ class TemporalMetricsProcessor:
 
             best_score = max(float(e.get("score", 0)) for e in events)
 
-            if best_score >= 1.0:
+            if best_score >= pass_threshold:
                 state = "fulfilled"
             elif len(events) == 1 and first_span < total_spans * 0.4:
                 state = "dormant"
-            elif best_score == 0.0 and first_span >= total_spans * 0.8:
+            elif best_score < pass_threshold and first_span >= total_spans * 0.8:
                 state = "dormant"
             else:
                 state = "drifting"
@@ -668,14 +665,47 @@ class TemporalMetricsProcessor:
     _RESOLVED_INTENT_STATES = {"fulfilled", "dormant"}
 
     @staticmethod
-    def _count_unsatisfied_intents(intent_states: List[Any]) -> int:
+    def _metric_usage_share(
+        span_usage: Dict[str, int],
+        index: int,
+        count: int,
+        model_name: str,
+    ) -> Dict[str, Any]:
+        """Evaluation usage fields for the ``index``-th of ``count`` span metrics.
+
+        A span's judge usage (all attempts, including evidence expansion) is
+        split evenly across the metrics judged for it. Token counts are
+        integers whose remainder goes to the first metrics, so the per-metric
+        values sum exactly to the span's usage; cost is priced from each share.
+        """
+
+        def share(total: int) -> int:
+            base, remainder = divmod(int(total), count)
+            return base + (1 if index < remainder else 0)
+
+        prompt = share(span_usage["prompt_tokens"])
+        completion = share(span_usage["completion_tokens"])
+        return {
+            "evaluation_model": model_name,
+            "evaluation_prompt_tokens": prompt,
+            "evaluation_completion_tokens": completion,
+            "evaluation_total_tokens": share(span_usage["total_tokens"]),
+            "evaluation_cost_usd": estimate_usage_cost_usd(
+                prompt, completion, model_name
+            ),
+        }
+
+    @staticmethod
+    def _count_unsatisfied_intents(
+        intent_states: List[Any], pass_threshold: float
+    ) -> int:
         return sum(
             1
             for state in intent_states
             if getattr(state, "state", "")
             not in TemporalMetricsProcessor._RESOLVED_INTENT_STATES
             and int(getattr(state, "occurrences", 0) or 0) >= 2
-            and float(getattr(state, "final_score", 0)) == 0.0
+            and float(getattr(state, "final_score", 0)) < pass_threshold
         )
 
     @staticmethod
@@ -1451,13 +1481,12 @@ class TemporalMetricsProcessor:
     # Adaptive span sampling helpers
     # ================================================================
 
-    def _build_sampling_plan(
+    def _build_sampling_plan_for(
         self,
-        raw_spans: List[Dict],
-        spans_by_id: Dict,
+        span_dicts: List[Dict[str, Any]],
         sampling: SamplingConfig,
     ):
-        """Pre-scan spans (zero MCE calls) to compute anchors and evaluable position map.
+        """Pre-scan steps (zero MCE calls) to compute anchors and evaluable position map.
 
         Returns:
             anchors (set[int]): span indices always evaluated regardless of zone rate.
@@ -1469,8 +1498,7 @@ class TemporalMetricsProcessor:
         post_large_tool_candidates: List[int] = []
         last_tool_was_large = False
 
-        for n, raw_span in enumerate(raw_spans):
-            span_dict = self._otel_trace_to_span_dict(raw_span, spans_by_id=spans_by_id)
+        for n, span_dict in enumerate(span_dicts):
             entity_type = span_dict["entity_type"]
 
             if entity_type not in ("tool", "llm"):
@@ -1558,21 +1586,6 @@ class TemporalMetricsProcessor:
     # Core: evaluate a session
     # ================================================================
 
-    def evaluate_session(
-        self,
-        session_id: str,
-        policy_override: Optional[str] = None,
-    ) -> SessionResult:
-        """Query session spans through the API library, then evaluate in-process."""
-        try:
-            spans = self.fetch_spans_for_session(session_id)
-        except Exception as exc:
-            logger.error("Error fetching session %s: %s", session_id, exc)
-            return SessionResult(session_id=session_id, error=str(exc))
-        return self.evaluate_spans(
-            spans, session_id=session_id, policy_override=policy_override
-        )
-
     def evaluate_spans(
         self,
         spans: Iterable[SpanInput],
@@ -1591,33 +1604,112 @@ class TemporalMetricsProcessor:
             return run_sync(self.aevaluate_spans(
                 spans, session_id=session_id, policy_override=policy_override
             ))
+        self._last_cross_span_usage = None
+        self._last_final_outcome_usage = None
         try:
-            self._last_cross_span_usage = None
-            self._last_final_outcome_usage = None
             raw_spans = deepcopy([dict(span) for span in spans])
-
             if not raw_spans:
                 return SessionResult(
                     session_id=session_id,
                     error="No spans found for session",
                 )
+            prepared = self._prepare_otel_session(raw_spans)
+        except Exception as e:
+            logger.error(f"Error processing session {session_id}: {e}")
+            return SessionResult(session_id=session_id, error=str(e))
+        return self._evaluate_prepared(
+            prepared, session_id=session_id, policy_override=policy_override
+        )
 
-            raw_spans = self._sort_spans_chronologically(raw_spans)
-            raw_spans = self._deduplicate_spans(raw_spans)
-            extracted_system_message = self._extract_system_message(raw_spans)
+    def evaluate_trajectory(
+        self,
+        trajectory: Trajectory,
+        *,
+        policy_override: Optional[str] = None,
+    ) -> SessionResult:
+        """Evaluate a normalized trajectory (see ``models.trajectory``).
+
+        Steps arrive ordered and identified by their own ids, so no OTel
+        parsing, sorting or de-duplication happens here.
+        """
+        session_id = trajectory["session_id"]
+        self._last_cross_span_usage = None
+        self._last_final_outcome_usage = None
+        try:
+            if not trajectory.get("steps"):
+                return SessionResult(
+                    session_id=session_id,
+                    error="No trajectory steps found for session",
+                )
+            prepared = self._prepare_trajectory_session(trajectory)
+        except Exception as e:
+            logger.error(f"Error processing session {session_id}: {e}")
+            return SessionResult(session_id=session_id, error=str(e))
+        return self._evaluate_prepared(
+            prepared, session_id=session_id, policy_override=policy_override
+        )
+
+    def _prepare_otel_session(
+        self, raw_spans: List[Dict[str, Any]]
+    ) -> _PreparedSession:
+        raw_spans = self._sort_spans_chronologically(raw_spans)
+        raw_spans = self._deduplicate_spans(raw_spans)
+        spans_by_id = {
+            str(span.get("SpanId")): span for span in raw_spans if span.get("SpanId")
+        }
+        root_request = SpanNormalizer.extract_root_request(raw_spans)
+        return _PreparedSession(
+            span_dicts=[
+                self._otel_trace_to_span_dict(raw_span, spans_by_id=spans_by_id)
+                for raw_span in raw_spans
+            ],
+            system_message=self._extract_system_message(raw_spans),
+            tool_defs=self._extract_tool_definitions(raw_spans),
+            coordination_context=self._extract_coordination_context(raw_spans),
+            roster=self._declared_roster(raw_spans, spans_by_id),
+            root_request=root_request,
+            contracts=list(
+                self._extract_agent_semantic_contracts(raw_spans, root_request)
+            ),
+            app_name=raw_spans[0].get("ServiceName", "") if raw_spans else "",
+            raw_spans=raw_spans,
+        )
+
+    def _prepare_trajectory_session(self, trajectory: Trajectory) -> _PreparedSession:
+        from stateful_evals_be.evaluation import trajectory_input as ti
+        from stateful_evals_be.evaluation.coordination import CoordinationContext
+
+        span_dicts = ti.build_span_dicts(trajectory)
+        return _PreparedSession(
+            span_dicts=span_dicts,
+            system_message=ti.root_policy(span_dicts),
+            tool_defs=ti.tool_definitions(trajectory),
+            coordination_context=CoordinationContext(),
+            roster=ti.declared_roster(span_dicts),
+            root_request=ti.find_root_request(span_dicts),
+            contracts=ti.semantic_contracts(span_dicts),
+            app_name="",
+            final_answer=ti.find_final_answer(span_dicts),
+        )
+
+    def _evaluate_prepared(
+        self,
+        prepared: _PreparedSession,
+        *,
+        session_id: str,
+        policy_override: Optional[str] = None,
+    ) -> SessionResult:
+        """Run the span loop and the final audit over a prepared session."""
+        try:
+            span_dicts = prepared.span_dicts
+            raw_spans = prepared.raw_spans
             system_message = (
                 policy_override.strip()
                 if isinstance(policy_override, str) and policy_override.strip()
-                else extracted_system_message
+                else prepared.system_message
             )
-            tool_defs = self._extract_tool_definitions(raw_spans)
-            spans_by_id = {
-                str(span.get("SpanId")): span
-                for span in raw_spans
-                if span.get("SpanId")
-            }
 
-            total_spans = len(raw_spans)
+            total_spans = len(span_dicts)
             current_score = 0.0
             failures: List[MetricFailure] = []
             intent_events: List[Dict[str, Any]] = []
@@ -1638,8 +1730,8 @@ class TemporalMetricsProcessor:
             anchors: set = set()
             eval_pos_map: Dict[int, int] = {}
             if use_sampling and sampling_cfg is not None:
-                anchors, eval_pos_map = self._build_sampling_plan(
-                    raw_spans, spans_by_id, sampling_cfg
+                anchors, eval_pos_map = self._build_sampling_plan_for(
+                    span_dicts, sampling_cfg
                 )
                 logger.info(
                     f"[{session_id}] Sampling: strategy={sampling_cfg.strategy} | "
@@ -1648,23 +1740,50 @@ class TemporalMetricsProcessor:
 
             traj_ctx = TrajectoryContext(
                 policy_text=system_message,
-                tool_definitions=tool_defs,
-                coordination_context=self._extract_coordination_context(raw_spans),
+                tool_definitions=prepared.tool_defs,
+                coordination_context=prepared.coordination_context,
                 adapter_ingestion="incremental",
             )
-            traj_ctx.declare_roster(self._declared_roster(raw_spans, spans_by_id))
-            root_request = SpanNormalizer.extract_root_request(raw_spans)
-            traj_ctx.declare_root_request(root_request)
-            self._ingest_agent_semantic_contracts(traj_ctx, raw_spans, root_request)
-            app_name = raw_spans[0].get("ServiceName", "") if raw_spans else ""
+            traj_ctx.declare_roster(prepared.roster)
+            traj_ctx.declare_root_request(prepared.root_request)
+            for agent_id, content, span_index in prepared.contracts:
+                traj_ctx.add_policy_rule(
+                    content,
+                    source_name=f"semantic_contract:{agent_id}",
+                    span_index=span_index,
+                )
+            app_name = prepared.app_name
+
+            # What each step added to the running context, keyed by Transition id
+            # (trajectory input only), so the caller can persist it with the step.
+            transition_contexts: Dict[str, Dict[str, Any]] = {}
+            # Policy, root request and contracts exist before the first step; they
+            # are folded into the first transition's context so replaying the
+            # deltas starts complete.
+            seed = traj_ctx.context_delta({})
+            first_transition = (
+                span_dicts[0].get("transition_id") if span_dicts else None
+            )
+            if seed and first_transition:
+                transition_contexts[first_transition] = seed
+
+            def ingest(step: Dict[str, Any], index: int) -> None:
+                transition_id = step.get("transition_id")
+                marker = traj_ctx.context_marker() if transition_id else None
+                traj_ctx.ingest_span(step, span_index=index)
+                if marker is not None:
+                    delta = traj_ctx.context_delta(marker)
+                    if delta:
+                        traj_ctx.merge_context_delta(
+                            transition_contexts.setdefault(transition_id, {}), delta
+                        )
 
             use_fatal_mode = self.options.use_fatal_mode
+            span_pass_threshold = self.options.span_pass_threshold
+            eval_model = str(self.llm_config.LLM_MODEL_NAME)
             skip_next_llm = False
 
-            for n, raw_span in enumerate(raw_spans):
-                span_dict = self._otel_trace_to_span_dict(
-                    raw_span, spans_by_id=spans_by_id
-                )
+            for n, span_dict in enumerate(span_dicts):
                 entity_type = span_dict["entity_type"]
                 entity_name = span_dict["entity_name"]
 
@@ -1674,17 +1793,17 @@ class TemporalMetricsProcessor:
                 )
 
                 if entity_type == "agent":
-                    skip_next_llm = self._agent_span_has_routing_or_answer(raw_span)
+                    skip_next_llm = self._span_has_routing_or_answer(span_dict)
                     if skip_next_llm:
                         logger.info(
                             f"[{session_id}]   Agent routing/answer detected — "
                             f"will skip next LLM span (dedup)"
                         )
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 if entity_type not in ("tool", "llm"):
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 if entity_type == "llm" and skip_next_llm:
@@ -1693,7 +1812,7 @@ class TemporalMetricsProcessor:
                         f"[{session_id}]   Skipping LLM span (dedup: "
                         f"agent already captured routing/answer)"
                     )
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 if entity_type == "tool":
@@ -1701,7 +1820,7 @@ class TemporalMetricsProcessor:
 
                 metrics_to_run = self._metrics_for_span(span_dict)
                 if not metrics_to_run:
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 # Adaptive sampling gate — skipped spans still feed TrajectoryContext
@@ -1713,7 +1832,7 @@ class TemporalMetricsProcessor:
                             f"[{session_id}]   [SAMPLED OUT] span {n} ({entity_type}/{entity_name})"
                         )
                         spans_sampled_out += 1
-                        traj_ctx.ingest_span(span_dict, span_index=n)
+                        ingest(span_dict, n)
                         continue
 
                 if span_dict.get("contains_error"):
@@ -1724,8 +1843,9 @@ class TemporalMetricsProcessor:
                         span_metric_results.append(
                             SpanMetricResult(
                                 span_index=n,
-                                span_id=str(raw_span.get("SpanId", "")),
-                                trace_id=str(raw_span.get("TraceId", "")),
+                                span_id=str(span_dict.get("span_id") or ""),
+                                trace_id=str(span_dict.get("trace_id") or ""),
+                                transition_id=str(span_dict.get("transition_id") or ""),
                                 span_type=entity_type,
                                 entity_name=entity_name,
                                 metric_name=metric_name,
@@ -1759,7 +1879,7 @@ class TemporalMetricsProcessor:
                                     policy=system_message,
                                 )
                             )
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 focused = self.options.span_context_mode == "focused"
@@ -1775,6 +1895,11 @@ class TemporalMetricsProcessor:
                 compact_span = self._compact_span_delta(span_dict)
                 mce_spans_evaluated += 1
                 mce_call_attempts += 1
+                span_usage = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
                 try:
                     mce_response = self.compute_span_state_delta(
                         span_dict,
@@ -1785,7 +1910,7 @@ class TemporalMetricsProcessor:
                     # Recheck provisional failures against all available prior
                     # artifacts once, so retrieval omissions do not become failures.
                     needs_expansion = mce_response.get("needs_more_context") or any(
-                        result.get("value") == 0
+                        float(result.get("value", 0.0)) < span_pass_threshold
                         for result in mce_response.get("results", [])
                     )
                     if (
@@ -1799,6 +1924,15 @@ class TemporalMetricsProcessor:
                             first_usage.get("completion_tokens", 0)
                         )
                         mce_total_tokens += int(first_usage.get("total_tokens", 0))
+                        span_usage["total_tokens"] += int(
+                            first_usage.get("total_tokens", 0)
+                        )
+                        span_usage["prompt_tokens"] += int(
+                            first_usage.get("prompt_tokens", 0)
+                        )
+                        span_usage["completion_tokens"] += int(
+                            first_usage.get("completion_tokens", 0)
+                        )
                         context_state = traj_ctx.retrieve_for_span(
                             span_dict,
                             span_index=n,
@@ -1822,6 +1956,13 @@ class TemporalMetricsProcessor:
                     mce_prompt_tokens += int(mce_usage.get("prompt_tokens", 0))
                     mce_completion_tokens += int(mce_usage.get("completion_tokens", 0))
                     mce_total_tokens += int(mce_usage.get("total_tokens", 0))
+                    span_usage["total_tokens"] += int(mce_usage.get("total_tokens", 0))
+                    span_usage["prompt_tokens"] += int(
+                        mce_usage.get("prompt_tokens", 0)
+                    )
+                    span_usage["completion_tokens"] += int(
+                        mce_usage.get("completion_tokens", 0)
+                    )
                     if focused and mce_response.get("needs_more_context"):
                         mce_response["results"] = []
                         mce_response["failed_metrics"] = [
@@ -1842,7 +1983,7 @@ class TemporalMetricsProcessor:
                         )
                         mce_call_failures += 1
                         last_mce_error = err_msg
-                        traj_ctx.ingest_span(span_dict, span_index=n)
+                        ingest(span_dict, n)
                         continue
 
                     mce_call_successes += 1
@@ -1850,7 +1991,7 @@ class TemporalMetricsProcessor:
                     logger.error(f"[{session_id}] Combined span judge failed: {e}")
                     mce_call_failures += 1
                     last_mce_error = str(e)
-                    traj_ctx.ingest_span(span_dict, span_index=n)
+                    ingest(span_dict, n)
                     continue
 
                 eval_context = json.dumps(
@@ -1858,7 +1999,8 @@ class TemporalMetricsProcessor:
                     ensure_ascii=True,
                     default=str,
                 )
-                for result in mce_response.get("results", []):
+                span_results = mce_response.get("results", [])
+                for result_index, result in enumerate(span_results):
                     result_metric = result.get("metric_name", "")
                     value = result.get("value", 0.0)
                     reasoning = result.get("reasoning", "")
@@ -1887,13 +2029,21 @@ class TemporalMetricsProcessor:
                     span_metric_results.append(
                         SpanMetricResult(
                             span_index=n,
-                            span_id=str(raw_span.get("SpanId", "")),
-                            trace_id=str(raw_span.get("TraceId", "")),
+                            span_id=str(span_dict.get("span_id") or ""),
+                            trace_id=str(span_dict.get("trace_id") or ""),
+                            transition_id=str(span_dict.get("transition_id") or ""),
                             span_type=entity_type,
                             entity_name=entity_name,
                             metric_name=result_metric,
                             score=score_value,
+                            raw_score=result.get("raw_score"),
                             reasoning=reasoning,
+                            **self._metric_usage_share(
+                                span_usage,
+                                result_index,
+                                len(span_results),
+                                eval_model,
+                            ),
                         )
                     )
 
@@ -1906,7 +2056,7 @@ class TemporalMetricsProcessor:
                         f"reasoning={reasoning[:120]}{'...' if len(str(reasoning)) > 120 else ''}"
                     )
 
-                    if use_fatal_mode and score_value == 0:
+                    if use_fatal_mode and score_value < span_pass_threshold:
                         if not self._is_intent_metric(result_metric):
                             failures.append(
                                 MetricFailure(
@@ -1924,10 +2074,28 @@ class TemporalMetricsProcessor:
                                 )
                             )
 
-                traj_ctx.ingest_span(span_dict, span_index=n)
+                ingest(span_dict, n)
 
-            self._synchronize_final_answer(traj_ctx, raw_spans)
+            finalize_marker = traj_ctx.context_marker()
+            if raw_spans:
+                self._synchronize_final_answer(traj_ctx, raw_spans)
+            elif prepared.final_answer[0]:
+                traj_ctx.set_final_answer(
+                    prepared.final_answer[0],
+                    prepared.final_answer[1],
+                    record_synthesis=True,
+                )
             traj_ctx.finalize_state()
+            last_transition = (
+                span_dicts[-1].get("transition_id") if span_dicts else None
+            )
+            if last_transition:
+                finalization = traj_ctx.context_delta(finalize_marker)
+                if finalization:
+                    traj_ctx.merge_context_delta(
+                        transition_contexts.setdefault(last_transition, {}),
+                        finalization,
+                    )
 
             if (
                 mce_call_attempts > 0
@@ -1986,8 +2154,12 @@ class TemporalMetricsProcessor:
                     )
                     failures.append(loop_failure)
 
-            intent_states = self._resolve_intent_states(intent_events, total_spans)
-            unsatisfied_intents = self._count_unsatisfied_intents(intent_states)
+            intent_states = self._resolve_intent_states(
+                intent_events, total_spans, span_pass_threshold
+            )
+            unsatisfied_intents = self._count_unsatisfied_intents(
+                intent_states, span_pass_threshold
+            )
 
             fatal_failures: List[FailureDetail] = []
             minor_failures: List[FailureDetail] = []
@@ -2067,7 +2239,7 @@ class TemporalMetricsProcessor:
                     for s in intent_states
                     if getattr(s, "state", "") in ("failed", "drifting")
                     and int(getattr(s, "occurrences", 0) or 0) >= 2
-                    and float(getattr(s, "final_score", 0)) == 0.0
+                    and float(getattr(s, "final_score", 0)) < span_pass_threshold
                 ]
                 unresolved_names = [getattr(s, "name", "?") for s in unresolved]
                 logger.info(
@@ -2313,6 +2485,7 @@ class TemporalMetricsProcessor:
                 high_level_metrics=high_level_metrics,
                 trajectory_metric_set=trajectory_metric_set,
                 trajectory_metrics=trajectory_metrics,
+                transition_contexts=transition_contexts,
                 token_usage=token_usage,
                 cost_estimate=cost_estimate,
             )
@@ -2322,7 +2495,7 @@ class TemporalMetricsProcessor:
             logger.error(f"Error processing session {session_id}: {error_str}")
 
             # Whole-session retries belong to the caller. Re-fetching here would
-            # violate evaluate_spans' input boundary and repeat billed model work.
+            # violate the evaluation input boundary and repeat billed model work.
             return SessionResult(session_id=session_id, error=error_str)
 
     # ================================================================
@@ -2364,26 +2537,6 @@ class TemporalMetricsProcessor:
             "total_minor": len(minor_failures),
         }
         return json.dumps(payload, ensure_ascii=False, default=str)
-
-    # ================================================================
-    # Batch: evaluate multiple sessions
-    # ================================================================
-
-    def run_evaluation(
-        self,
-        session_ids: List[str],
-        policy_overrides: Optional[Dict[str, str]] = None,
-    ) -> EvalSummary:
-        """Compatibility batch entry point; isolate evaluation state per session."""
-        from stateful_evals_be.evaluation.engine import EvaluationEngine
-
-        return EvaluationEngine(
-            llm_config=self.llm_config, options=self.options
-        ).evaluate_sessions(
-            session_ids,
-            span_loader=self.fetch_spans_for_session,
-            policy_overrides=policy_overrides,
-        )
 
 
 def _same_answer_text(first: str, second: str) -> bool:

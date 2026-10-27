@@ -55,6 +55,7 @@ Score: <1-5>
                 value=0.0,
                 metric_class=self.ontology_class,
                 reasoning="Missing required agent data",
+                error="Missing required agent data",
             )
 
         prompt = self.PROMPT_TEMPLATE.format(

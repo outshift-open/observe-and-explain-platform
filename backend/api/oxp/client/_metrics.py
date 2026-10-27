@@ -34,6 +34,7 @@ from oxp.models.otel_traces import (
     TimelineData,
 )
 from oxp.query_builders import metrics as metrics_queries
+from oxp.query_builders.metric_graph import EVALUATION_KEYS
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -70,8 +71,8 @@ def _metric_results_to_items(
             MetricItem(
                 name=r.metric_id,
                 value=r.value if isinstance(r.value, (int, float)) else None,
-                metric_id=r.metadata.get("metric_id"),
-                source=r.metadata.get("source") or r.provider,
+                metric_id=r.metric_id,
+                source=r.provider,
                 reasoning=_decode_reasoning_payload(r.reasoning),
                 error=r.error,
             )
@@ -99,78 +100,6 @@ def _json_safe(value):
     if isinstance(value, list):
         return [_json_safe(v) for v in value]
     return value
-
-
-def _parse_metric_result(
-    result: object,
-) -> tuple[float | None, str | None, str | None, str | None]:
-    """Parse serialized metric payload and return normalized fields.
-
-    Metric payloads can contain complex structures under ``value``. The
-    response model only accepts numeric values, so non-numeric values are
-    normalized to ``None``.
-    """
-    if result is None:
-        return None, None, None, None
-
-    if isinstance(result, str) and result == "":
-        return None, None, None, None
-
-    if isinstance(result, Real) and not isinstance(result, bool):
-        return float(result), None, None, None
-
-    parsed = None
-    if isinstance(result, str):
-        try:
-            parsed = json.loads(result)
-        except (json.JSONDecodeError, TypeError):
-            return None, None, None, None
-    elif isinstance(result, dict):
-        parsed = result
-
-    if isinstance(parsed, Real) and not isinstance(parsed, bool):
-        return float(parsed), None, None, None
-
-    if not isinstance(parsed, dict):
-        return None, None, None, None
-
-    raw_value = parsed.get("value")
-    value = (
-        float(raw_value)
-        if isinstance(raw_value, Real) and not isinstance(raw_value, bool)
-        else None
-    )
-    return (
-        value,
-        parsed.get("metric_id"),
-        parsed.get("source"),
-        parsed.get("reasoning"),
-    )
-
-
-def _parse_metric_payload(result: object) -> Any:
-    """Return the decoded metric payload when possible."""
-    if result is None or result == "":
-        return None
-    if isinstance(result, Real) and not isinstance(result, bool):
-        return float(result)
-    if isinstance(result, dict):
-        return result
-    if isinstance(result, str):
-        current: Any = result
-        for _ in range(3):
-            if isinstance(current, dict):
-                return current
-            if isinstance(current, Real) and not isinstance(current, bool):
-                return float(current)
-            if not isinstance(current, str):
-                return current
-            try:
-                current = json.loads(current)
-            except (json.JSONDecodeError, TypeError):
-                return None
-        return current
-    return None
 
 
 def _path_value(payload: Any, path: list[str] | None) -> Any:
@@ -312,6 +241,7 @@ class MetricsClient:
                 metadata={
                     "metric_id": m.get("metric_id"),
                     "source": m.get("source"),
+                    **{k: m[k] for k in EVALUATION_KEYS if m.get(k) is not None},
                 },
             )
             for m in metrics
@@ -397,14 +327,12 @@ class MetricsClient:
             name = row.get("metricName", "")
             if not name:
                 continue
-            payload = _parse_metric_payload(row.get("metricResult"))
-            value, _, _, _ = _parse_metric_result(row.get("metricResult"))
-            if value is None:
-                raw_value = row.get("value")
-                if isinstance(raw_value, Real) and not isinstance(raw_value, bool):
-                    value = float(raw_value)
-            if payload is None and value is not None:
-                payload = {"value": value}
+            raw_value = row.get("metricResult")
+            payload = (
+                float(raw_value)
+                if isinstance(raw_value, Real) and not isinstance(raw_value, bool)
+                else None
+            )
 
             ts = row.get("timestamp")
             epoch = 0.0
@@ -530,6 +458,7 @@ class MetricsClient:
                 metadata={
                     "metric_id": m.get("metric_id"),
                     "source": m.get("source"),
+                    **{k: m[k] for k in EVALUATION_KEYS if m.get(k) is not None},
                 },
             )
             for m in metrics

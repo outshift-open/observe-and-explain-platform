@@ -21,6 +21,8 @@ from oxp.models.otel_traces import (
     MonitorApplicationLevelData,
     MonitorByApplicationResponse,
     SemanticgroupsResponse,
+    SessionsWithCognitiveObservabilityResponse,
+    SessionsWithCognitionProtocolsResponse,
 )
 
 router = APIRouter()
@@ -150,6 +152,71 @@ def application_sessions_with_stateful_eval(
             start_time=start_time,
             end_time=end_time,
             semantic_group_id=semantic_group_id,
+        ),
+        ttl=settings.CACHE_TTL_SECONDS,
+        enabled=settings.CACHE_ENABLED,
+    )
+
+
+@router.get(
+    "/{application_id}/sessions-with-cognitive-observability",
+    response_model=SessionsWithCognitiveObservabilityResponse,
+)
+def application_sessions_with_cognitive_observability(
+    application_id: str,
+    start_time: str = Query(""),
+    end_time: str = Query(""),
+    session_id: str = Query(""),
+    ui_client=Depends(_kg_client),  # noqa: B008
+    redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
+) -> Any:
+    """Return sessions with their cognitive metrics and failures from the KG."""
+    key = make_cache_key(
+        "applications:sessions_with_cognitive_observability",
+        {
+            "app": application_id,
+            "start": start_time,
+            "end": end_time,
+            "session": session_id,
+        },
+    )
+    return cached(
+        redis_client=redis_client,
+        key=key,
+        fetch=lambda: ui_client.get_application_sessions_with_cognitive_observability(
+            application_id=application_id,
+            start_time=start_time,
+            end_time=end_time,
+            session_id=session_id,
+        ),
+        ttl=settings.CACHE_TTL_SECONDS,
+        enabled=settings.CACHE_ENABLED,
+    )
+
+
+@router.get(
+    "/{application_id}/sessions-with-cognition-protocols",
+    response_model=SessionsWithCognitionProtocolsResponse,
+)
+def application_sessions_with_cognition_protocols(
+    application_id: str,
+    start_time: str = Query(""),
+    end_time: str = Query(""),
+    ui_client=Depends(_kg_client),  # noqa: B008
+    redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
+) -> Any:
+    """Return sessions with their Cognition protocol status from the KG."""
+    key = make_cache_key(
+        "applications:sessions_with_cognition_protocols",
+        {"app": application_id, "start": start_time, "end": end_time},
+    )
+    return cached(
+        redis_client=redis_client,
+        key=key,
+        fetch=lambda: ui_client.get_application_sessions_with_cognition_protocols(
+            application_id=application_id,
+            start_time=start_time,
+            end_time=end_time,
         ),
         ttl=settings.CACHE_TTL_SECONDS,
         enabled=settings.CACHE_ENABLED,

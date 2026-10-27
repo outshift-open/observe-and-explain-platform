@@ -3,6 +3,7 @@
 import json
 
 from stateful_evals_be.evaluation.processor import TemporalMetricsProcessor
+from stateful_evals_be.integrations.oxp import oxp_span_to_otel
 from stateful_evals_be.evaluation.trajectory_context import (
     CoordinationEvent,
     IntentEntry,
@@ -204,7 +205,7 @@ def test_native_observe_contract_tools_and_explicit_final_are_preserved() -> Non
 
 
 def test_api_link_columns_reach_coordination_normalization() -> None:
-    raw = TemporalMetricsProcessor._oxp_span_to_otel_format(
+    raw = oxp_span_to_otel(
         {
             "span_id": "r2-agent",
             "trace_id": "trace-1",

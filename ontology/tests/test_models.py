@@ -119,8 +119,51 @@ def test_node_inheritance_resolved_from_ontology_subclassing():
         ("processing_call", "ProcessingCall"),
         ("state", "State"),
         ("transition", "Transition"),
+        ("trajectory_context", "TrajectoryContext"),
     ],
 )
 def test_expected_core_node_classes_exist(module, cls_name):
     imported = __import__(f"oxp_ontology.models.nodes.{module}", fromlist=[cls_name])
     assert hasattr(imported, cls_name)
+
+
+def test_cognition_protocol_report_lists_protocols_as_list_fields():
+    """mas:multiValued types a property as a list of its range."""
+    from datetime import datetime, timezone
+
+    from oxp_ontology.models.nodes.cognition_protocol_report import (
+        CognitionProtocolReport,
+    )
+
+    now = datetime.now(timezone.utc)
+    report = CognitionProtocolReport(
+        id="r", sessionId="s", reportedAt=now, protocolsEnabled=["accord"]
+    )
+    assert report.protocolsEnabled == ["accord"] and report.protocolsActivated == []
+    assert (
+        CognitionProtocolReport(id="r2", sessionId="s", reportedAt=now).protocolsEnabled
+        is not report.protocolsActivated
+    )
+
+
+def test_cognition_protocol_execution_report_requires_its_protocol():
+    from datetime import datetime, timezone
+
+    from pydantic import ValidationError
+
+    from oxp_ontology.models.nodes.cognition_protocol_execution_report import (
+        CognitionProtocolExecutionReport,
+    )
+
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValidationError):
+        CognitionProtocolExecutionReport(id="p", sessionId="s", reportedAt=now)
+    report = CognitionProtocolExecutionReport(
+        id="p",
+        sessionId="s",
+        reportedAt=now,
+        protocol="accord",
+        agentsActivated=["sre"],
+        metricCount=3,
+    )
+    assert report.agentsActivated == ["sre"] and report.metricCount == 3

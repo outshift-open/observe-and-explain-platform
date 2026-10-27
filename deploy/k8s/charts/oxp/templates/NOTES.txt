@@ -1,0 +1,21 @@
+OXP has been deployed to namespace {{ .Release.Namespace }}.
+
+No Ingress is enabled by default, so reach the deployed services locally via
+kubectl port-forward:
+
+{{- if .Values.gateway.enabled }}
+
+UI and API (through the gateway):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Values.gateway.fullnameOverride | default (include "oxp.fullname" .) }} 8080:{{ .Values.gateway.service.port }}
+  Then open http://localhost:8080
+{{- end }}
+
+{{- if .Values.otelCollector.enabled }}
+{{- $otelHttpPort := 4318 }}
+{{- if and .Values.otelCollector.ports (hasKey .Values.otelCollector.ports "otlp-http") }}
+{{- $otelHttpPort = int (index (index .Values.otelCollector.ports "otlp-http") "servicePort") }}
+{{- end }}
+
+OTel collector (to send traces from a local app):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "oxp.otelCollectorName" . }} {{ $otelHttpPort }}:{{ $otelHttpPort }}
+{{- end }}

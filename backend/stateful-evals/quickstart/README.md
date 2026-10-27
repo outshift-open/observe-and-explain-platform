@@ -60,8 +60,9 @@ How spans reach Stateful Evals: the SDK exports them over OTLP to `api_endpoint`
 The SDK's [collector config](https://github.com/agntcy/observe/blob/main/deploy/otel-collector-config.yaml)
 receives OTLP on ports 4317 and 4318 and writes to ClickHouse. The OXP API reads
 the `otel_traces` table ([schema](../../api/data/clickhouse/otel_traces.sql)), and
-`evaluate_session` and the [Stateful Eval worker](../../workers/stateful-eval-worker/README.md)
-fetch a session's spans in process through the API package. Without a database,
+the [Stateful Eval worker](../../workers/stateful-eval-worker/README.md)
+reads a session's trajectory through the OXP API (`get_session_trajectory`) and
+evaluates it with `evaluate_trajectory`. Without a database,
 export the spans to a file and call `evaluate_file`, as `evaluate_trajectories.py` does.
 
 ## Step 2: The sample trajectory

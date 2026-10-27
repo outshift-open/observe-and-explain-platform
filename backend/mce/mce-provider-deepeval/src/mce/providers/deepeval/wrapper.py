@@ -69,6 +69,7 @@ class DeepEvalMetricWrapper(ExternalMetricWrapper):
         Overrides default sequential implementation.
         """
         from mce.core.metric import MetricResult
+        from mce.engine.usage import track_usage
         import concurrent.futures
 
         # Fast path for empty
@@ -84,18 +85,23 @@ class DeepEvalMetricWrapper(ExternalMetricWrapper):
 
         # Helper to run one item and capture index
         def _process_item(idx, rid, ctx):
-            try:
-                # Same logic as base.compute() but simplified
-                return self.compute(rid, ctx)
-            except Exception as e:
-                return MetricResult(
-                    metric_id=self.metric_id,
-                    resource_id=rid,
-                    provider="DeepEval",
-                    value=0.0,
-                    error=str(e),
-                    reasoning=f"Batch Exec Failed: {e}",
-                )
+            # Runs in a pool thread, so open the usage scope here: it counts the
+            # judge calls DeepEval makes through the MCE LLM service.
+            with track_usage() as usage:
+                try:
+                    # Same logic as base.compute() but simplified
+                    result = self.compute(rid, ctx)
+                except Exception as e:
+                    result = MetricResult(
+                        metric_id=self.metric_id,
+                        resource_id=rid,
+                        provider="DeepEval",
+                        value=0.0,
+                        error=str(e),
+                        reasoning=f"Batch Exec Failed: {e}",
+                    )
+            result.metadata.update(usage.to_metadata())
+            return result
 
         # Use a pool sized from env (MCE_DEEPEVAL_MAX_WORKERS) or default 4.
         max_workers = int(os.environ.get("MCE_DEEPEVAL_MAX_WORKERS", "4"))

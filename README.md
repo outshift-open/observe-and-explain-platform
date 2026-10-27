@@ -1,5 +1,10 @@
 # Observe and eXplain Platform (OXP)
 
+> [!WARNING]
+> **This repository is discontinued and no longer maintained.** 
+> OXP has been renamed SCOPE and development has moved to [github.com/ioc-project/scope](https://github.com/ioc-project/scope). Please use that repository for new work, issues, and contributions.
+> This repo is going to be archived.
+
 OXP is a modular platform for observing, analyzing, and explaining the executions of Multi-Agent Systems (MAS) from OpenTelemetry traces. It ingests raw OTel spans, maps them onto a shared MAS ontology, and enriches each session with analysis such as semantic grouping, anomaly detection, consistency checking, and stateful trajectory evaluation — surfaced through a web dashboard.
 
 ## How it works

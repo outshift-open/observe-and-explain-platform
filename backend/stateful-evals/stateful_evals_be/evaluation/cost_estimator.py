@@ -1,13 +1,25 @@
 #  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
 #  SPDX-License-Identifier: Apache-2.0
-"""Local LLM token cost estimation for stateful eval runs."""
+"""LLM token cost estimation for stateful eval runs.
+
+The price table is LiteLLM's. It starts as ``data/model_prices_and_context_window.json``,
+the copy packaged with the library and refreshed from LiteLLM whenever the image
+is built. Unless ``MODEL_PRICES_REFRESH`` is ``false``, it is then refreshed at
+run time from ``MODEL_PRICES_URL`` (LiteLLM's published file) at the first price
+lookup and again every ``MODEL_PRICES_TTL_SECONDS`` (a day). If LiteLLM cannot be
+reached or its file is invalid, the table already in use stays, packaged or last
+fetched, and the fetch is retried an hour later.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import threading
+import time
+import urllib.request
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -21,6 +33,15 @@ _PRICE_FILE = (
     / "model_prices_and_context_window.json"
 )
 _DEFAULT_PRICING_MODEL = "gpt-4o"
+_DEFAULT_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+_DEFAULT_TTL_SECONDS = 24 * 3600
+_RETRY_SECONDS = 3600
+_FETCH_TIMEOUT_SECONDS = 5
+_MIN_MODELS = 1000  # a download with fewer entries is almost certainly broken
+
+_lock = threading.Lock()
+_lookup: Dict[str, "ModelPrice"] | None = None
+_next_refresh = 0.0  # time.monotonic() of the next run-time refresh
 
 
 @dataclass(frozen=True)
@@ -105,6 +126,24 @@ def estimate_token_cost(
     )
 
 
+def estimate_usage_cost_usd(
+    prompt_tokens: int,
+    completion_tokens: int,
+    model_name: str,
+) -> float:
+    """USD cost of a token count, falling back to the default pricing model."""
+
+    price = resolve_model_price(model_name) or resolve_model_price(
+        _DEFAULT_PRICING_MODEL
+    )
+    if price is None:
+        return 0.0
+    return _round_cost(
+        prompt_tokens * price.input_cost_per_token
+        + completion_tokens * price.output_cost_per_token
+    )
+
+
 def resolve_model_price(model_name: str) -> Optional[ModelPrice]:
     lookup = _price_lookup()
     key = _normalize_name(model_name)
@@ -117,19 +156,11 @@ def resolve_model_price(model_name: str) -> Optional[ModelPrice]:
     return None
 
 
-@lru_cache(maxsize=1)
-def _price_lookup() -> Dict[str, ModelPrice]:
-    try:
-        raw = json.loads(_PRICE_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        logger.exception("Unable to load local model pricing file: %s", _PRICE_FILE)
-        return {}
-
-    if not isinstance(raw, dict):
-        logger.warning("Local model pricing file is not a JSON object: %s", _PRICE_FILE)
-        return {}
-
+def _parse(raw: Any, source: str) -> Dict[str, ModelPrice]:
+    """Price by name and alias of every model with both per-token costs."""
     lookup: Dict[str, ModelPrice] = {}
+    if not isinstance(raw, dict):
+        return lookup
     for name, metadata in raw.items():
         if not isinstance(metadata, dict):
             continue
@@ -140,11 +171,84 @@ def _price_lookup() -> Dict[str, ModelPrice]:
             model_name=str(name),
             input_cost_per_token=pricing[0],
             output_cost_per_token=pricing[1],
-            source="local_model_prices_json",
+            source=source,
         )
         for alias in _names_and_aliases(str(name), metadata):
             lookup[_normalize_name(alias)] = price
     return lookup
+
+
+def _packaged_lookup(*, proxy_only: bool = False) -> Dict[str, ModelPrice]:
+    try:
+        raw = json.loads(_PRICE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("Unable to load local model pricing file: %s", _PRICE_FILE)
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning("Local model pricing file is not a JSON object: %s", _PRICE_FILE)
+        return {}
+    if proxy_only:
+        raw = {
+            name: metadata for name, metadata in raw.items()
+            if isinstance(metadata, dict)
+            and metadata.get("stateful_evals_source") == "proxy_model_info_snapshot"
+        }
+    return _parse(raw, "local_model_prices_json")
+
+
+def _fetched_lookup(url: str) -> Dict[str, ModelPrice]:
+    """The table at ``url``; raises ``ValueError`` unless it looks like LiteLLM's."""
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "oxp-stateful-evals-model-prices"}
+    )
+    with urllib.request.urlopen(request, timeout=_FETCH_TIMEOUT_SECONDS) as response:
+        lookup = _parse(
+            json.loads(response.read().decode("utf-8")), "litellm_model_prices_json"
+        )
+    if (
+        len(lookup) < _MIN_MODELS
+        or _normalize_name(_DEFAULT_PRICING_MODEL) not in lookup
+    ):
+        raise ValueError(f"the price file looks broken ({len(lookup)} priced names)")
+    return lookup
+
+
+def _refresh_enabled() -> bool:
+    return os.getenv("MODEL_PRICES_REFRESH", "true").strip().lower() not in (
+        "false",
+        "0",
+        "no",
+    )
+
+
+def _ttl_seconds() -> float:
+    try:
+        return float(os.getenv("MODEL_PRICES_TTL_SECONDS", _DEFAULT_TTL_SECONDS))
+    except ValueError:
+        return _DEFAULT_TTL_SECONDS
+
+
+def _price_lookup() -> Dict[str, ModelPrice]:
+    global _lookup, _next_refresh
+    with _lock:
+        if _lookup is None:
+            _lookup = _packaged_lookup()
+        if _refresh_enabled() and time.monotonic() >= _next_refresh:
+            url = os.getenv("MODEL_PRICES_URL", _DEFAULT_URL)
+            try:
+                # Proxy aliases may be absent upstream. Keep their packaged
+                # prices while allowing refreshed entries to take precedence.
+                _lookup = {**_packaged_lookup(proxy_only=True), **_fetched_lookup(url)}
+                _next_refresh = time.monotonic() + _ttl_seconds()
+                logger.info("Refreshed %d model prices from %s", len(_lookup), url)
+            except Exception as exc:
+                _next_refresh = time.monotonic() + _RETRY_SECONDS
+                logger.warning(
+                    "Could not refresh model prices from %s (%s); using the table already loaded",
+                    url,
+                    exc,
+                )
+        return _lookup
 
 
 def _names_and_aliases(name: str, metadata: Dict[str, Any]) -> Iterable[str]:

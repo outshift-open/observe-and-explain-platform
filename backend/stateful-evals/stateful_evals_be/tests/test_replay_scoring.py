@@ -33,5 +33,3 @@ def test_response_drift_relaxed_profile() -> None:
     assert "response_span_drifting" in current.quality_gate_failures
     assert relaxed.predicted_label == 1
     assert "response_span_drifting" not in relaxed.quality_gate_failures
-
-

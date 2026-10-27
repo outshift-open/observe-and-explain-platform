@@ -16,7 +16,7 @@
     dcterms:description "Semantic embedding layer for MAS trajectories. Defines Embedding classes and State/Execution to Embedding links."@en ;
     dcterms:created "2026-07-22"^^xsd:date ;
     owl:priorVersion <https://outshift-open.github.io/oxp-ontology/embedding/1.0.0-rc0> ;
-    owl:versionInfo "1.0.2" ;
+    owl:versionInfo "1.0.6" ;
     vann:preferredNamespacePrefix "mas" ;
     vann:preferredNamespaceUri "https://outshift-open.github.io/oxp-ontology/mas#" ;
     owl:imports <https://outshift-open.github.io/oxp-ontology/mas> .
@@ -69,6 +69,94 @@ mas:embeddingDimension rdf:type owl:DatatypeProperty, sh:PropertyShape ;
     rdfs:domain mas:Embedding ;
     rdfs:range xsd:integer ;
     rdfs:comment "Vector dimensionality." .
+
+# -- Trajectory Context
+
+mas:TrajectoryContext rdf:type owl:Class ;
+    rdfs:subClassOf mas:SemanticElement ;
+    rdfs:comment "What one Transition added to (or changed in) the running trajectory context of its session: the evidence, claims, intents, work units and provenance links derived from it. Replaying the TrajectoryContexts of a session's Transitions in trajectory order rebuilds the context at any point. Each constituent (evidence, claims, intents, work units, provenance links, coordination events, flags, final answer) is its own property and is only present when the Transition contributed it. Example: TrajectoryContext_001, attached to Transition_001 via :hasContext, holds the claims and evidence derived from the call Transition_001 represents." .
+
+mas:evidence rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:evidence ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Evidence the Transition added to the context: JSON list of facts (policy rule, tool output, user statement, agent handoff, runtime feedback), each with its absolute index, source, agent, outcome and the intents it relates to." .
+
+mas:claims rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:claims ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Claims the Transition added to the context: JSON list of agent assertions, completion claims and tool results, each with its absolute index, agent and evidence references." .
+
+mas:intents rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:intents ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Intents the Transition introduced or changed: JSON list of user, policy or delegated intents with their absolute index, status, owners and dependencies." .
+
+mas:workUnits rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:workUnits ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Work units (delegated pieces of work) the Transition introduced or changed: JSON list with absolute index, owner, outcome and source calls." .
+
+mas:provenanceLinks rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:provenanceLinks ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Provenance links the Transition added between context artifacts: JSON list (for example evidence supporting a claim)." .
+
+mas:coordinationEvents rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:coordinationEvents ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Coordination events (assignment, handoff, synthesis, ...) the Transition added: JSON list." .
+
+mas:flags rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:flags ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Flags the Transition raised on the trajectory: JSON list." .
+
+mas:finalAnswer rdf:type owl:DatatypeProperty, sh:PropertyShape ;
+    sh:path mas:finalAnswer ;
+    sh:targetClass mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:TrajectoryContext ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Text of the final answer, when this Transition set or changed it." .
+
+mas:hasContext rdf:type owl:ObjectProperty, sh:PropertyShape ;
+    sh:path mas:hasContext ;
+    sh:targetClass mas:Transition ;
+    sh:class mas:TrajectoryContext ;
+    sh:minCount 0 ;
+    sh:severity sh:Info ;
+    rdfs:domain mas:Transition ;
+    rdfs:range mas:TrajectoryContext ;
+    rdfs:comment "Transition contributed this trajectory context (Transition → TrajectoryContext). At most one per Transition." .
 
 # -- Semantic Group
 

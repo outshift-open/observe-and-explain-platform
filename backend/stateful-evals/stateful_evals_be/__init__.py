@@ -14,7 +14,6 @@ if TYPE_CHECKING:
         TemporalMetricsProcessor,
         available_metrics,
         evaluate_file,
-        evaluate_session,
         evaluate_spans,
         session_result_payload,
     )
@@ -28,7 +27,6 @@ __all__ = [
     "TemporalMetricsProcessor",
     "available_metrics",
     "evaluate_file",
-    "evaluate_session",
     "evaluate_spans",
     "session_result_payload",
 ]

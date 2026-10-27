@@ -13,7 +13,7 @@ from oxp.api.api_v1.endpoints.helpers import get_client
 from oxp.cache import cached, make_cache_key
 from oxp.connectors.base import Connector
 from oxp.core.config import settings
-from oxp.dependencies import get_db, get_redis
+from oxp.dependencies import get_db, get_neo4j_db, get_redis
 from oxp.models.otel_traces import (
     ApplicationNamesResponse,
     ApplicationsResponse,
@@ -24,6 +24,11 @@ router = APIRouter()
 
 def _client(db: Connector = Depends(get_db)):  # noqa: B008
     """Lazily resolve the UI client from the current DB dependency."""
+    return get_client(api_client=db)
+
+
+def _kg_client(db: Connector = Depends(get_neo4j_db)):  # noqa: B008
+    """Resolve a client backed by Neo4j for KG-only endpoints."""
     return get_client(api_client=db)
 
 
@@ -59,10 +64,10 @@ def get_applications(
     end_time: str = Query(""),
     limit: int = Query(50),
     offset: int = Query(0),
-    ui_client=Depends(_client),  # noqa: B008
+    ui_client=Depends(_kg_client),  # noqa: B008
     redis_client: redis_lib.Redis = Depends(get_redis),  # noqa: B008
 ) -> Any:
-    """Return the list of known applications (cached)."""
+    """Return the MAS applications from the KG that have sessions in range (cached)."""
     key = make_cache_key(
         "ui:applications",
         {"start": start_time, "end": end_time, "limit": limit, "offset": offset},

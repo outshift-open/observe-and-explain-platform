@@ -5,18 +5,30 @@ import logging
 import os
 from typing import Optional
 
+import yaml
 from worker_base.base_worker import BaseWorker
 from worker_base.queue_message import BaseQueueMessage
 
 logger = logging.getLogger(__name__)
 
 
+_SPAN_EVALUATION_FIELDS = (
+    "evaluation_model",
+    "evaluation_prompt_tokens",
+    "evaluation_completion_tokens",
+    "evaluation_total_tokens",
+    "evaluation_cost_usd",
+)
+
+
 class StatefulEvalWorker(BaseWorker):
     """Worker that runs temporal metric evaluation directly in-process.
 
-    Fetches spans, invokes the Stateful Evals library, and persists results.
-    Span fetching and metric writes both bypass the REST API layer and go
-    directly to the KG via the oxp-api library.
+    Reads a session's normalized trajectory (Transition/State chain and the
+    LLM, tool and agent calls it represents) from the KG through the OXP API
+    library's DAL, invokes the Stateful Evals library on it, and writes the
+    results back onto the Transition nodes. The KG connection is the shared
+    Neo4j connector every worker uses; no OTel store is involved.
     """
 
     def __init__(
@@ -30,6 +42,7 @@ class StatefulEvalWorker(BaseWorker):
         llm_api_key: Optional[str] = None,
         llm_model_name: Optional[str] = None,
         llm_base_model_url: Optional[str] = None,
+        config_path: Optional[str] = None,
         debug: bool = False,
     ):
         super().__init__(
@@ -53,32 +66,43 @@ class StatefulEvalWorker(BaseWorker):
         self.sampling_early_rate = float(os.getenv("SAMPLING_EARLY_RATE", "0.25"))
         self.sampling_mid_rate = float(os.getenv("SAMPLING_MID_RATE", "0.60"))
 
+        self.trajectory_metrics = self._trajectory_metrics_from(config_path)
+
         self.push_metrics = os.getenv("PUSH_METRICS", "true").strip().lower() not in ("false", "0", "no")
+        self.push_context = os.getenv("PUSH_TRANSITION_CONTEXT", "true").strip().lower() not in ("false", "0", "no")
 
-        # Lazy-initialised shared LocalClient (one Neo4j driver pool per worker)
-        self._oxp_client = None
+    @staticmethod
+    def _trajectory_metrics_from(config_path: Optional[str]) -> Optional[list[str]]:
+        """The ``trajectory_metrics`` of the config file: ``all`` or a list of names or codes.
 
-    def _get_oxp_client(self):
-        if self._oxp_client is None:
-            from oxp.client.local import LocalClient
+        With no file, or an empty list, no trajectory metric runs. The file is checked
+        here, so a misspelt key or metric stops the worker at startup and not on every message.
+        """
+        if not config_path:
+            return None
+        with open(config_path, encoding="utf-8") as handle:
+            config = yaml.safe_load(handle) or {}
+        unknown = set(config) - {"trajectory_metrics"}
+        if unknown:
+            raise ValueError(f"Unknown setting(s) in {config_path}: {', '.join(sorted(unknown))}")
 
-            neo4j = None
-            if self.push_metrics:
-                # Same shared connector BaseWorker and every other worker use, so
-                # metric writes reuse its driver and its NEO4J_URI/host:port handling.
-                from oxp.dependencies import get_neo4j_connector
+        selectors = config.get("trajectory_metrics") or []
+        if isinstance(selectors, str):
+            selectors = [selectors]
+        if not selectors:
+            return None
+        from stateful_evals_be.evaluation.trajectory_context_metrics.trajectory_metrics import (
+            resolve_trajectory_metric_codes,
+        )
 
-                neo4j = get_neo4j_connector()
-            self._oxp_client = LocalClient.from_settings(persist_metrics=self.push_metrics, neo4j=neo4j)
-        return self._oxp_client
+        resolve_trajectory_metric_codes(selectors)
+        return list(selectors)
 
-    def _close_db_handler(self):
-        try:
-            if self._oxp_client is not None:
-                self._oxp_client.close()
-                self._oxp_client = None
-        finally:
-            super()._close_db_handler()
+    def _get_kg(self):
+        """The shared Neo4j connector (owned and closed by the base worker)."""
+        from oxp.dependencies import get_neo4j_connector
+
+        return get_neo4j_connector()
 
     def _build_processor(self):
         """Create a fresh TemporalMetricsProcessor for one session evaluation.
@@ -110,24 +134,26 @@ class StatefulEvalWorker(BaseWorker):
 
         return TemporalMetricsProcessor(
             llm_config=llm_config,
-            options=TemporalMetricOptions(sampling=sampling_cfg),
+            options=TemporalMetricOptions(sampling=sampling_cfg, trajectory_metrics=self.trajectory_metrics),
         )
 
-    def _fetch_spans(self, session_id: str):
-        from stateful_evals_be.integrations.oxp import fetch_session_spans
+    @staticmethod
+    def _fetch_trajectory(kg, session_id: str) -> dict:
+        from oxp.client.dal import get_session_trajectory
 
-        spans = fetch_session_spans(self._get_oxp_client(), session_id)
-        logger.info("Fetched %d spans for session %s (in-process)", len(spans), session_id)
-        return spans
+        trajectory = get_session_trajectory(kg, session_id)
+        logger.info("Read %d trajectory steps for session %s", len(trajectory["steps"]), session_id)
+        return trajectory
 
     async def handle_message(self, msg: BaseQueueMessage):
         session_id = msg.session_id
         logger.info(f"StatefulEvalWorker: evaluating session {session_id}")
 
-        spans = await asyncio.to_thread(self._fetch_spans, session_id)
+        kg = self._get_kg()
         processor = self._build_processor()
         try:
-            result = await asyncio.to_thread(processor.evaluate_spans, spans, session_id=session_id)
+            trajectory = await asyncio.to_thread(self._fetch_trajectory, kg, session_id)
+            result = await asyncio.to_thread(processor.evaluate_trajectory, trajectory)
         finally:
             processor.close()
 
@@ -135,7 +161,7 @@ class StatefulEvalWorker(BaseWorker):
             logger.error(f"StatefulEvalWorker: session {session_id} error: {result.error}")
 
         if self.push_metrics and not result.error:
-            await asyncio.to_thread(self._push_metrics_to_kg, result)
+            await asyncio.to_thread(self._push_metrics_to_kg, kg, result)
         elif self.push_metrics and result.error:
             logger.warning(f"StatefulEvalWorker: skipping KG write for session {session_id} due to eval error")
 
@@ -149,55 +175,124 @@ class StatefulEvalWorker(BaseWorker):
         ]
         return True
 
-    def _push_metrics_to_kg(self, result) -> None:
-        """Write span and session-level metrics directly to the KG via the oxp-api lib."""
-        client = self._get_oxp_client()
+    def _session_evaluation_fields(self, result) -> dict:
+        """Total evaluation usage (all phases) and estimated cost of the session."""
+        fields: dict = {"evaluation_model": self.llm_model_name}
+        usage = result.token_usage
+        if usage.total_tokens or usage.prompt_tokens or usage.completion_tokens:
+            fields["evaluation_prompt_tokens"] = usage.prompt_tokens
+            fields["evaluation_completion_tokens"] = usage.completion_tokens
+            fields["evaluation_total_tokens"] = usage.total_tokens
+            fields["evaluation_cost_usd"] = result.cost_estimate.estimated_cost_usd
+        return fields
 
-        if result.span_metric_results:
-            grouped: dict = {}
-            for smr in result.span_metric_results:
-                key = smr.span_id or f"idx-{smr.span_index}"
-                grouped.setdefault(key, []).append(smr)
+    def _trajectory_metric_results(self, result) -> list:
+        """The session's trajectory metrics as ``MetricResult``s measuring the session.
 
-            for span_id, smrs in grouped.items():
-                metrics_payload = [
-                    {
-                        "name": smr.metric_name,
-                        "value": smr.score,
-                        "provider": "stateful_evals",
-                        "metric_id": None,
-                        "source": "StatefulEval",
-                        "reasoning": smr.reasoning,
-                    }
-                    for smr in smrs
-                ]
-                resp = client.write_span_metrics(result.session_id, span_id, metrics_payload)
-                errs = resp.get("errors", [])
-                if errs:
-                    logger.error("write_span_metrics errors for span %s: %s", span_id, errs)
-                else:
-                    logger.info("Wrote %d span metrics for span %s", resp.get("written", 0), span_id)
+        A metric that was not applicable or could not be judged has no score and is not written.
+        """
+        from oxp.interfaces.models import MetricResult
+        from stateful_evals_be.evaluation.cost_estimator import estimate_usage_cost_usd
 
-        if result.trajectory_score is not None:
-            resp = client.write_session_metrics(
+        results = []
+        skipped = 0
+        for item in result.trajectory_metrics:
+            if item.get("score") is None:
+                skipped += 1
+                continue
+            usage = (item.get("metadata") or {}).get("usage") or {}
+            metadata: dict = {"evaluation_model": self.llm_model_name}
+            if usage.get("total_tokens"):
+                metadata["evaluation_prompt_tokens"] = usage["prompt_tokens"]
+                metadata["evaluation_completion_tokens"] = usage["completion_tokens"]
+                metadata["evaluation_total_tokens"] = usage["total_tokens"]
+                metadata["evaluation_cost_usd"] = estimate_usage_cost_usd(
+                    usage["prompt_tokens"], usage["completion_tokens"], self.llm_model_name
+                )
+            results.append(
+                MetricResult(
+                    metric_id="".join(item["high_level_metric"].split()),
+                    resource_id=result.session_id,
+                    provider="StatefulEvals",
+                    value=item["score"],
+                    reasoning=item.get("reasoning"),
+                    metadata=metadata,
+                )
+            )
+        if skipped:
+            logger.info("Skipping %d trajectory metrics without a score for session %s", skipped, result.session_id)
+        return results
+
+    def _push_metrics_to_kg(self, kg, result) -> None:
+        """Write step metrics, trajectory context and the session score to the KG."""
+        from oxp.client.dal import write_transition_context
+        from oxp.interfaces.models import MetricResult
+        from oxp.providers import OXPMetricsProvider
+
+        provider = OXPMetricsProvider(db=kg)
+
+        # A step's span id is the id of its call node, which the metrics measure.
+        grouped: dict = {}
+        for smr in result.span_metric_results:
+            if not smr.span_id:
+                logger.warning("Skipping %s: no call id on its span result", smr.metric_name)
+                continue
+            grouped.setdefault(smr.span_id, []).append(smr)
+
+        for call_id, smrs in grouped.items():
+            # Evaluation usage/cost keys are only sent when measured; they become the
+            # evaluation fields of the MetricResult.
+            ok = provider.save_call_metrics(
                 result.session_id,
+                call_id,
                 [
-                    {
-                        "name": "trajectory_score",
-                        "value": result.trajectory_score,
-                        "provider": "stateful_evals",
-                        "metric_id": None,
-                        "source": "StatefulEval",
-                        "reasoning": result.trajectory_reasoning,
-                    }
+                    MetricResult(
+                        metric_id=smr.metric_name,
+                        resource_id=call_id,
+                        provider="StatefulEvals",
+                        value=smr.score,
+                        reasoning=smr.reasoning,
+                        metadata={
+                            field: getattr(smr, field)
+                            for field in _SPAN_EVALUATION_FIELDS
+                            if getattr(smr, field, None) is not None
+                        },
+                    )
+                    for smr in smrs
                 ],
             )
-            errs = resp.get("errors", [])
-            if errs:
-                logger.error("write_session_metrics errors for session %s: %s", result.session_id, errs)
+            if ok:
+                logger.info("Wrote %d metrics for call %s", len(smrs), call_id)
             else:
-                logger.info(
-                    "Wrote trajectory_score=%s for session %s",
-                    result.trajectory_score,
-                    result.session_id,
-                )
+                logger.error("Could not write all metrics for call %s", call_id)
+
+        if self.push_context:
+            for transition_id, context in (getattr(result, "transition_contexts", None) or {}).items():
+                if not write_transition_context(kg, result.session_id, transition_id, context):
+                    logger.error("Could not write context for transition %s", transition_id)
+
+        trajectory_metrics = self._trajectory_metric_results(result)
+        if trajectory_metrics:
+            ok = provider.save_metrics(trajectory_metrics)
+            if ok:
+                logger.info("Wrote %d trajectory metrics for session %s", len(trajectory_metrics), result.session_id)
+            else:
+                logger.error("Could not write all trajectory metrics for session %s", result.session_id)
+
+        if result.trajectory_score is not None:
+            ok = provider.save_metrics(
+                [
+                    MetricResult(
+                        metric_id="TrajectoryScore",
+                        resource_id=result.session_id,
+                        provider="StatefulEvals",
+                        value=result.trajectory_score,
+                        reasoning=result.trajectory_reasoning,
+                        metadata=self._session_evaluation_fields(result),
+                    )
+                ]
+            )
+            if ok:
+                logger.info("Wrote TrajectoryScore=%s for session %s", result.trajectory_score, result.session_id)
+            else:
+                logger.error("Could not write TrajectoryScore for session %s", result.session_id)

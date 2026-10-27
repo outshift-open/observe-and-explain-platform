@@ -11,6 +11,7 @@ flow between workers (both the per-session ingestion pipeline and the periodic j
 |---|---|
 | [analysis-worker](analysis-worker.md) | Runs anomaly detection, consistency and normal behaviour analyses in parallel |
 | [anomaly-detection-worker](anomaly-detection-worker.md) | Identifies outlier sessions within a semantic group |
+| [cognitive-failure-worker](cognitive-failure-worker.md) | Detects cognitive failures of the challenges taxonomy in a session |
 | [consistency-worker](consistency-worker.md) | Consistency analysis |
 | [embedding-worker](embedding-worker.md) | Processes telemetry sessions with vector embeddings |
 | [grouping-worker](grouping-worker.md) | Quick-grouping of sessions |

@@ -160,6 +160,43 @@ class TestOntologyValidity:
         assert (mas.result, RDF.type, OWL.DatatypeProperty) in g
         assert (mas.reasoning, RDF.type, OWL.DatatypeProperty) in g
 
+    def test_metric_result_declares_a_required_timestamp(self):
+        """Every observation is timestamped, so results can be ordered over time."""
+        from rdflib import RDFS, XSD, Graph, Namespace
+        from rdflib.namespace import SH
+
+        g = Graph()
+        g.parse(get_ontology_path("metrics"), format="turtle")
+        mas = Namespace("https://outshift-open.github.io/oxp-ontology/mas#")
+
+        assert (mas.timestamp, RDFS.domain, mas.MetricResult) in g
+        assert (mas.timestamp, RDFS.range, XSD.dateTime) in g
+        assert next(g.objects(mas.timestamp, SH.minCount)).toPython() == 1
+
+    def test_metric_result_declares_optional_evaluation_cost_properties(self):
+        """LLM-judged metrics can record the judge model, its token usage and an estimated USD cost."""
+        from rdflib import RDFS, XSD, Graph, Namespace
+        from rdflib.namespace import SH
+
+        g = Graph()
+        g.parse(get_ontology_path("metrics"), format="turtle")
+        mas = Namespace("https://outshift-open.github.io/oxp-ontology/mas#")
+
+        expected = {
+            "evaluationModel": XSD.string,
+            "evaluationPromptTokenCount": XSD.integer,
+            "evaluationCompletionTokenCount": XSD.integer,
+            "evaluationTotalTokenCount": XSD.integer,
+            "evaluationCost": XSD.double,
+        }
+        for name, datatype in expected.items():
+            prop = mas[name]
+            assert (prop, RDFS.domain, mas.MetricResult) in g, name
+            assert (prop, RDFS.range, datatype) in g, name
+            # optional: deterministic metrics make no LLM call
+            assert (prop, SH.minCount, None) in g
+            assert next(g.objects(prop, SH.minCount)).toPython() == 0, name
+
     def test_validation_library_accepts_rc_ordering(self):
         assert parse_version("1.0.0-rc0") < parse_version("1.0.0-rc1")
         assert parse_version("1.0.0-rc1") < parse_version("1.0.0")
@@ -183,6 +220,70 @@ class TestOntologyValidity:
 
         assert report.ok is False
         assert "agent_spans[0] has mismatched sessionId" in report.issues
+
+
+class TestCognitionProtocolReportsOntology:
+    """The Cognition protocol reports and how metrics attach to them."""
+
+    @staticmethod
+    def _graph():
+        from rdflib import Graph
+
+        g = Graph()
+        for name in ("mas", "metrics", "analysis"):
+            g.parse(get_ontology_path(name), format="turtle")
+        return g
+
+    def test_report_classes_are_declared(self):
+        from rdflib import OWL, RDF, RDFS, Namespace
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        for cls in (mas.CognitionProtocolReport, mas.CognitionProtocolExecutionReport):
+            assert (cls, RDF.type, OWL.Class) in g
+            assert (cls, RDFS.subClassOf, mas.Element) in g
+
+    def test_reports_hang_off_a_session(self):
+        from rdflib import RDFS, Namespace
+        from rdflib.namespace import SH
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        assert (mas.reportsOn, RDFS.range, mas.Session) in g
+        assert next(g.objects(mas.reportsOn, SH.minCount)).toPython() == 1
+
+    def test_a_metric_result_can_measure_a_protocol_execution_report(self):
+        from rdflib import OWL, RDFS, Namespace
+        from rdflib.collection import Collection
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        union = next(g.objects(mas.measures, RDFS.range))
+        members = set(Collection(g, next(g.objects(union, OWL.unionOf))))
+        assert members == {mas.ExecutionElement, mas.CognitionProtocolExecutionReport}
+
+    def test_protocol_lists_are_marked_multi_valued(self):
+        from rdflib import Namespace
+
+        g, mas = (
+            self._graph(),
+            Namespace("https://outshift-open.github.io/oxp-ontology/mas#"),
+        )
+        for prop in (
+            "protocolsEnabled",
+            "protocolsActivated",
+            "agentsEnabled",
+            "agentsActivated",
+            "skillsEnabled",
+            "skillsActivated",
+        ):
+            assert next(g.objects(mas[prop], mas.multiValued)).toPython() is True
 
 
 class TestPackageIntegration:

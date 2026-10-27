@@ -270,6 +270,60 @@ class TestConditionalAboutMetricRule:
         )
 
 
+class TestCognitionProtocolReports:
+    """The Cognition protocol reports conform when they hang off a Session, and not otherwise."""
+
+    @staticmethod
+    def _cognition_protocol_report(**overrides):
+        from oxp_ontology.models.nodes.cognition_protocol_report import (
+            CognitionProtocolReport,
+        )
+
+        defaults = {
+            "id": "cognitionprotocolreport-1",
+            "name": "Cognition protocol report",
+            "sessionId": "s1",
+            "reportedAt": datetime.datetime.now(datetime.timezone.utc),
+            "protocolsEnabled": ["accord"],
+            "protocolsActivated": ["accord"],
+        }
+        defaults.update(overrides)
+        return CognitionProtocolReport(**defaults)
+
+    def test_report_on_a_session_conforms_with_lists(self):
+        from oxp_ontology.models.edges.reports_on import reportsOn
+
+        report = self._cognition_protocol_report()
+        result = verify_kg_object(
+            report, edges=[reportsOn(source_id=report.id, target_id="s1")]
+        )
+        assert result.conforms, [v.message for v in result.errors]
+
+    def test_report_without_a_session_violates(self):
+        result = verify_kg_object(self._cognition_protocol_report())
+        assert not result.conforms
+        assert any("reportsOn" in str(v.path) for v in result.errors)
+
+    def test_protocol_execution_report_conforms(self):
+        from oxp_ontology.models.edges.reports_on import reportsOn
+        from oxp_ontology.models.nodes.cognition_protocol_execution_report import (
+            CognitionProtocolExecutionReport,
+        )
+
+        report = CognitionProtocolExecutionReport(
+            id="p1",
+            name="accord",
+            sessionId="s1",
+            protocol="accord",
+            reportedAt=datetime.datetime.now(datetime.timezone.utc),
+            agentsActivated=["sre", "db"],
+        )
+        result = verify_kg_object(
+            report, edges=[reportsOn(source_id=report.id, target_id="s1")]
+        )
+        assert result.conforms, [v.message for v in result.errors]
+
+
 class TestOntologyValidationError:
     def test_raised_from_a_failing_report_carries_the_report(self):
         node, edges = _consistency_report(with_group=False)

@@ -67,6 +67,9 @@ all = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"mce.engine" = ["data/*.json"]
+
 [tool.uv.sources]
 oxp-mce-provider-native = { workspace = true }
 oxp-mce-provider-sdk = { workspace = true }

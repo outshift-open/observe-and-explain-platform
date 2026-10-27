@@ -2,12 +2,14 @@
 #  SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 import concurrent.futures
+import contextvars
+import functools
 import logging
 import os
 from typing import Any
 from mce.core.metric import Metric, MetricRequirements, MetricResult
 from mce.core.specs import SpecRegistry
-from mce.providers.native.utils import llm_g_eval_score
+from mce.providers.native.utils import JudgeScoreError, llm_g_eval_score
 from mce.providers.native.metrics.quality.tool_utilization_accuracy_workaround import (
     resolve_tool_call_fields,
 )
@@ -78,6 +80,7 @@ Score: <1-5>
                 value=0.0,
                 metric_class=self.ontology_class,
                 reasoning=f"Missing required tool data: {missing}",
+                error=f"Missing required tool data: {missing}",
             )
 
         prompt = self.PROMPT_TEMPLATE.format(
@@ -143,6 +146,7 @@ Score: <1-5>
                 value=0.0,
                 metric_class=self.ontology_class,
                 reasoning=f"No evaluable ToolCalls in session (skipped={skipped}, total={len(tool_spans)})",
+                error="No evaluable ToolCalls in session",
             )
 
         max_workers = self._resolve_parallel_workers()
@@ -155,20 +159,37 @@ Score: <1-5>
             skipped,
         )
 
-        def _score_call(item: dict[str, str]) -> tuple[str, float]:
-            score, _, _ = llm_g_eval_score(self, item["prompt"])
+        def _score_call(item: dict[str, str]) -> tuple[str, float | None]:
+            try:
+                score, _, _ = llm_g_eval_score(self, item["prompt"])
+            except JudgeScoreError as exc:
+                logger.warning(
+                    "ToolUtilizationAccuracy: no score for ToolCall %s: %s",
+                    item["execution_id"],
+                    exc,
+                )
+                return item["execution_id"], None
             return item["execution_id"], score
 
         completed = 0
+        unscored = 0
         log_every = 1 if total <= 10 else max(1, total // 4)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Worker threads do not inherit the context: run each call in a copy
+            # of this one so its LLM usage is counted for this metric.
             future_to_call = {
-                executor.submit(_score_call, item): item["execution_id"]
+                executor.submit(
+                    functools.partial(contextvars.copy_context().run, _score_call),
+                    item,
+                ): item["execution_id"]
                 for item in evaluable_calls
             }
             for future in concurrent.futures.as_completed(future_to_call):
                 execution_id, score = future.result()
-                scores.append(score)
+                if score is None:
+                    unscored += 1
+                else:
+                    scores.append(score)
                 completed += 1
                 if completed == total or completed % log_every == 0:
                     logger.info(
@@ -179,6 +200,10 @@ Score: <1-5>
                         execution_id,
                     )
 
+        if not scores:
+            raise JudgeScoreError(
+                f"No usable judge score for any of the {total} ToolCalls"
+            )
         avg = sum(scores) / len(scores)
         return MetricResult(
             metric_id=self.metric_id,
@@ -191,6 +216,7 @@ Score: <1-5>
                 "scores": scores,
                 "evaluated": len(scores),
                 "skipped": skipped,
+                "unscored": unscored,
                 "scale": "1-5",
             },
         )

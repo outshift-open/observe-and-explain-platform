@@ -5,6 +5,54 @@ All notable changes to the OXP backend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Cognitive failure worker.** `cognitive-failure-worker` detects the cognitive failures of the challenges
+  taxonomy (IR-1, CC-3, ...) in a session and writes a `CognitiveFailureReport` (failure code,
+  `low`/`medium`/`high` confidence, reasoning) attached to the session by `reportsOn` and to the call where it
+  happened by `atCall`. The worker fetches the trajectory, writes it to a temporary file that is deleted
+  afterwards, and an agent without access to the API or the graph reads it with `list_steps` / `read_step` /
+  `grep` tools and answers through a schema-enforced `submit_detections` tool. Opt-in: list the failures to look for in `cognitive_failure_config.yaml`
+  (`workers.cognitive-failure.config` in the Helm chart). It is fed from the embedding worker's output, next to
+  the stateful-eval worker. The Cypher is in `oxp.query_builders.failure_graph`, the writer in
+  `oxp.client.failures`. Requires an `oxp-ontology` release with `CognitiveFailureReport`.
+- **Cognition protocol reports.** `oxp.providers.OXPCognitionProtocolReportProvider` writes, through the ontology models, an
+  `CognitionProtocolReport` per session (`protocolsEnabled` / `protocolsActivated`: which Cognition protocols were available and
+  which were used) and a `CognitionProtocolExecutionReport` per session and protocol (the agents and skills that had
+  it and used it, and its evaluation metrics), both linked to the `Session` by `reportsOn`.
+  `save_protocol_execution_metrics` stores a protocol's metrics as `MetricResult` nodes that `measure` its
+  execution report (the report's earlier results are replaced), via the new `protocol_execution_report` target
+  of `metric_graph.write_metric_result_query`. The Cypher is in `oxp.query_builders.cognition_protocol_graph`.
+  Requires `oxp-ontology>=1.0.6`.
+- **Cognition protocols read API.** `GET /sessions/{id}/cognition-protocols` reads the session's `CognitionProtocolReport` and
+  `CognitionProtocolExecutionReport` nodes and returns, per protocol (`ACCORD`...), `enabled` / `activated`, the
+  agents and skills that had / used it, and a generic `metrics` list (`name`, `section`, `value`, `reasoning`
+  or parsed `details`, `provider`, `unit`, `timestamp`). `sessions-with-cognition-protocols` returns each session's
+  enabled / activated protocols from its `CognitionProtocolReport`; its `concord` summary is no longer filled.
+
+### Changed
+
+- **Breaking: metrics are stored as the ontology's `Metric` + `MetricResult`.** A `MetricResult`
+  (`result`, `reasoning`, `timestamp`, `evaluation*` cost fields) is linked to its `Metric` definition
+  (one per metric name and provider, with `metricProvider`, `unit`, `valueRange`) by `ofMetricType`, and
+  `measures` the `Session`, or the call (by span id), it was computed for. This replaces the
+  `(:Session|:Span)-[:hasMetric]->(:Metric {metricName, metricResult, value, provider, source,
+  metricId, ...})` nodes: there is no `hasMetric` edge and no `Span` node for metrics, and `source` and
+  `metricId` are gone (the provider identifies the producer). Every reader (API queries, group-worker
+  data, UI rollups, insight templates) and the writers (MCE, stateful-eval worker) use the new model;
+  there is no backward compatibility, so existing metric nodes must be deleted and recomputed.
+- `aboutMetric` links from consistency, anomaly and normal-behaviour reports now point at the `Metric`
+  definition(s) of the metric name (they never matched anything before).
+- Requires `oxp-ontology` with `MetricResult.timestamp`.
+- The stateful-eval worker can run the trajectory metrics (Policy Safety, Task Completion, ...) and writes each
+  as a session `MetricResult`. They are opt-in: list the ones to run in `stateful_eval_config.yaml` (`workers.stateful-eval.config` in the
+  Helm chart); with no file or an empty list none run.
+- The LLM price table behind the evaluation cost is refreshed from LiteLLM on every `mce-worker` and
+  `stateful-eval-worker` image build (in the Dockerfile, so local builds too) and at run time, falling back to
+  the table packaged in the image. See `MODEL_PRICES_REFRESH`, `MODEL_PRICES_URL` and `MODEL_PRICES_TTL_SECONDS`.
+
 ## [1.0.0] - 2026-09-30
 
 ### Added

@@ -1,0 +1,34 @@
+#  Copyright (c) 2026 Cisco Systems, Inc. and its affiliates
+#  SPDX-License-Identifier: Apache-2.0
+
+# Settings of the cognitive-failure worker (--config-file, or COGNITIVE_FAILURE_CONFIG_PATH).
+#
+# Which cognitive failures of the challenges taxonomy to look for. Only the ones listed run, and
+# every one listed is part of the one judge call made per session; with none, nothing is detected.
+# A detection is written as a CognitiveFailureReport on the session and, when it happened in one
+# call, on that call.
+failures:
+  # Individual
+  - IR-1   # earlier instructions lost as the context fills
+  - IC-1   # a commitment dropped under interference
+  - IC-2   # the plan is not revised when the context changes
+  - IE-1   # false confidence: does not know what it does not know
+  # Dyadic
+  - DR-2   # information lost or truncated at a handoff
+  - DC-3   # positions exchanged, no binding proposal
+  - DC-4   # task delegated to the wrong peer
+  - DE-1   # query routed to a peer without the knowledge, or the worse reply adopted
+  # Collective
+  - CC-3   # conflicting sub-agent outputs committed without reconciliation
+  - CE-1   # confident output with no collective verification
+  # Not enabled by default: structural or design-level, or needing more than one trace
+  # - DR-1
+  # - DC-1
+  # - DC-2
+  # - CR-1
+  # - CR-2
+  # - CC-1
+  # - CC-2
+  # - CC-4
+  # - CS-1
+  # - CS-2

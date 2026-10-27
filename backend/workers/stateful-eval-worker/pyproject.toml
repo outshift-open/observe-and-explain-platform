@@ -27,6 +27,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "click>=8.0.0",
     "aio_pika>=8.0.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.optional-dependencies]

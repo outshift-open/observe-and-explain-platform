@@ -67,8 +67,6 @@ spec:
                 secretKeyRef:
                   name: {{ $llmSecretName }}
                   key: {{ $embeddingModelKey }}
-            - name: EMBEDDING_LAYER
-              value: {{ $worker.layer | quote }}
             - name: MAX_INFLIGHT_MESSAGES
               value: {{ $worker.maxInflightMessages | quote }}
             {{- if $workerOverrides.aiGatewayApiKey }}

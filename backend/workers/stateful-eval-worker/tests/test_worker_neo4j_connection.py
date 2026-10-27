@@ -53,12 +53,11 @@ def drivers(monkeypatch):
         {"NEO4J_HOST": "neo4j:7687"},
     ],
 )
-def test_metric_writes_share_the_base_worker_neo4j_driver(monkeypatch, rabbit_url, drivers, env):
+def test_kg_access_shares_the_base_worker_neo4j_driver(monkeypatch, rabbit_url, drivers, env):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     worker = StatefulEvalWorker(rabbit_url=rabbit_url, input_queue="test")
-    worker.push_metrics = True
-    worker._get_oxp_client()
+    worker._get_kg()
     assert [d.uri for d in drivers] == ["bolt://neo4j:7687"]
     worker._close_db_handler()
     assert drivers[0].close_calls == 1

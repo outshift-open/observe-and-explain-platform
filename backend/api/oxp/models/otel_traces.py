@@ -310,7 +310,7 @@ class CollectSessionItem(BaseModel):
     cost: float = 0.0
     duration: float = 0.0
     session_metrics: list[dict[str, Any]] = []
-    # Optional stateful evaluation metric (e.g. trajectory_score)
+    # Optional stateful evaluation metric (e.g. TrajectoryScore)
     statefulEval: dict | None = None
 
 
@@ -321,6 +321,74 @@ class CollectByApplicationResponse(BaseModel):
     successRate: float = 100.0
     errorRate: float = 0.0
     sessionList: list[CollectSessionItem] = []
+
+
+# ── Cognitive observability models ────────────────────────────────────────────
+
+
+class CognitiveObservabilityMetric(BaseModel):
+    """A single named cognitive metric score (0..1, unit ``PERCENTAGE``)."""
+
+    name: str
+    value: "SingleValueData"
+
+
+class CognitiveFailure(BaseModel):
+    """A cognitive failure detected for a session (one ``CognitiveFailuresReport``)."""
+
+    name: str
+    confidence: float
+    description: str = ""
+    remediations: list[str] = []
+
+
+class CognitiveSessionItem(CollectSessionItem):
+    """A session with its cognitive observability metrics and failures."""
+
+    cognitiveObservabilityMetrics: list[CognitiveObservabilityMetric] = []
+    cognitiveFailures: list[CognitiveFailure] = []
+
+
+class SessionsWithCognitiveObservabilityResponse(BaseModel):
+    """Response body for ``sessions-with-cognitive-observability``."""
+
+    sessions: list[CognitiveSessionItem] = []
+
+
+# ── Cognition protocols models ───────────────────────────────────────────────────────
+
+
+class SessionCognitionProtocolsResponse(BaseModel):
+    """Response body for ``GET /sessions/{session_id}/cognition-protocols``.
+
+    Each protocol is a camelCase dict (``protocol``, ``enabled``, ``activated``, the agents and
+    skills that had / used it, and its ``metrics``) as consumed by the UI.
+    """
+
+    sessionId: str
+    protocols: list[dict[str, Any]] = []
+
+
+class SessionCognitionProtocolStatus(BaseModel):
+    """Whether a protocol was enabled / activated in a session."""
+
+    protocol: str
+    enabled: bool
+    activated: bool
+
+
+class SessionWithCognitionProtocolsItem(CognitiveSessionItem):
+    """A session with its Cognition protocol status and cognitive observability."""
+
+    cognitionProtocols: list[SessionCognitionProtocolStatus] = []
+    # Only for sessions where CONCORD was activated.
+    concord: dict[str, Any] | None = None
+
+
+class SessionsWithCognitionProtocolsResponse(BaseModel):
+    """Response body for ``sessions-with-cognition-protocols``."""
+
+    sessions: list[SessionWithCognitionProtocolsItem] = []
 
 
 # ── Application General Charts models ─────────────────────────────────────────

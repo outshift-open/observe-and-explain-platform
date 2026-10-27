@@ -4,6 +4,7 @@
  */
 
 export * from './stringUtils';
+export * from './dateUtils';
 export * from './traceSpan';
 export * from './metrics';
 export * from './sort';
