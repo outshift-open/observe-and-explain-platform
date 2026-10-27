@@ -9,7 +9,7 @@ Reuses MCE's LLMJudgeConfig and DataFetchingConfig directly.
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from metrics_computation_engine.models.requests import (
     LLMJudgeConfig,
@@ -79,6 +79,14 @@ class TemporalMetricOptions(BaseModel):
         description=(
             "'llm' extracts trajectory artifacts and runs span judges in "
             "parallel. 'legacy' retains Python artifact ingestion."
+        ),
+    )
+    extract_reasoning_graph: bool = Field(
+        default=False,
+        description=(
+            "Experimental: extend the existing per-span LLM extraction with "
+            "ontology artifacts, attributed propositions, relationships, state "
+            "values, and checks. Requires artifact_organization='llm'."
         ),
     )
     span_context_mode: Literal["focused", "legacy"] = Field(
@@ -157,6 +165,10 @@ class TemporalMetricOptions(BaseModel):
         le=16384,
         description="Maximum output tokens for the shared final metric audit.",
     )
+    judge_model_name: Optional[str] = Field(
+        default=None,
+        description="Final judge model; overrides JUDGE_MODEL_NAME and defaults to the extraction model.",
+    )
     reasoning_effort: Optional[Literal["low", "medium", "high"]] = Field(
         default="low",
         description="Reasoning effort for final audits and trajectory metric judges.",
@@ -202,6 +214,14 @@ class TemporalMetricOptions(BaseModel):
         )
 
         return list(resolve_trajectory_metric_codes(value))
+
+    @model_validator(mode="after")
+    def validate_reasoning_graph_organization(self) -> "TemporalMetricOptions":
+        if self.extract_reasoning_graph and self.artifact_organization != "llm":
+            raise ValueError("extract_reasoning_graph requires artifact_organization='llm'")
+        if self.extract_reasoning_graph and "span_judge_max_attempts" not in self.model_fields_set:
+            self.span_judge_max_attempts = 5
+        return self
 
 
 class TemporalEvalRequest(BaseModel):

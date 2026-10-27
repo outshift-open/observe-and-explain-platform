@@ -157,10 +157,39 @@ class EvaluationEngine:
             if self._options.use_fatal_mode
             else "Average Score"
         )
-        total_cost_estimate = estimate_token_cost(
-            agg_tokens,
-            self._llm_config.LLM_MODEL_NAME,
-        )
+        costs = [result.cost_estimate for result in successful_results]
+        if not costs:
+            total_cost_estimate = estimate_token_cost(
+                agg_tokens, self._llm_config.LLM_MODEL_NAME,
+            )
+        else:
+            total_cost_estimate = deepcopy(costs[0])
+            for field in ("prompt_cost_usd", "completion_cost_usd", "estimated_cost_usd"):
+                setattr(total_cost_estimate, field, round(sum(getattr(cost, field) for cost in costs), 8))
+            total_cost_estimate.warnings = list(dict.fromkeys(
+                warning for cost in costs for warning in cost.warnings
+            ))
+            total_cost_estimate.by_phase = {}
+            for phase in dict.fromkeys(phase for cost in costs for phase in cost.by_phase):
+                records = [(cost, cost.by_phase[phase]) for cost in costs if phase in cost.by_phase]
+                combined = deepcopy(records[0][1])
+                for field in ("prompt_tokens", "completion_tokens", "estimated_cost_usd"):
+                    combined[field] = round(sum(record.get(field, 0) for _, record in records), 8)
+                combined["model_name"] = " + ".join(sorted({
+                    record.get("model_name", cost.model_name) for cost, record in records
+                }))
+                for field in ("pricing_model_name", "pricing_source"):
+                    values = {record[field] for _, record in records if field in record}
+                    if values:
+                        combined[field] = " + ".join(sorted(values))
+                total_cost_estimate.by_phase[phase] = combined
+            for field in ("model_name", "pricing_model_name", "pricing_source"):
+                setattr(total_cost_estimate, field, " + ".join(sorted({getattr(cost, field) for cost in costs})))
+            for field in ("input_cost_per_1m_tokens", "output_cost_per_1m_tokens"):
+                if len({getattr(cost, field) for cost in costs}) > 1:
+                    setattr(total_cost_estimate, field, None)
+            if any(cost.pricing_source == "unavailable" for cost in costs):
+                total_cost_estimate.warnings.append("Some trajectory costs are unavailable; total includes known estimates only.")
 
         return EvalSummary(
             scoring_mode=scoring_mode,

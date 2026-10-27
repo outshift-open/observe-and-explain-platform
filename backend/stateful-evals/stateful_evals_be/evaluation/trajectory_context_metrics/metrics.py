@@ -44,6 +44,7 @@ class LLMRubricMetric:
     # When true, the rubric states an applicability condition and the judge may
     # return ``"applicable": false`` instead of a verdict.
     judge_decides_applicability = False
+    allows_unknown = False
 
     def __init__(
         self,
@@ -95,6 +96,9 @@ class LLMRubricMetric:
                 rubric=self.rubric,
                 context_payload=self.to_judge_payload(context)["context"],
                 allow_not_applicable=self.judge_decides_applicability,
+                allow_unknown=self.allows_unknown,
+                **({"source_spans": getattr(context, "source_spans", None)}
+                   if isinstance(judge, LLMMetricJudge) else {}),
             )
         except Exception as exc:
             return self.decorate_result(
@@ -229,15 +233,21 @@ class LLMRubricMetric:
                 "evaluation_error": "The metric does not permit a not-applicable verdict.",
             }
         requested_score = raw.get("score")
+        indeterminate = (
+            self.allows_unknown and requested_score is None
+            and raw.get("status") == "unknown" and not fatal_failures and not minor_failures
+        )
         evaluation_invalid = (
             not raw or bool(raw_metadata.get("evaluation_invalid"))
-            or type(requested_score) not in (int, float) or requested_score not in (0, 1)
+            or (not indeterminate and (
+                type(requested_score) not in (int, float) or requested_score not in (0, 1)
+            ))
             or (requested_score == 0 and not fatal_failures and not minor_failures)
         )
         # A binary failure must be backed by a fatal finding. This prevents an
         # unsupported score=0 (or a recovered minor issue) from becoming a fatal
         # trajectory failure downstream.
-        score = None if evaluation_invalid else 0 if fatal_failures else 1
+        score = None if evaluation_invalid or indeterminate else 0 if fatal_failures else 1
         score_was_normalized = False if score is None else score != requested_score
         if (
             self.judge_decides_applicability
@@ -274,7 +284,7 @@ class LLMRubricMetric:
             high_level_metric=self.name,
             score=score,
             status=(
-                "unknown" if evaluation_invalid else "fail" if score == 0 else "pass"
+                "unknown" if score is None else "fail" if score == 0 else "pass"
             ),
             reasoning=str(raw.get("reasoning") or ""),
             fatal_failures=fatal_failures,
@@ -291,6 +301,7 @@ class LLMRubricMetric:
                 if usage is not None
                 else judge_usage_payload(judge),
                 "requested_score": requested_score,
+                **({"indeterminate": True} if indeterminate else {}),
                 "score_was_normalized": score_was_normalized,
                 **dict(batch_metadata or {}),
                 **(raw_metadata),

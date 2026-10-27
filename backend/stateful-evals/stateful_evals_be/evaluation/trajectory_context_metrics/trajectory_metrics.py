@@ -22,6 +22,7 @@ from .judge import (
     MetricJudge,
     build_context_payload,
     build_operation_context,
+    recorded_source_context,
 )
 from .metrics import aevaluate_high_level_metrics_batched
 from .trajectory_metric_definitions import (
@@ -231,7 +232,7 @@ class DelegationAccuracyMetric(TrajectoryMetric):
 class GoalAlignmentMetric(GoalAlignmentMetricV1):
     """Checks the objectives and contributions actually pursued in execution."""
 
-    definition_version = USER_CLARIFIED_METRIC_VERSION
+    definition_version = GoalAlignmentMetricV1.definition_version
     metric_layer = "execution"
     requires_dedicated_judge = True
     rubric = GoalAlignmentMetricV1.rubric
@@ -277,6 +278,7 @@ class GoalAlignmentMetric(GoalAlignmentMetricV1):
             )
             if key in payload
         }
+        goal_context.update(recorded_source_context(context))
         goal_context["delegation_requests"] = [
             {
                 key: audit[key]
@@ -435,6 +437,66 @@ repeat. Order calls by their start and end times, not by span index.
         }
 
 
+class DecisionCorrectnessMetric(TrajectoryMetric):
+    """Assess the delivered decision within its recorded information environment."""
+
+    name = "DecisionCorrectness"
+    metric_code = "decision_correctness"
+    definition_version = "artifact_context_v1"
+    metric_layer = "outcome"
+    allows_unknown = True
+    requires_dedicated_judge = True
+    rubric = """\
+Evaluate whether the delivered decision is defensible given the task, information,
+instructions and capabilities available to the decision maker when it acted.
+
+Identify the actual adopted choice, its material conditions, the applicable
+decision requirements, and the decisive premises. Trace attributed propositions
+to their original sources. Extracted relations, state values and checks are
+fallible interpretations; they do not independently establish truth. Globally
+recorded information is not necessarily available to the deciding component.
+Interpret capability declarations at their recorded actor and time scope. A
+global tool list does not establish every actor's access at every call; missing
+declarations do not prove unavailability.
+
+Pass when the choice is reasonably supported within the recorded environment.
+An agent can choose decisively under uncertainty without verifying unavailable
+outside facts or guaranteeing the outcome. Judge the actual delivered choice
+at its full scope; do not substitute an abstract option, a repaired plan, or an
+action that was never adopted. A delivery can commit to a choice originating
+with another actor; retain provenance while assessing the delivered outcome.
+
+Fail when a known material contradiction, a violated decision requirement, or
+an unsupported necessary premise makes that choice indefensible against the
+available alternatives. A proposal mentioned only for clarification is not
+automatically adopted or executed. Distinguish a defective explanation or
+process from a defective choice: it affects this score when it changes a
+material condition, violates a decision requirement, or supplies a necessary
+premise for selecting the outcome. Otherwise record it only as a minor issue.
+
+Return score null and status unknown when the record cannot establish the
+actual choice or resolve its defensibility. Missing information is not a known
+negative. Cite the source-backed choice and decisive premises or requirement.
+"""
+
+    def __init__(
+        self, *, input_config: MetricInputConfig = metric_input_config(
+            "policy", "user_statements", "intents", "claims", "fact_store",
+            "final_answer", "operations", max_claims=140, max_facts=140,
+        ), judge: MetricJudge | None = None,
+    ) -> None:
+        super().__init__(input_config=input_config, judge=judge)
+
+    def to_judge_payload(self, context: TrajectoryContext) -> dict[str, Any]:
+        payload = super().to_judge_payload(context)
+        payload["context"].update(
+            root_request=context.root_request,
+            root_agent_id=context.root_agent_id,
+            tool_definitions=context.tool_definitions,
+        )
+        return payload
+
+
 def build_updated_trajectory_metrics(
     *, judge: MetricJudge | None = None
 ) -> tuple[TrajectoryContextMetric, ...]:
@@ -572,6 +634,13 @@ TRAJECTORY_METRIC_CODES: tuple[str, ...] = tuple(
     definition.code for definition in TRAJECTORY_METRIC_DEFINITIONS
 )
 
+# Explicit opt-in keeps the existing suite and the "all" selector at 13 metrics.
+OPTIONAL_TRAJECTORY_METRIC_DEFINITIONS = (
+    TrajectoryMetricDefinition(
+        "decision_correctness", "DecisionCorrectness", "outcome", DecisionCorrectnessMetric
+    ),
+)
+
 
 def _selector_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().casefold()).strip("_")
@@ -589,17 +658,21 @@ def _definition_aliases(
 
 _DEFINITIONS_BY_SELECTOR = {
     alias: definition
-    for definition in TRAJECTORY_METRIC_DEFINITIONS
+    for definition in (*TRAJECTORY_METRIC_DEFINITIONS, *OPTIONAL_TRAJECTORY_METRIC_DEFINITIONS)
     for alias in _definition_aliases(definition)
 }
 _DEFINITIONS_BY_CODE = {
-    definition.code: definition for definition in TRAJECTORY_METRIC_DEFINITIONS
+    definition.code: definition
+    for definition in (*TRAJECTORY_METRIC_DEFINITIONS, *OPTIONAL_TRAJECTORY_METRIC_DEFINITIONS)
 }
 
 
-def available_trajectory_metrics() -> list[dict[str, str]]:
+def available_trajectory_metrics(*, include_optional: bool = False) -> list[dict[str, str]]:
     """Return API-safe metadata for all registered trajectory metrics."""
-    return [definition.to_payload() for definition in TRAJECTORY_METRIC_DEFINITIONS]
+    definitions = TRAJECTORY_METRIC_DEFINITIONS + (
+        OPTIONAL_TRAJECTORY_METRIC_DEFINITIONS if include_optional else ()
+    )
+    return [definition.to_payload() for definition in definitions]
 
 
 def resolve_trajectory_metric_codes(
@@ -726,6 +799,7 @@ __all__ = (
     "TRAJECTORY_METRIC_SET",
     "UPDATED_METRIC_NAMES",
     "CommunicationEfficiencyMetric",
+    "DecisionCorrectnessMetric",
     "ConfidenceCalibrationMetric",
     "ConstraintSatisfactionMetric",
     "ContextPreservationMetric",

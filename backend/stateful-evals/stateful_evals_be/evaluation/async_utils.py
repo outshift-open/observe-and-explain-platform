@@ -6,6 +6,7 @@ import asyncio
 import inspect
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from urllib.parse import urlparse
 
 import litellm
 from metrics_computation_engine.llm_judge.llm import LLMClient
@@ -55,6 +56,15 @@ async def query(client, messages, **kwargs):
                                             base_url=client.api_base or None,
                                             max_retries=client.num_retries)
     kwargs.pop("allowed_openai_params", None)
+    native_openai = (
+        not client.api_base
+        or urlparse(str(client.api_base)).hostname == "api.openai.com"
+    )
+    if native_openai:
+        if "max_tokens" in kwargs:
+            kwargs.setdefault("max_completion_tokens", kwargs.pop("max_tokens"))
+        if kwargs.get("reasoning_effort") not in (None, "none"):
+            kwargs.pop("temperature", None)
     return await transports[id(client)].chat.completions.create(
         model=client.model, messages=list(messages), **kwargs,
     )

@@ -106,7 +106,7 @@ def session_result_payload(result: SessionResult) -> dict[str, Any]:
     return payload
 
 
-def available_metrics() -> dict[str, Any]:
+def available_metrics(*, include_optional: bool = False) -> dict[str, Any]:
     """Return the metric registry formerly exposed by GET /metrics."""
     from stateful_evals_be.evaluation.trajectory_context_metrics import (
         TRAJECTORY_METRIC_SET,
@@ -117,5 +117,5 @@ def available_metrics() -> dict[str, Any]:
         "total_metrics": len(CORE_METRICS),
         "metrics": list(CORE_METRICS),
         "trajectory_metric_set": TRAJECTORY_METRIC_SET,
-        "trajectory_metrics": available_trajectory_metrics(),
+        "trajectory_metrics": available_trajectory_metrics(include_optional=include_optional),
     }

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -277,6 +278,37 @@ def _load_llm_context(payload: Mapping[str, Any]) -> TrajectoryContext:
     ):
         if name in payload:
             setattr(context, name, payload[name])
+    if "reasoning_graph" in payload:
+        graph = payload["reasoning_graph"]
+        if not isinstance(graph, dict) or any(
+            not isinstance(graph.get(name), list)
+            or any(not isinstance(row, dict) for row in graph[name])
+            for name in ("nodes", "edges", "state_values", "checks")
+        ):
+            raise ValueError("Invalid saved reasoning_graph")
+        context.reasoning_graph = deepcopy(graph)
+    deltas = payload.get("reasoning_graph_deltas", [])
+    if not isinstance(deltas, list) or any(not isinstance(delta, dict) for delta in deltas):
+        raise ValueError("Invalid saved reasoning_graph_deltas")
+    context.reasoning_graph_deltas = deepcopy(deltas)
+    instructions = payload.get("recorded_instructions", [])
+    if not isinstance(instructions, list) or any(not isinstance(row, dict) for row in instructions):
+        raise ValueError("Invalid saved recorded_instructions")
+    context.recorded_instructions = deepcopy(instructions)
+    if "recorded_instructions" not in payload and context.source_spans:
+        from stateful_evals_be.evaluation.llm_state import LLMState
+        state = LLMState(context.source_spans)
+        state.context = context
+        context.recorded_instructions = state.instruction_sources()
+    sources = payload.get("recorded_sources", [])
+    if not isinstance(sources, list) or any(not isinstance(row, dict) for row in sources):
+        raise ValueError("Invalid saved recorded_sources")
+    context.recorded_sources = deepcopy(sources)
+    if "recorded_sources" not in payload and context.source_spans:
+        from stateful_evals_be.evaluation.llm_state import LLMState
+        state = LLMState(context.source_spans)
+        state.context = context
+        context.recorded_sources = state.recorded_sources()
     context.rebuild_runtime_indexes()
     return context
 
@@ -335,6 +367,10 @@ def trajectory_context_to_payload(
             "source_spans": _jsonable(context.source_spans),
             "artifact_sources": _jsonable(context.artifact_sources),
             "artifact_relationship_decisions": _jsonable(context.artifact_relationship_decisions),
+            "reasoning_graph": _jsonable(context.reasoning_graph),
+            "reasoning_graph_deltas": _jsonable(context.reasoning_graph_deltas),
+            "recorded_instructions": _jsonable(context.recorded_instructions),
+            "recorded_sources": _jsonable(context.recorded_sources),
         })
     if metadata:
         payload.update(_jsonable(dict(metadata)))

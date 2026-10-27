@@ -10,12 +10,72 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from stateful_evals_be.evaluation.reasoning_graph import source_quotation_text
+
 if TYPE_CHECKING:
     from stateful_evals_be.evaluation.trajectory_context import TrajectoryContext
 
 
 def _size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+def recorded_operation_carriers(context: TrajectoryContext) -> list[dict[str, Any]]:
+    """Expose native operation provenance without relabelling model-owned records."""
+    from stateful_evals_be.evaluation.llm_state import LLMState
+
+    spans = getattr(context, "source_spans", [])
+    if not spans or getattr(context, "artifact_organization", "") != "llm":
+        return []
+    state = LLMState(spans)
+    state.context = context
+    result = []
+    for operation in context.raw_spans:
+        index = operation.get("span_index")
+        if type(index) is not int or not 0 <= index < len(spans):
+            continue
+        raw = spans[index]
+        attrs = raw.get("SpanAttributes", {})
+        carrier = {
+            "operation_id": operation.get("artifact_id", f"operation:{index}"),
+            "span_index": index,
+            "recorded_envelope": {key: raw[key] for key in (
+                "SpanId", "ParentSpanId", "TraceId", "SpanName", "Timestamp", "Duration", "StatusCode"
+            ) if key in raw},
+            "recorded_attributes": {key: attrs[key] for key in (
+                "mas.boundary", "traceloop.span.kind", "ioa_observe.span.kind",
+                "mas.call.id", "mas.parent.call.id", "tool.name",
+                "traceloop.entity.name", "ioa_observe.entity.name",
+                "mas.status", "mas.observation.complete", "mas.observation.timestamp"
+            ) if isinstance(attrs, dict) and key in attrs},
+            "selected_sources": {},
+        }
+        for field in ("input_ref", "content_ref"):
+            source_id = operation.get(field)
+            if not source_id:
+                continue
+            source = {"source_id": source_id}
+            try:
+                resolved_id = state._source_id(source_id)
+                parts = resolved_id.split(":")
+                source_index = int(parts[1]) if len(parts) == 3 and parts[0] == "source" else -1
+                if 0 <= source_index <= index:
+                    state.source_catalog(source_index)
+                location, value = state._source(resolved_id, index)
+                annotation = state._sources[resolved_id][3]
+                if resolved_id != source_id:
+                    source["resolved_source_id"] = resolved_id
+                source.update(source_ref=location, **{key: annotation[key] for key in (
+                    "direction", "message_role", "agent_id"
+                ) if key in annotation})
+                text = source_quotation_text(value)
+                source.update(artifact_id=resolved_id, content=text, quotation_text=text,
+                              span_index=location["span_index"], kind="source")
+            except (ValueError, TypeError, AttributeError):
+                source["status"] = "unresolved_at_operation_span"
+            carrier["selected_sources"][field] = source
+        result.append(carrier)
+    return result
 
 
 def current_agent_instruction_records(span: dict[str, Any]) -> list[dict[str, Any]]:
@@ -413,3 +473,275 @@ def select_span_context(
         "soft_budget_exceeded": _size(view) > max_chars,
     }
     return view
+
+
+# The model-owned span pipeline uses these views. Stored state and source IDs
+# remain unchanged; archive navigation is explicitly distinct from evidence.
+def _source_refs(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return set().union(*(_source_refs(v) for v in value), set())
+    if not isinstance(value, dict):
+        return set()
+    fields = {"source_id", "content_source_id", "source_ref", "content_ref", "input_ref",
+              "request_ref", "description_ref", "policy_text_ref", "root_request_ref",
+              "final_answer_ref", "tool_definitions_ref", "source_ids", "omitted_source_ids"}
+    candidates = [item for key in fields for item in
+                  (value.get(key, []) if isinstance(value.get(key), list) else [value.get(key)])]
+    return {item for item in candidates if isinstance(item, str) and item.startswith("source:")} | _source_refs(value.get("anchors", []))
+
+
+def _archive_records(prior: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    records = {r["id"]: r for rows in prior.get("records", {}).values() for r in rows}
+    records.update({r["id"]: r for rows in prior.get("reasoning_graph", {}).values() for r in rows})
+    records.update({r["artifact_id"]: r for r in prior.get("operations", [])})
+    return records
+
+
+def _source_key(value: Any) -> str:
+    import hashlib
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def _source_bound(state: Any, span_index: int | None) -> int:
+    accepted = len(state.context.source_spans)
+    if span_index is None:
+        return accepted - 1
+    if type(span_index) is not int or not 0 <= span_index <= accepted:
+        raise ValueError("Context expansion cannot observe a future span")
+    return span_index
+
+
+def expand_context(state: Any, prior: dict[str, Any], refs: list[str], *,
+                   span_index: int | None = None) -> dict[str, Any]:
+    """Resolve exact IDs within this state and cutoff; never search other cases."""
+    from copy import deepcopy
+    limit = _source_bound(state, span_index)
+    records = _archive_records(prior)
+    result: dict[str, Any] = {"sources": {}, "records": {}, "spans": {}, "source_catalog": {}, "unavailable_refs": []}
+    if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
+        raise ValueError("context_requests must be a list of exact ID strings")
+    pending = list(dict.fromkeys(refs))
+    seen = set()
+    while pending:
+        ref = pending.pop(0)
+        if ref in seen:
+            continue
+        seen.add(ref)
+        try:
+            if ref.startswith("source:"):
+                location, value = state._source(ref, limit)
+                result["sources"][ref] = {"source_id": ref, "source_ref": location,
+                                          "quotation_text": source_quotation_text(value)}
+                index, path = location["span_index"], location["path"]
+            elif ref.startswith("span:"):
+                index = int(ref.split(":", 1)[1])
+                if not 0 <= index <= limit or index >= len(state._raw_spans):
+                    raise ValueError("Unavailable source span")
+                sid = next(item["source_id"] for item in state.source_catalog(index) if not item["location"])
+                result["spans"][ref] = {"source_id": sid,
+                                        "quotation_text": source_quotation_text(state._raw_spans[index])}
+                path = []
+            elif ref in records:
+                record = records[ref]
+                if max(record.get("span_index", -1), record.get("last_seen", -1)) > limit:
+                    raise ValueError("Unavailable future record")
+                result["records"][ref] = deepcopy(record)
+                pending.extend(sorted(_source_refs(record)))
+                continue
+            else:
+                raise ValueError("Unknown archive ID")
+            for item in state.source_catalog(index):
+                if item["location"][:len(path)] == path:
+                    sid = item["source_id"]
+                    result["source_catalog"][sid] = {"location": item["location"], **state._sources[sid][3]}
+        except (ValueError, KeyError, IndexError):
+            result["unavailable_refs"].append(ref)
+    return result
+
+
+def _visible_sources(state: Any, refs: set[str], limit: int) -> tuple[dict, dict]:
+    """Represent identical bodies and parent/child selections only once."""
+    sources, aliases, fingerprints, locations = {}, {}, {}, {}
+    for ref in sorted(refs, key=lambda r: (len(state._sources.get(r, (0, [], None, {}))[1]), r)):
+        location, value = state._source(ref, limit)
+        parent = next((other for other, where in locations.items()
+                       if location["span_index"] == where["span_index"]
+                       and location["path"][:len(where["path"])] == where["path"]), None)
+        if parent:
+            aliases[ref] = {"source_id": parent, "path": location["path"][len(locations[parent]["path"]):]}
+            continue
+        key = _source_key(value)
+        if key in fingerprints:
+            aliases[ref] = {"source_id": fingerprints[key], "path": []}
+        else:
+            sources[ref], locations[ref], fingerprints[key] = value, location, ref
+    # Long descendants are already readable inside a pinned parent. Describe
+    # their location rather than copying their text again in the current view.
+    for ref, (index, path, value, _) in state._sources.items():
+        if index <= limit and ref not in sources and ref not in aliases and _size(value) >= 128:
+            parent = next((other for other, where in locations.items() if index == where["span_index"]
+                           and path[:len(where["path"])] == where["path"]), None)
+            if parent:
+                aliases[ref] = {"source_id": parent, "path": path[len(locations[parent]["path"]):]}
+    return sources, aliases
+
+
+def _message_sources(state: Any, limit: int, roles: set[str], *, input_only: bool = True) -> tuple[set[str], list[dict]]:
+    """Select complete bodies at recorded message boundaries, never quoted roles."""
+    refs, occurrences = set(), []
+    paths = {(index, tuple(path)): (sid, annotation) for sid, (index, path, _, annotation)
+             in state._sources.items() if index <= limit}
+    for sid, (index, path, value, annotation) in state._sources.items():
+        if index > limit or annotation.get("message_role") not in roles or input_only and annotation.get("direction") == "output":
+            continue
+        field = path[-1] if path else ""
+        if isinstance(field, str) and field.startswith(("gen_ai.prompt.", "gen_ai.completion.")) and not field.endswith((".content", ".parts")):
+            continue
+        parent = paths.get((index, tuple(path[:-1])))
+        if parent and parent[1].get("message_role") == annotation["message_role"]:
+            continue
+        # Preserve the complete recorded instruction body, with its observed
+        # message/recipient identity beside it. No instruction text is classified.
+        parsed = value
+        if isinstance(parsed, str):
+            try:
+                parsed = json.loads(parsed)
+            except ValueError:
+                pass
+        flat_body = isinstance(field, str) and field.startswith(("gen_ai.prompt.", "gen_ai.completion."))
+        body = next((paths[(index, tuple([*path, key]))][0] for key in ("content", "parts")
+                     if not flat_body and isinstance(parsed, dict) and key in parsed and (index, tuple([*path, key])) in paths), sid)
+        refs.add(body)
+        occurrences.append({"source_id": body, "message_source_id": sid, "span_index": index,
+                            **{k: annotation[k] for k in ("message_role", "agent_id", "direction") if k in annotation}})
+    return refs, occurrences
+
+
+def _instruction_sources(state: Any, limit: int) -> tuple[set[str], list[dict]]:
+    return _message_sources(state, limit, {"system", "developer"})
+
+
+def _navigation(record: dict[str, Any]) -> dict[str, Any]:
+    keep = {"id", "artifact_id", "type", "parent_id", "artifact_ref", "span_index", "first_seen", "last_seen",
+            "agent_id", "owner_agent_ids", "sender_agent_ids", "recipient_agent_ids", "intent_id",
+            "parent_intent_ids", "related_intent_ids", "from_id", "to_id", "relation", "task_id",
+            "proposition_ids", "state_ids", "target_ids", "supersedes", "qualification", "outcome", "status"}
+    result = {k: v for k, v in record.items() if k in keep and v not in (None, "", [], {})}
+    label = next((record[k] for k in ("text", "name", "entity_name", "subject", "operation_name")
+                  if isinstance(record.get(k), str) and record[k]), "")
+    if label:
+        result["navigation_label"] = label[:120]
+    result["source_ids"] = sorted(_source_refs(record))
+    result["view"] = "navigation_only_expand_ID_for_full_record_and_sources"
+    return result
+
+
+def _working_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {**{k: v for k, v in record.items() if k != "anchors"},
+            "source_ids": sorted(_source_refs(record)), "view": "record_without_source_quotations"}
+
+
+def build_span_view(state: Any, span_index: int, raw_span: dict[str, Any],
+                    prior: dict[str, Any], metric_name: str) -> dict[str, Any]:
+    """Project current observations and compact prior state without changing either."""
+    _source_bound(state, span_index)
+    if raw_span != state._raw_spans[span_index]:
+        raise ValueError("Current observation differs from its registered source")
+    catalog = state.source_catalog(span_index)
+    refs, instructions = _instruction_sources(state, span_index)
+    metadata, ledgers = prior.get("metadata", {}), prior.get("records", {})
+    refs.update(v for k, v in metadata.items() if k in {"policy_text_ref", "root_request_ref"} and v)
+    for record in ledgers.get("intents", []):
+        refs.update(_source_refs(record))
+    for record in ledgers.get("evidence", []):
+        if record.get("fact_type") == "policy_rule":
+            refs.update(_source_refs(record))
+    graph = prior.get("reasoning_graph", {})
+    for record in graph.get("nodes", []):
+        if record.get("type") in {"SystemPrompt", "Constraint"}:
+            refs.update(_source_refs(record))
+    visible, visible_aliases = _visible_sources(state, refs, span_index)
+    prior_values = {}
+    for sid, (index, _, value, _) in state._sources.items():
+        if index < span_index and _size(value) >= 128:
+            prior_values.setdefault(_source_key(value), sid)
+    seen = {**prior_values, **{_source_key(v): sid for sid, v in visible.items()},
+            **{_source_key(state._sources[sid][2]): sid for sid in visible_aliases}}
+    current_ids = {tuple(item["location"]): item["source_id"] for item in catalog}
+    aliases, hidden_paths, visited = {}, [], set()
+
+    def current(value: Any, path: list, *, register: bool = True) -> Any:
+        visited.add(tuple(path))
+        sid = current_ids.get(tuple(path))
+        if register and sid and _size(value) >= 128:
+            key = _source_key(value)
+            if key in seen:
+                target = seen[key]
+                archived = target not in visible and target not in visible_aliases and state._sources[target][0] < span_index
+                aliases[sid] = target
+                if archived:
+                    hidden_paths.append(path)
+                return {"source_id": sid, "value_ref": target,
+                        "view": "archive_reference_request_before_using" if archived else
+                                "visible_source_alias" if target in visible or target in visible_aliases else "current_projection_alias"}
+            seen[key] = sid
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except ValueError:
+                decoded = None
+            if isinstance(decoded, (dict, list)):
+                return {"source_id": sid, "decoded_structure": current(decoded, path, register=False),
+                        "view": "navigation_only_request_original_before_quoting_container"}
+        if isinstance(value, dict):
+            return {key: current(child, [*path, key]) for key, child in value.items()}
+        if isinstance(value, list):
+            return [current(child, [*path, index]) for index, child in enumerate(value)]
+        return {"source_id": sid, "quotation_text": source_quotation_text(value)} if sid else value
+
+    observation = current(raw_span, [])
+    sources = [{**{k: v for k, v in item.items() if k != "preview"}, "view": "source_navigation_only",
+                **({"content_status": "archived_request_before_using"} if any(
+                    item["location"][:len(path)] == path for path in hidden_paths) else {})}
+               for item in catalog if tuple(item["location"]) in visited
+               or any(key in item for key in ("message_role", "direction", "agent_id"))]
+    nodes = graph.get("nodes", [])
+    required = {r["id"] for r in nodes if r.get("type") in {"Actor", "Intent", "Task", "Constraint", "SystemPrompt"}}
+    working_graph = {"nodes": [_working_record(r) for r in nodes if r["id"] in required or r in nodes[-8:]],
+                     "edges": [_working_record(r) for r in graph.get("edges", [])[-8:]]}
+    for name in ("state_values", "checks"):
+        rows = graph.get(name, [])
+        superseded = {ref for r in rows for ref in r.get("supersedes", [])}
+        selected = [r for r in rows if r["id"] not in superseded and (
+            name == "state_values" or r.get("outcome") in {"pending", "unknown", "violated"} or r in rows[-8:])]
+        working_graph[name] = [_working_record(r) for r in selected]
+    working = {name: rows if name in {"intents", "agents", "work_units"} else rows[-6:]
+               for name, rows in ledgers.items()}
+    working_ids = {r["id"] for rows in working.values() for r in rows}
+    graph_ids = {r["id"] for rows in working_graph.values() for r in rows}
+    return {"current_span_index": span_index,
+            "current_raw_span": {"span_ref": f"span:{span_index}", "source_projection": observation,
+                                  "source_aliases": aliases},
+            "available_current_sources": sources,
+            "trajectory_state_before_span": {
+                "records": working, "new_record_ids": prior.get("new_record_ids", {}),
+                "artifact_index": {name: [_navigation(r) for r in rows if r["id"] not in working_ids]
+                                   for name, rows in ledgers.items()},
+                "operations": [_navigation(r) for r in prior.get("operations", [])], "metadata": metadata,
+                "reasoning_graph": working_graph,
+                "graph_index": {name: [_navigation(r) for r in rows if r["id"] not in graph_ids]
+                                for name, rows in graph.items()},
+                "selected_source_texts": {sid: {"source_id": sid, "quotation_text": source_quotation_text(value)}
+                                          for sid, value in visible.items()},
+                "source_aliases": visible_aliases,
+                "instruction_occurrences": instructions, "context_view": metric_name},
+            "archive_access": {
+                "request_field": "context_requests", "reference_formats": ["source:span:node", "artifact ID", "span:index"],
+                "cutoff_span_index": span_index,
+                "instructions": "Navigation labels are not evidence. Archive references hide full bodies, not observed receipt events. "
+                "Copy source_id and quotation_text together. Decoded containers and source paths are navigation; request "
+                "the original source before quoting a container without quotation_text. Identical-value aliases reuse the "
+                "same quotation text while retaining their recorded source identity; descendant paths require their own "
+                "source text before quoting. All instructions remain attributed to their "
+                "recorded agents. Request exact missing records or sources before relying on their contents."}}

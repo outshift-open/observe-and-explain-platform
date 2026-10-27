@@ -34,6 +34,7 @@ from .metrics import (
     evaluate_high_level_metrics_batched,
 )
 from .trajectory_metrics import (
+    DecisionCorrectnessMetric,
     ALL_TRAJECTORY_METRICS,
     CURRENT_TRAJECTORY_METRICS,
     LEGACY_TRAJECTORY_METRICS,
@@ -149,6 +150,7 @@ __all__ = [
     "build_updated_paper_metrics",
     "build_updated_trajectory_metrics",
     "available_trajectory_metrics",
+    "DecisionCorrectnessMetric",
     "build_trajectory_metrics",
     "evaluate_high_level_metric_payloads",
     "evaluate_high_level_metric_payloads_batched",

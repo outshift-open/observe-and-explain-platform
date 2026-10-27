@@ -8,7 +8,11 @@ import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 
-from stateful_evals_be.evaluation.span_context import current_agent_instruction_records
+from stateful_evals_be.evaluation.span_context import (
+    build_span_view, current_agent_instruction_records, expand_context,
+)
+from stateful_evals_be.evaluation.span_schema import decode_response, response_format
+from stateful_evals_be.evaluation.reasoning_graph import EXTRACTION_PROMPT as REASONING_GRAPH_PROMPT
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.models.requests import TemporalMetricOptions
 
@@ -116,88 +120,11 @@ roles, evidence or relationships. Preserve canonical IDs, numbers, units, condit
 provenance, and uncertainty by selecting exact source nodes. All prior intents are
 available. Reuse existing records; append new records with consecutive IDs starting
 at new_record_ids. Record the actual root request/policy and final user-facing answer
-when available. Never turn every response into separate propositions.
+when available. Keep complete responses intact; extract material propositions
+only when reasoning_graph_guidance is supplied.
 The output template describes fields, not records to invent. Use empty lists
 for absent updates, actual source IDs and supported values for real records.
 """
-
-
-def _metric_state_view(prior: dict[str, Any], metric_name: str) -> dict[str, Any]:
-    """Keep metric ledgers and their links; index only unrelated source content."""
-    ledgers = {
-        "IntentRecognition": ("intents", "agents", "work_units"),
-        "Groundedness": ("intents", "agents", "claims", "evidence"),
-        "Relevancy": ("intents", "agents", "work_units", "claims"),
-    }.get(metric_name.split(".")[-1])
-    if ledgers is None:
-        return prior
-    sources = prior["selected_source_texts"]
-    selected = {}
-    all_records = {row["id"]: row for rows in prior["records"].values() for row in rows}
-    retained = set()
-
-    def retain(value):
-        if isinstance(value, str):
-            if value in sources:
-                selected[value] = sources[value]
-            if value in all_records and value not in retained:
-                retained.add(value)
-                retain(all_records[value])
-        elif isinstance(value, dict):
-            for item in value.values():
-                retain(item)
-        elif isinstance(value, list):
-            for item in value:
-                retain(item)
-
-    for name in ledgers:
-        retain(prior["records"].get(name, []))
-    retain(prior["metadata"])
-
-    def index(row):
-        # Preserve arbitrary navigation fields instead of a second record schema.
-        # Omitted selectors remain explicit provenance, not unresolved text refs.
-        omitted = []
-
-        def project(value):
-            if isinstance(value, dict):
-                result = {}
-                for key, item in value.items():
-                    if item in (None, "", [], {}):
-                        continue
-                    if isinstance(item, str) and item in sources and item not in selected:
-                        omitted.append(item)
-                    else:
-                        result[key] = project(item)
-                return result
-            if isinstance(value, list):
-                result = []
-                for item in value:
-                    if isinstance(item, str) and item in sources and item not in selected:
-                        omitted.append(item)
-                    else:
-                        result.append(project(item))
-                return result
-            return value
-
-        result = project(row)
-        if omitted:
-            result["omitted_source_ids"] = list(dict.fromkeys([
-                *result.get("omitted_source_ids", []), *omitted,
-            ]))
-        return result
-
-    return {
-        "records": {name: [row for row in rows if row["id"] in retained]
-                    for name, rows in prior["records"].items()},
-        "new_record_ids": prior["new_record_ids"],
-        "artifact_index": {name: [index(row) for row in rows if row["id"] not in retained]
-                           for name, rows in prior["records"].items()},
-        "operations": [index(row) for row in prior["operations"]],
-        "metadata": prior["metadata"],
-        "context_view": metric_name,
-        "selected_source_texts": selected,
-    }
 
 
 class SpanJudge:
@@ -220,59 +147,92 @@ class SpanJudge:
         prior = state.prompt_state()
         extractor = next((name for name in self.metric_names
                           if name.split(".")[-1] == "IntentRecognition"), self.metric_names[0])
-        payload = {"current_span_index": span_index, "current_raw_span": raw_span}
 
         async def judge_metric(name):
             extracting = name == extractor
             usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            request = {**payload, "trajectory_state_before_span": _metric_state_view(prior, name),
-                       "requested_metrics": [name],
-                       "output_schema": {"metric_name": name, "score": "numeric0or1",
-                                         "reasoning": "one concise evidence-grounded sentence"}}
+            request = build_span_view(state, span_index, raw_span, prior, name)
+            request["requested_metrics"] = [name]
             if extracting:
-                request["available_current_sources"] = state.source_catalog(span_index)
                 request["observed_agent_id"] = SpanNormalizer.explicit_agent_id(raw_span)
-                request["state_update_guidance"] = state.schema()
-                request["output_schema"]["state_delta"] = "object following state_update_guidance"
+                request["state_update_guidance"] = state.schema(
+                    state.context.reasoning_graph if state.extract_reasoning_graph else None
+                )
             messages = [{"role": "system", "content": (
                 _SPAN_STATE_DELTA_SYSTEM_PROMPT.partition("Return strict JSON only")[0]
                 + _FOCUSED_TRANSITION_INSTRUCTIONS
                 + (_EXTRACTION_INSTRUCTIONS if extracting else "")
-                + "Artifact indexes preserve navigation fields; omitted_source_ids are provenance "
-                "markers whose content is unavailable in this view. "
-                "Use records and selected_source_texts for supporting content; an indexed claim "
-                "or unfinished operation is not verified evidence. "
-                + "Return one strict JSON object for only the requested metric using output_schema."
+                + (REASONING_GRAPH_PROMPT if extracting and state.extract_reasoning_graph else "")
+                + "This is a compact view of an intact source archive. Indexes and previews "
+                "are navigation aids, not complete evidence; omitted content is not absent evidence. "
+                "All intents and their links are indexed. Request exact source, artifact, graph "
+                "record or span IDs in context_requests whenever full earlier content is needed "
+                "to extract or judge correctly. Do not fail a metric because content was omitted "
+                "from this view. Request only observed/current records; future spans are unavailable. "
+                "A retrieval response is provisional: set score to null and return context_requests; "
+                "no state update is applied until a complete valid verdict with [] requests arrives. "
+                "For normal responses, score must be 0 or 1. Return only new/changed records. "
+                "Use null for unchanged optional fields; clear_fields names intentional clears. "
+                "Only events, properties and state_values.value use JSON-encoded strings; "
+                "records themselves are objects. Encode an unknown state value as the string null. "
+                "Copy quotations from host-rendered quotation_text paired with its source_id. "
+                "Never reconstruct quotations from decoded/projected containers; retrieve their "
+                "original source when quotation_text is not shown. "
+                "Return one strict JSON object for only the requested metric using the response schema."
             )}, {"role": "user", "content": json.dumps(request, ensure_ascii=False, default=str)}]
             error = None
-            for attempt in range(self.options.span_judge_max_attempts):
+            calls = failures = fetches = 0
+            while failures < self.options.span_judge_max_attempts:
                 text = None
                 try:
+                    calls += 1
                     response = await self._query(
                         messages,
-                        max_tokens=min(16384, (self.options.span_judge_max_tokens
-                                              if extracting else 1024) * (2**attempt)),
-                        response_format={"type": "json_object"},
+                        max_tokens=min(16384, (max(self.options.span_judge_max_tokens, 8192)
+                                              if extracting and state.extract_reasoning_graph else
+                                              self.options.span_judge_max_tokens
+                                              if extracting else 1024) * (2**failures)),
+                        response_format=response_format(name, extracting, state.extract_reasoning_graph),
                     )
                     for key in usage:
                         usage[key] += int(getattr(getattr(response, "usage", None), key, 0) or 0)
                     text = (response.choices[0].message.content or "").strip()
                     if text.startswith("```"):
                         text = text.split("\n", 1)[1].removesuffix("```").strip()
-                    result = json.loads(text)
-                    if isinstance(result, dict) and set(result) == {name} and isinstance(result[name], dict):
-                        result = {"metric_name": name, **result[name]}
+                    result = decode_response(json.loads(text))
                     if not isinstance(result, dict) or result.get("metric_name") != name:
                         raise ValueError(f"Return metric_name={name!r}")
+                    refs = result.pop("context_requests", [])
+                    if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
+                        raise ValueError("context_requests must be a list of exact archive IDs")
+                    if refs:
+                        if fetches >= 2:
+                            raise SpanJudgeError("Additional archive context still required after two retrieval rounds",
+                                                 usage=usage, calls=calls)
+                        retrieved = expand_context(state, prior, refs, span_index=span_index)
+                        if retrieved.get("unavailable_refs"):
+                            raise ValueError(f"Unavailable archive IDs: {retrieved['unavailable_refs']}")
+                        fetches += 1
+                        messages.extend([
+                            {"role": "assistant", "content": text},
+                            {"role": "user", "content": json.dumps({
+                                "retrieved_context": retrieved,
+                                "instruction": "State is unchanged. Return the complete verdict and state_delta; "
+                                               "use [] context_requests when sufficient. Retain source attribution "
+                                               "and call-time visibility; evaluator access is not agent access.",
+                            }, ensure_ascii=False, default=str)},
+                        ])
+                        continue
                     if type(result.get("score")) not in (int, float) or result["score"] not in (0, 1):
                         raise ValueError("score must be numeric0or1")
                     if not isinstance(result.get("reasoning"), str) or not result["reasoning"].strip():
                         raise ValueError("reasoning must be nonempty")
                     if extracting:
                         state.validate(result.get("state_delta"), span_index, raw_span)
-                    return {"result": result, "usage": usage, "calls": attempt + 1}
+                    return {"result": result, "usage": usage, "calls": calls}
                 except (ValueError, TypeError, KeyError, IndexError) as exc:
                     error = exc
+                    failures += 1
                     if text:
                         messages.append({"role": "assistant", "content": text})
                     messages.append({"role": "user", "content": (
@@ -280,18 +240,21 @@ class SpanJudge:
                         "Return complete corrected JSON. Use catalog source IDs only for content "
                         "pointers; relationship fields require record IDs. "
                         "Preserve valid state_delta records and fields; declare any new "
-                        "referenced record in the same delta or reuse an available ID."
+                        "referenced record in the same delta or reuse an available ID. "
+                        "Request archived content if needed rather than guessing."
                     )})
+                except SpanJudgeError:
+                    raise
                 except Exception as exc:
-                    raise SpanJudgeError(str(exc), usage=usage, calls=attempt + 1) from exc
+                    raise SpanJudgeError(str(exc), usage=usage, calls=calls) from exc
             raise SpanJudgeError(f"Span{span_index} {name} failed: {error}",
-                                 usage=usage, calls=self.options.span_judge_max_attempts)
+                                 usage=usage, calls=calls)
 
         verdicts = await asyncio.gather(*(judge_metric(name) for name in self.metric_names),
                                         return_exceptions=True)
-        usage = {key: sum((v.usage if isinstance(v, SpanJudgeError) else v["usage"]).get(key, 0)
+        usage = {key: sum((getattr(v, "usage", {}) if isinstance(v, Exception) else v["usage"]).get(key, 0)
                           for v in verdicts) for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
-        calls = sum(v.calls if isinstance(v, SpanJudgeError) else v["calls"] for v in verdicts)
+        calls = sum(getattr(v, "calls", 0) if isinstance(v, Exception) else v["calls"] for v in verdicts)
         errors = [v for v in verdicts if isinstance(v, Exception)]
         if errors:
             raise SpanJudgeError(str(errors[0]), usage=usage, calls=calls)

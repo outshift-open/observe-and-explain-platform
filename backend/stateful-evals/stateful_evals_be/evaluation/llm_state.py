@@ -9,6 +9,7 @@ import json
 from dataclasses import asdict, fields
 from typing import Any
 
+from stateful_evals_be.evaluation import reasoning_graph
 from stateful_evals_be.evaluation.span_normalization import SpanNormalizer
 from stateful_evals_be.evaluation.trajectory_context import (
     AgentProfile, ClaimEntry, CoordinationEvent, EvidenceFact, IntentEntry,
@@ -40,8 +41,9 @@ def _text(value: Any) -> str:
 class LLMState:
     """The span loop owns one state; the model supplies its semantic updates."""
 
-    def __init__(self, raw_spans: list[dict[str, Any]]) -> None:
+    def __init__(self, raw_spans: list[dict[str, Any]], *, extract_reasoning_graph=False) -> None:
         self._raw_spans = raw_spans
+        self.extract_reasoning_graph = extract_reasoning_graph
         self._catalogs: dict[int, list[dict[str, Any]]] = {}
         self._sources: dict[str, tuple[int, list[str | int], Any, dict[str, Any]]] = {}
         self.context = TrajectoryContext(policy_text="", artifact_organization="llm")
@@ -49,9 +51,9 @@ class LLMState:
         self.context.artifact_sources = {}
 
     @staticmethod
-    def schema() -> dict[str, Any]:
+    def schema(graph=None) -> dict[str, Any]:
         """Small prompt guide for the existing record constructors."""
-        return {
+        schema = {
             "instructions": (
                 "Return state_delta with ledger lists directly at its top level: evidence, claims, "
                 "intents, agents, work_units, coordination_events, plus operation and metadata. "
@@ -67,8 +69,9 @@ class LLMState:
                 "Creation slots use N, "
                 "then N+1, N+2 for multiple new records in that ledger. Select the smallest "
                 "complete response, request, contract, or tool result; do not select an entire "
-                "span/conversation when its individual message is available. Never split responses "
-                "into propositions or duplicate repeated history. Content is copied from source_ref. "
+                "span/conversation when its individual message is available. Keep responses intact "
+                "in claims; decomposition belongs only in reasoning_graph when requested. "
+                "Do not duplicate repeated history. Content is copied from source_ref. "
                 "Only intents, agents, and work_units can update an existing ID; omit unchanged fields. "
                 "An update's source_ref supports the change; description_ref/request_ref replaces "
                 "the original request only when that request changed. Relationship IDs may reference "
@@ -81,7 +84,11 @@ class LLMState:
                 "Infer links from meaning, including which broader request a delegated task serves. "
                 "evidence_refs can cite facts/contracts and claims from earlier spans; provenance "
                 "does not make an agent's claim verified truth. Include one operation for the action "
-                "actually recorded; proposed actions are not executions. Set operation.agent_id "
+                "actually recorded; proposed actions are not executions. Use the current "
+                "recorded span boundary. Input-history tool calls and copied "
+                "parent completions are not new executions of this span; use its own recorded "
+                "identity and output, distinguishing requests from execution and returned results. "
+                "Set operation.agent_id "
                 "to observed_agent_id when provided; null is allowed when the author is unknown. "
                 "An unfinished input-only observation cannot establish "
                 "a returned output or successful tool completion. Select operation input_ref "
@@ -109,6 +116,10 @@ class LLMState:
             "operation": "operation_type=llm|tool|coordination, entity_name, actor_scope=root|peer|unknown, is_delegation; optional agent_id, content_ref, input_ref, evidence_refs, work_id, delegation_id, delegator_agent_id, recipient_agent_ids, outcome, coordination_event_ids",
             "metadata": "optional root_agent_id (agent ID), policy_text_ref, root_request_ref, final_answer_ref, tool_definitions_ref (source IDs), delivery_span_index, termination_span_index; null preserves prior values",
         }
+        if graph is not None:
+            schema["reasoning_graph_guidance"] = reasoning_graph.guidance(graph)
+            schema["instructions"] += " Also return reasoning_graph inside state_delta following reasoning_graph_guidance."
+        return schema
 
     def source_catalog(self, span_index: int) -> list[dict[str, Any]]:
         """Assign stable IDs to structural nodes, including JSON-encoded objects."""
@@ -160,6 +171,106 @@ class LLMState:
             raise ValueError(f"Future source_ref {source_id!r}")
         return {"span_index": source_index, "path": path}, value
 
+    def instruction_sources(self, span_index=None) -> list[dict[str, Any]]:
+        """Expose recorded instruction bodies once, retaining every occurrence."""
+        from stateful_evals_be.evaluation.span_context import _instruction_sources
+
+        limit = len(self.context.source_spans) - 1 if span_index is None else span_index
+        if type(limit) is not int or limit < -1 or limit > len(self.context.source_spans):
+            raise ValueError("Instructions cannot observe a future span")
+        if span_index is not None and (limit < 0 or limit >= len(self._raw_spans)):
+            raise ValueError("Unknown instruction source span")
+        for index in range(limit + 1):
+            self.source_catalog(index)
+        _, occurrences = _instruction_sources(self, limit)
+        grouped = {}
+        for occurrence in occurrences:
+            source_id = occurrence["source_id"]
+            location, value = self._source(source_id, limit)
+            content = reasoning_graph.source_quotation_text(value)
+            span = self._raw_spans[location["span_index"]]
+            attributes = span.get("SpanAttributes", {})
+            agent_id = occurrence.get("agent_id") or None
+            group = grouped.setdefault(content, {"content": content, "occurrences": []})
+            group["occurrences"].append({
+                **occurrence, "artifact_id": source_id, "source_ref": location,
+                "agent_id": agent_id, "agent_attribution": "recorded" if agent_id else "unknown",
+                "span_id": span.get("SpanId"), "recorded_at": span.get("Timestamp"),
+                "observed_at": attributes.get("mas.observation.timestamp") if isinstance(attributes, dict) else None,
+            })
+        return list(grouped.values())
+
+    def recorded_sources(self, span_index=None, *, context=None) -> list[dict[str, Any]]:
+        """Close model-selected provenance over exact bodies and recorded user turns."""
+        from stateful_evals_be.evaluation.span_context import _message_sources
+
+        ctx = self.context if context is None else context
+        limit = len(ctx.source_spans) - 1 if span_index is None else span_index
+        if type(limit) is not int or limit < -1 or limit > len(self.context.source_spans) or limit >= len(self._raw_spans):
+            raise ValueError("Recorded sources cannot observe a future span")
+        for index in range(limit + 1):
+            self.source_catalog(index)
+        _, messages = _message_sources(self, limit, {"system", "developer", "user", "human", "assistant", "tool", "function"}, input_only=False)
+        bodies = {row["source_id"] for row in messages}
+        selected = {sid: set() for sid in bodies if self._sources[sid][3].get("message_role") in {"system", "developer", "user", "human"}
+                    and self._sources[sid][3].get("direction") != "output"}
+        for artifact_id, history in ctx.artifact_sources.items():
+            for row in history:
+                if row.get("content_source_id"):
+                    selected.setdefault(row["content_source_id"], set()).add(artifact_id)
+        for rows in ctx.reasoning_graph.values():
+            for row in rows:
+                for anchor in row.get("anchors", []):
+                    selected.setdefault(anchor["source_id"], set()).add(row["id"])
+        # Keep the complete enclosing message or tool result when an extracted
+        # anchor selects only a nested value. Never expand to its conversation.
+        from stateful_evals_be.evaluation.span_normalization import _SOURCE_OUTPUT_KEYS
+        tool_bodies = {sid for sid, (index, path, _, _) in self._sources.items()
+                       if index <= limit and SpanNormalizer.entity_type(self._raw_spans[index]) == "tool"
+                       and len(path) == (2 if path and path[0] == "SpanAttributes" else 1)
+                       and path[-1] in (*_SOURCE_OUTPUT_KEYS, "mas.tool.output", "tool.output", "tool_output")}
+        for sid, artifacts in list(selected.items()):
+            location, _ = self._source(sid, limit)
+            for body in bodies | tool_bodies:
+                index, path, _, _ = self._sources[body]
+                if index == location["span_index"] and location["path"][:len(path)] == path:
+                    selected.setdefault(body, set()).update(artifacts)
+        selected_values = {(type(self._source(sid, limit)[1]).__name__, reasoning_graph.source_quotation_text(self._source(sid, limit)[1]))
+                           for sid in selected}
+        for body in bodies | tool_bodies:
+            value = self._sources[body][2]
+            if (type(value).__name__, reasoning_graph.source_quotation_text(value)) in selected_values:
+                selected.setdefault(body, set())
+
+        def allowed(sid):
+            index, path, _, _ = self._sources[sid]
+            if not path or path == ["SpanAttributes"]:
+                return False
+            # A container of whole messages/conversations is not a body. A
+            # quoted JSON object inside a body remains ordinary source data.
+            return not any(index == self._sources[body][0] and len(path) < len(self._sources[body][1])
+                           and self._sources[body][1][:len(path)] == path for body in bodies)
+
+        grouped = {}
+        for sid, artifacts in sorted(selected.items(), key=lambda item: (self._sources[item[0]][0], item[0])):
+            location, value = self._source(sid, limit)
+            if not allowed(sid):
+                continue
+            key = (type(value).__name__, reasoning_graph.source_quotation_text(value))
+            group = grouped.setdefault(key, {"content": reasoning_graph.source_quotation_text(value),
+                                            "source_type": type(value).__name__, "occurrences": []})
+            index, _, _, annotation = self._sources[sid]
+            span = self._raw_spans[index]
+            attributes = span.get("SpanAttributes", {})
+            owner = annotation.get("agent_id") or None
+            group["occurrences"].append({"source_id": sid, "artifact_id": sid, "source_ref": location,
+                "span_index": index, **{k: annotation[k] for k in ("message_role", "direction") if k in annotation},
+                "agent_id": owner, "agent_attribution": "recorded" if owner else "unknown",
+                "span_id": span.get("SpanId"), "recorded_at": span.get("Timestamp"),
+                "observed_at": attributes.get("mas.observation.timestamp") if isinstance(attributes, dict) else None,
+                "selected_by": sorted(artifacts)})
+        return list(grouped.values())
+
     def prompt_state(self) -> dict[str, Any]:
         """Send each selected source once; records and operations point to it."""
         ctx = self.context
@@ -194,6 +305,13 @@ class LLMState:
         for operation in result["operations"]:
             if operation.get("input_ref") and operation["input_ref"] not in result["selected_source_texts"]:
                 operation["omitted_source_ids"] = [operation.pop("input_ref")]
+        if self.extract_reasoning_graph:
+            result["reasoning_graph"] = copy.deepcopy(ctx.reasoning_graph)
+            for rows in ctx.reasoning_graph.values():
+                for row in rows:
+                    for anchor in row["anchors"]:
+                        source_id = anchor["source_id"]
+                        result["selected_source_texts"][source_id] = self._sources[source_id][2]
         return result
 
     def validate(self, delta, span_index, raw_span=None):
@@ -205,7 +323,10 @@ class LLMState:
             raise ValueError("State updates must follow span order exactly once")
         if raw_span is not None and raw_span != self._raw_spans[span_index]:
             raise ValueError("Current span differs from its registered source")
-        if not isinstance(delta, dict) or set(delta) - set(_RECORDS) - {"operation", "metadata"}:
+        allowed = set(_RECORDS) | {"operation", "metadata"}
+        if self.extract_reasoning_graph:
+            allowed.add("reasoning_graph")
+        if not isinstance(delta, dict) or set(delta) - allowed:
             raise ValueError("state_delta must contain record lists, operation, and metadata")
         candidate = copy.deepcopy(self.context)
         metadata = delta.get("metadata", {})
@@ -266,7 +387,27 @@ class LLMState:
         candidate.source_spans.append(self._raw_spans[span_index])
         self._metadata(candidate, metadata, span_index)
         self._validate_refs(candidate)
+        if self.extract_reasoning_graph:
+            artifact_ids = {
+                f"{prefix}:{index}" for name, (_, prefix, _) in _RECORDS.items()
+                if name != "agents" for index in range(len(getattr(candidate, name)))
+            } | set(candidate.agents) | {row["artifact_id"] for row in candidate.raw_spans}
+            # Recorded actor identities can precede their optional profiles.
+            artifact_ids.update(row["agent_id"] for row in candidate.raw_spans if row.get("agent_id"))
+            candidate.reasoning_graph = reasoning_graph.apply_delta(
+                candidate.reasoning_graph, delta.get("reasoning_graph"), span_index=span_index,
+                resolve_source=lambda source_id: self._source(source_id, span_index, candidate),
+                artifact_ids=artifact_ids,
+            )
+            candidate.reasoning_graph_deltas.append({
+                "span_index": span_index,
+                **{name: [copy.deepcopy(next(record for record in candidate.reasoning_graph[name]
+                                            if record["id"] == update["id"])) for update in rows]
+                   for name, rows in delta["reasoning_graph"].items()},
+            })
         candidate.rebuild_runtime_indexes()
+        candidate.recorded_instructions = self.instruction_sources(span_index)
+        candidate.recorded_sources = self.recorded_sources(span_index, context=candidate)
         if commit:
             self.context.__dict__.update(candidate.__dict__)
         return candidate
@@ -305,8 +446,10 @@ class LLMState:
             _, value = self._source(content_id, span_index)
             values[text_field] = _text(value)
         for key, value in values.items():
-            if key in defaults and isinstance(defaults[key], list) and (not isinstance(value, list) or key != "events" and any(not isinstance(item, str) for item in value)):
-                raise ValueError(f"{artifact_id}.{key} must be a list")
+            if key in defaults and isinstance(defaults[key], list):
+                item_type = int if key == "receipt_span_indices" else str
+                if not isinstance(value, list) or key != "events" and any(type(item) is not item_type for item in value):
+                    raise ValueError(f"{artifact_id}.{key} must be a list")
             if key in {"name", "source", "status", "fact_type", "source_name", "claim_type", "entity_name", "event_type", "operation_name", "allocator_agent_id"} and not isinstance(value, str):
                 raise ValueError(f"{artifact_id}.{key} must be a string")
         if name == "intents" and values.get("status") not in {"unassessed", "in_progress", "fulfilled", "failed", "blocked", "superseded"}:

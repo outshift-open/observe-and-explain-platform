@@ -18,6 +18,7 @@ Flow:
 import asyncio
 import json
 import logging
+import os
 import re
 from collections.abc import Iterable
 from copy import deepcopy
@@ -1154,6 +1155,65 @@ class TemporalMetricsProcessor:
             "unsatisfied_intents": unsatisfied_intents,
         }
 
+    def _create_trajectory_metric_judge(self):
+        """Resolve the final model without replacing a caller's custom client."""
+        from stateful_evals_be.evaluation.trajectory_context_metrics.judge import (
+            LLMMetricJudge,
+        )
+
+        client = self.llm_client
+        model_name = getattr(client, "model", None) or self.llm_config.LLM_MODEL_NAME
+        requested_model = (
+            getattr(self.options, "judge_model_name", None)
+            or os.getenv("JUDGE_MODEL_NAME", "")
+        ).strip()
+        if requested_model and requested_model != model_name:
+            if type(client) is LLMClient:
+                client = LLMClient({
+                    "LLM_MODEL_NAME": requested_model,
+                    "LLM_BASE_MODEL_URL": self.llm_config.LLM_BASE_MODEL_URL,
+                    "LLM_API_KEY": self.llm_config.LLM_API_KEY,
+                })
+                model_name = requested_model
+            else:
+                logger.warning("JUDGE_MODEL_NAME does not override a custom LLM client")
+        self._final_judge_model_name = model_name
+        return LLMMetricJudge(
+            llm_client=client,
+            model_name=model_name,
+            max_tokens=self.options.final_judge_max_tokens,
+            reasoning_effort=self.options.reasoning_effort,
+        )
+
+    def _estimate_usage_cost(self, tokens):
+        """Price final-judge tokens using their actual model when it differs."""
+        span_model = self.llm_config.LLM_MODEL_NAME
+        estimate = estimate_token_cost(tokens, span_model)
+        final_model = getattr(self, "_final_judge_model_name", span_model)
+        if final_model == span_model or not tokens.high_level_total_tokens:
+            return estimate
+        final_tokens = TokenUsage(
+            prompt_tokens=tokens.high_level_prompt_tokens,
+            completion_tokens=tokens.high_level_completion_tokens,
+            total_tokens=tokens.high_level_total_tokens,
+        )
+        old = estimate_token_cost(final_tokens, span_model)
+        final = estimate_token_cost(final_tokens, final_model)
+        for field in ("prompt_cost_usd", "completion_cost_usd", "estimated_cost_usd"):
+            setattr(estimate, field, round(
+                getattr(estimate, field) - getattr(old, field) + getattr(final, field), 8,
+            ))
+        estimate.pricing_source = "mixed_model_estimate"
+        estimate.pricing_model_name = f"{estimate.pricing_model_name} + {final.pricing_model_name}"
+        estimate.input_cost_per_1m_tokens = estimate.output_cost_per_1m_tokens = None
+        estimate.by_phase["high_level"].update(
+            model_name=final_model, pricing_source=final.pricing_source,
+            pricing_model_name=final.pricing_model_name,
+            estimated_cost_usd=final.estimated_cost_usd,
+        )
+        estimate.warnings.extend(f"Final judge: {warning}" for warning in final.warnings)
+        return estimate
+
     def _run_unified_final_audit(self, **kwargs):
         return run_sync(self._arun_unified_final_audit(**kwargs))
 
@@ -1180,9 +1240,6 @@ class TemporalMetricsProcessor:
             aevaluate_metric_suite_batched,
             build_metric_suite,
         )
-        from stateful_evals_be.evaluation.trajectory_context_metrics.judge import (
-            LLMMetricJudge,
-        )
 
         if getattr(traj_ctx, "artifact_organization", "legacy") != "llm":
             self._synchronize_final_answer(traj_ctx, raw_spans)
@@ -1193,12 +1250,7 @@ class TemporalMetricsProcessor:
             unsatisfied_intents=unsatisfied_intents,
         )
 
-        judge = LLMMetricJudge(
-            llm_client=self.llm_client,
-            model_name=self.llm_config.LLM_MODEL_NAME,
-            max_tokens=self.options.final_judge_max_tokens,
-            reasoning_effort=self.options.reasoning_effort,
-        )
+        judge = self._create_trajectory_metric_judge()
         metric_suite = self.options.high_level_metric_suite
         all_metrics = build_metric_suite(metric_suite, judge=judge)
         audit_metrics = tuple(
@@ -1363,6 +1415,7 @@ class TemporalMetricsProcessor:
         payloads = [result.to_payload() for result in audit_results]
         usage = _empty_usage()
         for payload in payloads:
+            payload.setdefault("metadata", {})["judge_model_name"] = judge.model_name
             metric_usage = (payload.get("metadata") or {}).get("usage") or {}
             usage["prompt_tokens"] += int(metric_usage.get("prompt_tokens", 0) or 0)
             usage["completion_tokens"] += int(
@@ -1397,9 +1450,6 @@ class TemporalMetricsProcessor:
         from stateful_evals_be.evaluation.trajectory_context_metrics import (
             aevaluate_trajectory_metrics_batched,
         )
-        from stateful_evals_be.evaluation.trajectory_context_metrics.judge import (
-            LLMMetricJudge,
-        )
 
         selectors = self.options.trajectory_metrics
         if not selectors:
@@ -1413,12 +1463,7 @@ class TemporalMetricsProcessor:
             intent_states=intent_states,
             unsatisfied_intents=unsatisfied_intents,
         )
-        judge = LLMMetricJudge(
-            llm_client=self.llm_client,
-            model_name=self.llm_config.LLM_MODEL_NAME,
-            max_tokens=self.options.final_judge_max_tokens,
-            reasoning_effort=self.options.reasoning_effort,
-        )
+        judge = self._create_trajectory_metric_judge()
         results = await aevaluate_trajectory_metrics_batched(
             traj_ctx,
             selectors,
@@ -1434,6 +1479,7 @@ class TemporalMetricsProcessor:
         payloads = [result.to_payload() for result in results]
         usage = _empty_usage()
         for payload in payloads:
+            payload.setdefault("metadata", {})["judge_model_name"] = judge.model_name
             metric_usage = (payload.get("metadata") or {}).get("usage") or {}
             usage["prompt_tokens"] += int(metric_usage.get("prompt_tokens", 0) or 0)
             usage["completion_tokens"] += int(
@@ -2285,10 +2331,7 @@ class TemporalMetricsProcessor:
                 completion_tokens=mce_ct + rev_ct + cs_ct + fo_ct + hl_ct,
                 total_tokens=mce_tt + rev_tt + cs_tt + fo_tt + hl_tt,
             )
-            cost_estimate = estimate_token_cost(
-                token_usage,
-                self.llm_config.LLM_MODEL_NAME,
-            )
+            cost_estimate = self._estimate_usage_cost(token_usage)
 
             return SessionResult(
                 session_id=session_id,

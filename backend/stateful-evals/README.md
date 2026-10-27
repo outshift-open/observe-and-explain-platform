@@ -15,7 +15,7 @@ supply spans and model access, and own scheduling and persistence.
 ## Install
 
 The library supports Python 3.11+ (the full OXP workspace needs 3.13+). From the
-repository root:
+`backend/` directory:
 
 ```bash
 uv venv .venv-evals --python 3.13
@@ -51,7 +51,11 @@ result = evaluate_spans(
         LLM_BASE_MODEL_URL=os.environ["LLM_BASE_MODEL_URL"],
         LLM_API_KEY=os.environ["LLM_API_KEY"],
     ),
-    options=TemporalMetricOptions(trajectory_metrics=["groundedness", "task_completion"]),
+    options=TemporalMetricOptions(
+        extract_reasoning_graph=True,
+        high_level_metric_suite="paper_v2",
+        trajectory_metrics=["decision_correctness"],
+    ),
 )
 if result.error:
     raise RuntimeError(result.error)
@@ -59,6 +63,23 @@ Path("evaluation.json").write_text(json.dumps(session_result_payload(result), in
 ```
 
 Keep API keys in the environment, not in source files. Model calls cost money.
+
+`extract_reasoning_graph=True` adds attributed propositions, relationships,
+state values, and source anchors to the existing per-span extraction call.
+Final judges receive metric-specific artifact views and exact linked sources.
+`paper_v2` runs the standard 13 metrics; `decision_correctness` adds one optional
+diagnostic judging whether the delivered choice was defensible within the
+recorded information and capabilities. It can return `unknown` when the record
+cannot resolve the choice, and does not change `trajectory_score`. The existing
+`all` selector still means the standard 13; discover optional metrics with
+`available_metrics(include_optional=True)`.
+
+The same `LLM_BASE_MODEL_URL`, `LLM_MODEL_NAME`, and `LLM_API_KEY` configuration
+works with OpenAI-compatible proxies, including provider-prefixed Gemini model
+names. Optional `JUDGE_MODEL_NAME` selects the final model using the same endpoint
+and key; otherwise it uses the extraction model. A request's
+`TemporalMetricOptions(judge_model_name=...)` overrides that environment setting.
+Keep local `.env` files untracked and load them into the process environment.
 
 ## Input spans
 

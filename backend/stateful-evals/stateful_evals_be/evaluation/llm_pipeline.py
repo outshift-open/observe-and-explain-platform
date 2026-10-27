@@ -8,7 +8,6 @@ from copy import deepcopy
 from functools import partial
 
 from stateful_evals_be.evaluation.coordination import COORDINATION_CONTEXT_ATTRIBUTE
-from stateful_evals_be.evaluation.cost_estimator import estimate_token_cost
 from stateful_evals_be.evaluation.llm_state import LLMState
 from stateful_evals_be.evaluation.span_judge import SpanJudgeError, SpanJudge
 from stateful_evals_be.evaluation.trajectory_context import _timestamp_ns
@@ -84,7 +83,7 @@ async def evaluate_llm_spans(processor, spans, *, session_id, policy_override=No
                 span["SpanAttributes"].pop(COORDINATION_CONTEXT_ATTRIBUTE, None)
         if policy_override and policy_override.strip():
             raw_spans[0]["evaluation_policy_override"] = policy_override.strip()
-        state = LLMState(raw_spans)
+        state = LLMState(raw_spans, extract_reasoning_graph=options.extract_reasoning_graph)
         processor.last_trajectory_context = state.context
         judge = SpanJudge(query=partial(processor._aquery_with_budget, span_processing=True),
                           options=options, metric_names=processor.metric_names)
@@ -164,6 +163,6 @@ async def evaluate_llm_spans(processor, spans, *, session_id, policy_override=No
         span_metric_results=results, trajectory_patterns=patterns,
         high_level_metric_suite=options.high_level_metric_suite, high_level_metrics=high_metrics,
         trajectory_metrics=trajectory_metrics, trajectory_metric_set=metric_set,
-        token_usage=tokens, cost_estimate=estimate_token_cost(tokens, processor.llm_config.LLM_MODEL_NAME),
+        token_usage=tokens, cost_estimate=processor._estimate_usage_cost(tokens),
         eval_duration_seconds=round(time.monotonic() - started, 3),
     )

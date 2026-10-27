@@ -301,6 +301,16 @@ class TrajectoryContext:
         # telemetry interpreted again by the final metric payload builders.
         self.raw_spans: List[Dict[str, Any]] = []
         self.artifact_relationship_decisions: Dict[str, Dict[str, Any]] = {}
+        # Optional model-extracted ontology and proposition history. Python
+        # stores accepted records; it does not infer their semantic relations.
+        self.reasoning_graph: Dict[str, List[Dict[str, Any]]] = {
+            "nodes": [], "edges": [], "state_values": [], "checks": [],
+        }
+        self.reasoning_graph_deltas: List[Dict[str, Any]] = []
+        # Original system/developer bodies and every recorded recipient/time;
+        # applicability remains a model judgment, independent of graph extraction.
+        self.recorded_instructions: List[Dict[str, Any]] = []
+        self.recorded_sources: List[Dict[str, Any]] = []
         self.evidence: List[EvidenceFact] = []
         self.intents: List[IntentEntry] = []
         self.claims: List[ClaimEntry] = []

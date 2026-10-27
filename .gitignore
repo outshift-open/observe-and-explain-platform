@@ -1,0 +1,5 @@
+# Local credentials; keep secrets out of commits in every workspace directory.
+.env
+.env.*
+!.env.example
+!.env.template
