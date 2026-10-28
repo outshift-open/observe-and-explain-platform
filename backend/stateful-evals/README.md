@@ -52,9 +52,12 @@ result = evaluate_spans(
         LLM_API_KEY=os.environ["LLM_API_KEY"],
     ),
     options=TemporalMetricOptions(
+        artifact_organization="llm",
         extract_reasoning_graph=True,
         high_level_metric_suite="paper_v2",
         trajectory_metrics=["decision_correctness"],
+        span_reasoning_effort="none",
+        reasoning_effort="high",
     ),
 )
 if result.error:
@@ -67,6 +70,10 @@ Keep API keys in the environment, not in source files. Model calls cost money.
 `extract_reasoning_graph=True` adds attributed propositions, relationships,
 state values, and source anchors to the existing per-span extraction call.
 Final judges receive metric-specific artifact views and exact linked sources.
+The options above select the proposition-based pipeline with high-reasoning
+final judges. Semantic verdicts for LLM-organized contexts always go to the LLM
+judge; legacy deterministic prechecks do not override them. Python validates
+schemas, references and source locations rather than interpreting behavior.
 `paper_v2` runs the standard 13 metrics; `decision_correctness` adds one optional
 diagnostic judging whether the delivered choice was defensible within the
 recorded information and capabilities. It can return `unknown` when the record
@@ -127,6 +134,9 @@ the model decides roles, intent links, evidence, claims, and ownership. Response
 remain whole records. Exact source spans are archived for final audits. Prompts
 reference repeated source text once to avoid replaying duplicated histories.
 Span reasoning defaults to `none`; final reasoning defaults to `low`.
+The explicit `artifact_organization="legacy"` compatibility mode still uses the
+older Python ingestion rules. It is separate from the proposition-based setup
+above; structural telemetry parsers are shared by both modes.
 
 Async callers use `await engine.aevaluate_spans(spans, session_id=...)` on one
 event loop and one shared HTTP client. Synchronous entry points remain available.

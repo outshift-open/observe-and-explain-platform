@@ -452,7 +452,7 @@ def test_cross_agent_term_consistency_uses_llm_judge_rubric() -> None:
     assert result.metadata["metric_code"] == "CATCS"
     assert "same material term" in judge.calls[0]["rubric"]
     assert "explicitly labelled" in judge.calls[0]["rubric"]
-    assert "five-day trip and four nights" in judge.calls[0]["rubric"]
+    assert "units, basis, and scope" in " ".join(judge.calls[0]["rubric"].split())
     assert "different scopes" in judge.calls[0]["rubric"]
     assert "user_statements" in judge.calls[0]["context_payload"]
 
@@ -669,9 +669,9 @@ def test_hallucination_uses_llm_judge_rubric() -> None:
     assert result.score == 0
     assert "fact_store" in judge.calls[0]["context_payload"]
     assert "high-confidence evidence" in judge.calls[0]["rubric"]
-    assert "absence of a particular symptom" in judge.calls[0]["rubric"]
+    assert "absence of one symptom" in judge.calls[0]["rubric"]
     assert "forward-looking actions" in judge.calls[0]["rubric"]
-    assert "next update in 15 minutes" in judge.calls[0]["rubric"]
+    assert "communication cadence" in " ".join(judge.calls[0]["rubric"].split())
     assert "even a minor hallucination finding" in judge.calls[0]["rubric"]
 
 

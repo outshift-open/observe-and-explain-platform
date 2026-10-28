@@ -81,12 +81,13 @@ class LLMRubricMetric:
                 ),
                 context,
             )
-        prechecked = self.deterministic_precheck(
-            context,
-            stateful_result=stateful_result,
-        )
-        if prechecked is not None:
-            return self.decorate_result(prechecked, context)
+        if getattr(context, "artifact_organization", "python") != "llm":
+            prechecked = self.deterministic_precheck(
+                context,
+                stateful_result=stateful_result,
+            )
+            if prechecked is not None:
+                return self.decorate_result(prechecked, context)
         judge = self.judge or LLMMetricJudge()
         try:
             raw = await call_judge(
@@ -503,8 +504,8 @@ actions clearly resolve it.
 A recommendation that is revised or replaced after later evidence or verification
 is normal orchestration, not a component conflict. The final answer need not repeat
 and rebut every discarded option when the selected action is grounded and verified.
-Different health labels are compatible when one concerns the overall incident or an
-externally observed dependency and another concerns a component's internal state.
+Different labels can be compatible when they concern different subjects or
+scopes and the final answer preserves that distinction.
 """
 
     def __init__(
@@ -558,21 +559,16 @@ Do not treat a wrong agent response, a response to the wrong delegated task,
 tool unavailability, a clarification request, or an explicitly labelled
 assumption as semantic drift. Those belong to capability-task alignment,
 delegation execution, task completeness, or correctness. Do not fail for
-harmless wording differences, synonyms, or irrelevant terminology. Exact,
-explicit unit conversion is compatible: for example, an error rate of 0.232
-and 23.2% have the same meaning when the percent sign or unit is present; the
-text need not also spell out ``23.2% = 0.232``. A
-canonical conversion with explicit task context is also compatible: for
-example, a five-day trip and four nights of accommodation are complementary
-durations, not a redefinition of ``duration``, when the handoff/request states
-those units. Mark minor when a real semantic drift is later clarified or
-corrected before the final answer.
+harmless wording differences, synonyms, or irrelevant terminology. Compatible
+conversions preserve meaning when the quantities' units, basis, and scope are
+clear; the text need not narrate a supported conversion. Different measures
+of the same activity need not have identical values. Mark minor when a real
+semantic drift is later clarified or corrected before the final answer.
 
-Do not treat the same word as semantically inconsistent merely because agents apply
-it to different scopes, such as overall incident severity versus internal database
-health, or externally observed dependency degradation versus native engine state.
-An explicit final distinction between those scopes is reconciliation, not silent
-merging.
+Do not treat the same word as semantically inconsistent merely because agents
+apply it to different scopes. Statements about a whole and one of its parts
+can be compatible. An explicit final distinction between those scopes is
+reconciliation, not silent merging.
 """
 
     def __init__(
@@ -929,17 +925,17 @@ source citation was invented or contradicted and that claim materially affects
 the final answer. Mark minor when an unsupported intermediate claim is later
 corrected, qualified, or not relied on in the final answer.
 
-Do not treat absence of a particular symptom (for example, no waiting or blocking
-queries) as direct contradiction of a broader warning or pressure condition. A
-qualified causal synthesis may be supported by several indirect facts. Fail only
-when affirmative tool evidence rules the claim out, or when the trajectory presents
+Do not treat absence of one symptom as direct contradiction of a broader
+condition. A qualified causal synthesis may be supported by several indirect
+facts. Fail only when affirmative tool evidence rules the claim out, or when the
+trajectory presents
 an unsupported inference as certain and materially relies on it.
 
 Distinguish factual claims from forward-looking actions. A proposed next step,
-recommendation, operational commitment, or communication cadence (for example,
-"next update in 15 minutes") is not a hallucinated fact merely because no tool
-output supplied it. Evaluate it as hallucination only if it falsely asserts that
-the action already occurred, attributes the commitment to another party, or makes
+recommendation, operational commitment, or communication cadence is not a
+hallucinated fact merely because no tool output supplied it. Evaluate it as
+hallucination only if it falsely asserts that the action already occurred,
+attributes the commitment to another party, or makes
 an unsupported factual guarantee that materially affects the outcome. Do not emit
 even a minor hallucination finding solely because a proposed cadence, next action,
 or recommendation lacks a matching fact-store entry.
