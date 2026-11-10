@@ -1,0 +1,28 @@
+# Example rules file. Copy it to rules.yaml (or pass it with --rules).
+#
+#   name          which rule: all, tool_events, tool_completed, llm_events, llm_completed,
+#                 mcp_traffic, agent_handoffs, service_events, agent_events
+#   callback_url  URL to call back when an event matches
+#   value         only for service_events and agent_events: the service / agent to match
+#
+# A rule that takes a value can be listed once per value.
+rules:
+  - name: all
+    callback_url: https://audit.example.com/hooks/events
+  - name: tool_completed
+    callback_url: https://tools.example.com/hooks/tool-completed
+  - name: llm_completed
+    callback_url: https://llm.example.com/hooks/llm-completed
+  - name: mcp_traffic
+    callback_url: https://mcp.example.com/hooks/traffic
+  - name: agent_handoffs
+    callback_url: https://topology.example.com/hooks/handoffs
+  - name: agent_events
+    value: researcher
+    callback_url: https://agents.example.com/hooks/researcher
+  - name: agent_events
+    value: planner
+    callback_url: https://agents.example.com/hooks/planner
+  - name: service_events
+    value: weather-agent
+    callback_url: https://services.example.com/hooks/weather-agent

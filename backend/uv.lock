@@ -3934,6 +3934,7 @@ dependencies = [
     { name = "click" },
     { name = "norm" },
     { name = "oxp-api" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -3947,6 +3948,7 @@ requires-dist = [
     { name = "norm", editable = "norm" },
     { name = "oxp-api", editable = "api" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
 

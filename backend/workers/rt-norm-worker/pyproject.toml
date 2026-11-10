@@ -19,6 +19,7 @@ dependencies = [
     "click>=8.0.0",
     "norm",
     "oxp-api",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

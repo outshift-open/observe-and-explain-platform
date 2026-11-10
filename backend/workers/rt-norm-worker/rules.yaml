@@ -1,0 +1,24 @@
+# Rules of the rt-norm-worker, loaded into memory at startup. Each one is a rule name (its
+# meaning is built into the worker, see RULE_TYPES in rules.py), the URL to call back and,
+# for the rules that take one, the value to compare with. The URLs are placeholders.
+rules:
+  - name: all
+    callback_url: http://localhost:8080/callbacks/all
+  - name: tool_events
+    callback_url: http://localhost:8080/callbacks/tool_events
+  - name: tool_completed
+    callback_url: http://localhost:8080/callbacks/tool_completed
+  - name: llm_events
+    callback_url: http://localhost:8080/callbacks/llm_events
+  - name: llm_completed
+    callback_url: http://localhost:8080/callbacks/llm_completed
+  - name: mcp_traffic
+    callback_url: http://localhost:8080/callbacks/mcp_traffic
+  - name: agent_handoffs
+    callback_url: http://localhost:8080/callbacks/agent_handoffs
+  - name: service_events
+    value: weather-agent
+    callback_url: http://localhost:8080/callbacks/service_events
+  - name: agent_events
+    value: researcher
+    callback_url: http://localhost:8080/callbacks/agent_events
