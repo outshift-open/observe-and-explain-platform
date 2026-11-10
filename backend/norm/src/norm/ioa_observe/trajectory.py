@@ -45,9 +45,13 @@ def add_final_state_transition(
     initial_state_id: str,
     input_text: str,
     output_text: str,
-) -> None:
+    mark_final: bool = True,
+) -> State:
     """Create owner_id's final State (hasFinalState + hasState) and the Transition
-    initial -> final, with correspondsToTransition/representsExecution to owner_id."""
+    initial -> final, with correspondsToTransition/representsExecution to owner_id.
+
+    With ``mark_final=False`` the State is only attached with hasState: it is a
+    final-looking State that a later one has already superseded as owner_id's final."""
     final_state = registry.add(
         State(
             id=_hash_id("state", span_id, "final", output_text),
@@ -55,7 +59,8 @@ def add_final_state_transition(
             content=output_text or "(no content recorded)",
         )
     )
-    registry.add_edge(hasFinalState(source_id=owner_id, target_id=final_state.id))
+    if mark_final:
+        registry.add_edge(hasFinalState(source_id=owner_id, target_id=final_state.id))
     registry.add_edge(hasState(source_id=owner_id, target_id=final_state.id))
 
     transition = registry.add(
@@ -68,6 +73,7 @@ def add_final_state_transition(
     registry.add_edge(leadsTo(source_id=transition.id, target_id=final_state.id))
     registry.add_edge(correspondsToTransition(source_id=owner_id, target_id=transition.id))
     registry.add_edge(representsExecution(source_id=transition.id, target_id=owner_id))
+    return final_state
 
 
 def add_state_pair_transition(

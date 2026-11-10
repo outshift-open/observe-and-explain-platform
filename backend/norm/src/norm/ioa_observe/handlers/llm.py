@@ -18,6 +18,7 @@ from oxp_ontology.models.nodes import LLM, LLMCall
 from ..fields import _hash_id
 from ..registry import Registry
 from ..trajectory import add_final_state_transition, add_initial_state
+from .agent import _own_agent_id
 from .topology import _ensure_agent_call
 
 
@@ -37,7 +38,7 @@ def _ensure_llm_call(
     if ensured is None or not llm_name:
         return None
     agent_call, session_id, _, event_time = ensured
-    agent_id = str(event_attrs.get("agent.name") or "")
+    agent_id = _own_agent_id(registry, agent_call) or str(event_attrs.get("agent.name") or "")
     span_id = str(event_attrs.get("llm.call.id") or event.get("SpanId") or event_attrs.get("span.id") or "")
 
     # llm.name is "<provider>/<model>" (as in "azure/gpt-4o"); handle_chat gets them separately.

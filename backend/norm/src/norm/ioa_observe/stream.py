@@ -42,7 +42,7 @@ from oxp_ontology.models.edges import (
     hasInitialState,
     hasState,
 )
-from oxp_ontology.models.nodes import AgentCall, MASCall, ProcessingCall, Session, Transition
+from oxp_ontology.models.nodes import Agent, AgentCall, MASCall, ProcessingCall, Session, Transition
 
 from .build import apply_heuristics, dispatch_span, serialize_registry
 from .events import dispatch_event
@@ -80,10 +80,11 @@ class GraphReader(Protocol):
         """Return ``(nodes, edges)`` as stored.
 
         ``nodes``: every node with ``sessionId == session_id`` or ``id`` in
-        ``node_ids``, plus the endpoints of the edges below, each a dict with
-        ``node_type`` and its properties. ``edges``: every edge touching a
-        node of that session, plus those among ``node_ids``, each a dict
-        with ``edge_type``, ``from_id`` and ``to_id``.
+        ``node_ids``, every Agent whose ``name`` is in ``node_ids`` (so ``node_ids``
+        may also carry agent names), plus the endpoints of the edges below, each a
+        dict with ``node_type`` and its properties. ``edges``: every edge touching a
+        node of that session or one of those Agents, plus those among ``node_ids``,
+        each a dict with ``edge_type``, ``from_id`` and ``to_id``.
         """
         ...
 
@@ -235,6 +236,9 @@ class StreamNormalizer:
         touched = {node.id for node in scratch.nodes.values()}
         for _etype, source_id, target_id in scratch.edges:
             touched.update((source_id, target_id))
+        # Agents are keyed on a span id but matched by name (an a2a.agent_card has no span id),
+        # so the reader is also handed their names: it loads the Agents called that.
+        touched.update(node.name for node in scratch.all_of(Agent))
 
         # The dry run can't see what depends on stored state (e.g. an edge to an agent found
         # through an existing AgentCall), so if the real run touches more, load those too
@@ -310,14 +314,19 @@ class InMemoryGraph:
         ids = set(node_ids)
         by_id = {node["id"]: node for node in self.nodes.values()}
         in_session = {i for i, n in by_id.items() if session_id and n.get("sessionId") == session_id}
+        named = {i for i, n in by_id.items() if n["node_type"] == "Agent" and n.get("name") in ids}
         edges = [
             e
             for e in self.edges.values()
             if e["from_id"] in in_session
             or e["to_id"] in in_session
+            or e["from_id"] in named
+            or e["to_id"] in named
             or (e["from_id"] in ids and e["to_id"] in ids)
         ]
-        wanted = in_session | ids | {e["from_id"] for e in edges} | {e["to_id"] for e in edges}
+        wanted = (
+            in_session | named | ids | {e["from_id"] for e in edges} | {e["to_id"] for e in edges}
+        )
         nodes = [dict(by_id[i]) for i in wanted if i in by_id]
         return nodes, [dict(e) for e in edges]
 

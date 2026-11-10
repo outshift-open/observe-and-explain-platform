@@ -62,6 +62,7 @@ class Neo4jStore:
         nodes: dict[tuple[str, str], dict[str, Any]] = {}
         for row in self._db.execute(
             "MATCH (n) WHERE n.sessionId = $sid OR n.id IN $ids "
+            "OR (n:Agent AND n.name IN $ids) "
             "RETURN labels(n)[0] AS label, properties(n) AS props",
             params,
         ):
@@ -72,6 +73,7 @@ class Neo4jStore:
         for row in self._db.execute(
             "MATCH (a)-[r]->(b) "
             "WHERE a.sessionId = $sid OR b.sessionId = $sid "
+            "OR (a:Agent AND a.name IN $ids) OR (b:Agent AND b.name IN $ids) "
             "OR (a.id IN $ids AND b.id IN $ids) "
             "RETURN type(r) AS edge_type, a.id AS from_id, b.id AS to_id, "
             "labels(a)[0] AS from_label, properties(a) AS from_props, "

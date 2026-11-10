@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import Any
 
 from oxp_ontology.models.edges import (
-    executesAgent,
     executesTool,
     hasFinalState,
     hasInitialState,
@@ -24,7 +23,8 @@ from ..fields import (
 )
 from ..registry import Registry
 from ..trajectory import add_final_state_transition, add_initial_state
-from .agent import _ensure_mas_call
+from .a2a import handle_a2a_tool_started
+from .agent import _ensure_mas_call, _own_agent_id
 
 
 def _ensure_tool_call(
@@ -52,9 +52,13 @@ def _ensure_tool_call(
     if application_id:
         _ensure_mas_call(registry, session_id, application_id, event_time)
     tool, _ = registry.add_if_not_exists(Tool(id=tool_name, name=tool_name, description=""))
+    # ``tool.call.id`` is the id of the call itself, shared by every event about it: the
+    # tool.* events and, for an MCP tool, the mcp.message.* events (as their message.id).
+    # Without it the call is told apart by the span of the event.
+    call_id = str(event_attrs.get("tool.call.id") or "") or _hash_id("toolcall", tool_name, span_id)
     tool_call, _ = registry.add_if_not_exists(
         ToolCall(
-            id=_hash_id("toolcall", tool_name, span_id),
+            id=call_id,
             name=f"Tool call ({tool_name}) {span_id}",
             sessionId=session_id,
             startTime=event_time,
@@ -71,7 +75,7 @@ def _ensure_tool_call(
     )
     if agent_call is not None:
         registry.add_edge(hasToolCall(source_id=agent_call.id, target_id=tool_call.id))
-        agent_id = registry.edge_target(executesAgent, agent_call.id)
+        agent_id = _own_agent_id(registry, agent_call)
         if agent_id:
             registry.add_edge(usesTool(source_id=agent_id, target_id=tool.id))
     return tool_call, session_id, span_id, event_time
@@ -82,7 +86,13 @@ def handle_tool_started(
 ) -> None:
     """Ensure the ToolCall's nodes and edges and give it its initial State (from
     ``tool.input``) once. Its final State and Transition need ``tool.output``, so they
-    belong to ``tool.completed``."""
+    belong to ``tool.completed``.
+
+    A tool of type ``a2a`` is a call to another agent, not a tool: it is a handoff (see
+    ``handle_a2a_tool_started``) and gets no Tool or ToolCall."""
+    if str(event_attrs.get("tool.type") or "") == "a2a":
+        handle_a2a_tool_started(event, event_attrs, registry)
+        return
     ensured = _ensure_tool_call(event, event_attrs, registry)
     if ensured is None:
         return
@@ -98,7 +108,12 @@ def handle_tool_completed(
 ) -> None:
     """Ensure the ToolCall's nodes and edges, close it, and give it its final State
     (from ``tool.output``) and Transition. The initial State is whatever ``tool.started``
-    stored; only if there is none is one created, from ``tool.input``."""
+    stored; only if there is none is one created, from ``tool.input``.
+
+    A tool of type ``a2a`` is a handoff, recorded by ``tool.started``; nothing to close."""
+    if str(event_attrs.get("tool.type") or "") == "a2a":
+        # TODO: the handoff's result (tool.output) is not recorded yet.
+        return
     ensured = _ensure_tool_call(event, event_attrs, registry)
     if ensured is None:
         return

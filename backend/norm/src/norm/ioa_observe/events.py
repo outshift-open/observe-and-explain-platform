@@ -7,10 +7,18 @@ from __future__ import annotations
 from typing import Any
 
 from .handlers import (
+    handle_a2a_agent_card,
+    handle_a2a_message_received,
+    handle_a2a_message_sent,
     handle_llm_completed,
     handle_llm_started,
+    handle_mcp_message_completed,
+    handle_mcp_message_received,
+    handle_mcp_message_sent,
+    handle_mcp_tools_discovered,
     handle_tool_completed,
     handle_tool_started,
+    handle_topology_edge_updated,
     handle_topology_node_completed,
     handle_topology_node_started,
     handle_topology_session_completed,
@@ -32,6 +40,7 @@ def dispatch_event(event: dict[str, Any], event_attrs: dict[str, Any], registry:
             handle_topology_node_completed(event, event_attrs, registry)
         case "topology.edge.updated":
             # TODO: handle topology.edge.updated
+            #handle_topology_edge_updated(event, event_attrs, registry)
             pass
         case "llm.started":
             handle_llm_started(event, event_attrs, registry)
@@ -42,14 +51,11 @@ def dispatch_event(event: dict[str, Any], event_attrs: dict[str, Any], registry:
         case "tool.completed":
             handle_tool_completed(event, event_attrs, registry)
         case "a2a.message.sent":
-            # TODO: handle a2a.message.sent
-            pass
+            handle_a2a_message_sent(event, event_attrs, registry)
         case "a2a.message.received":
-            # TODO: handle a2a.message.received
-            pass
+            handle_a2a_message_received(event, event_attrs, registry)
         case "a2a.agent_card":
-            # TODO: handle a2a.agent_card
-            pass
+            handle_a2a_agent_card(event, event_attrs, registry)
         case "slim.message.sent":
             # TODO: handle slim.message.sent
             pass
@@ -57,14 +63,13 @@ def dispatch_event(event: dict[str, Any], event_attrs: dict[str, Any], registry:
             # TODO: handle slim.message.received
             pass
         case "mcp.message.sent":
-            # TODO: handle mcp.message.sent
-            pass
+            handle_mcp_message_sent(event, event_attrs, registry)
         case "mcp.message.received":
-            # TODO: handle mcp.message.received
-            pass
+            handle_mcp_message_received(event, event_attrs, registry)
+        case "mcp.message.completed":
+            handle_mcp_message_completed(event, event_attrs, registry)
         case "mcp.tools.discovered":
-            # TODO: handle mcp.tools.discovered
-            pass
+            handle_mcp_tools_discovered(event, event_attrs, registry)
         case "mcp.tools.published":
             # TODO: handle mcp.tools.published
             pass
