@@ -26,21 +26,27 @@ class Graph(GraphReader, Protocol):
     def apply(self, delta: Any) -> None: ...
 
 
-def run(graph: Graph, path: Path = DEFAULT_TRACES_PATH, kind: Kind = "span") -> int:
-    """Print every record, normalize it on its own and write only what changed to ``graph``.
+def process_record(graph: Graph, record: dict[str, Any], kind: Kind) -> Any:
+    """Normalize one span / log record against the graph as stored and write what changed.
 
-    Nothing is kept between records: each one is normalized against the graph as stored.
+    Nothing is kept between records. Returns the ``StreamDelta`` that was applied."""
+    print(json.dumps(record))
+    delta = StreamNormalizer(graph).process(record, kind)
+    print(
+        f"  -> +{len(delta.nodes)} nodes, +{len(delta.edges)} edges, "
+        f"-{len(delta.removed_nodes)} nodes, -{len(delta.removed_edges)} edges"
+    )
+    graph.apply(delta)
+    return delta
+
+
+def run(graph: Graph, path: Path = DEFAULT_TRACES_PATH, kind: Kind = "span") -> int:
+    """Normalize every record of an OTel export file, one by one, into ``graph``.
 
     Returns the number of records processed.
     """
     count = 0
     for record in read_records(path):
-        print(json.dumps(record))
-        delta = StreamNormalizer(graph).process(record, kind)
-        print(
-            f"  -> +{len(delta.nodes)} nodes, +{len(delta.edges)} edges, "
-            f"-{len(delta.removed_nodes)} nodes, -{len(delta.removed_edges)} edges"
-        )
-        graph.apply(delta)
+        process_record(graph, record, kind)
         count += 1
     return count
